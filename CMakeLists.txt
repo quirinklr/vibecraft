@@ -41,3 +41,17 @@ target_link_libraries(Minecraft PRIVATE
     # BITTE ÜBERPRÜFE, DASS DER ORDNER "lib-vc2022" HEISST UND DIE DATEI "glfw3.lib" EXISTIERT!
     "${GLFW_ROOT_DIR}/lib-vc2022/glfw3.lib"
 )
+
+# =================================================================
+# KOPIERE SHADER AUTOMATISCH NACH DEM BUILD
+# =================================================================
+# Dieser Befehl wird jedes Mal ausgeführt, NACHDEM die "Minecraft.exe"
+# erfolgreich erstellt wurde.
+add_custom_command(TARGET Minecraft POST_BUILD
+    # Wir benutzen das eingebaute CMake-Tool, um Verzeichnisse zu kopieren
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    # QUELLE: Der "shaders"-Ordner in unserem Projekt
+    "${CMAKE_SOURCE_DIR}/shaders"
+    # ZIEL: Ein neuer "shaders"-Ordner direkt neben der fertigen .exe-Datei
+    "$<TARGET_FILE_DIR:Minecraft>/shaders"
+)
