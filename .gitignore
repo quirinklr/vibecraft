@@ -1,0 +1,86 @@
+# =================================================================
+# JetBrains IDEs (CLion, etc.)
+# =================================================================
+.idea/
+cmake-build-*/
+
+# =================================================================
+# Visual Studio / Visual Studio Code
+# =================================================================
+# User-specific files
+*.suo
+*.user
+*.user.*
+*.opensdf
+*.sln.docstates
+
+# IDE-specific settings folder
+.vs/
+.vscode/
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+
+# Visual C++ cache files
+ipch/
+*.aps
+*.ncb
+*.opendb
+*.sdf
+*.tlog
+*.log
+*.ilk
+*.psess
+*.vsp
+*.vspx
+*.map
+
+# =================================================================
+# CMake
+# =================================================================
+# The primary build directory for our project
+build/
+
+# Other CMake generated files
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+CTestConfiguration.ini
+
+# =================================================================
+# Binaries
+# =================================================================
+# Executables and libraries that might be created
+*.exe
+*.dll
+*.lib
+*.a
+*.so
+
+# =================================================================
+# Operating System Files
+# =================================================================
+# Windows thumbnail cache
+Thumbs.db
+ehthumbs.db
+
+# macOS custom folder attributes
+.DS_Store
+
+# macOS resource forks
+._*
