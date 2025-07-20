@@ -45,13 +45,14 @@ target_link_libraries(Minecraft PRIVATE
 # =================================================================
 # KOPIERE SHADER AUTOMATISCH NACH DEM BUILD
 # =================================================================
-# Dieser Befehl wird jedes Mal ausgeführt, NACHDEM die "Minecraft.exe"
-# erfolgreich erstellt wurde.
+# Dieser Befehl wird jedes Mal ausgeführt, NACHDEM das Ziel "Minecraft"
+# (deine .exe) erfolgreich erstellt wurde.
 add_custom_command(TARGET Minecraft POST_BUILD
-    # Wir benutzen das eingebaute CMake-Tool, um Verzeichnisse zu kopieren
+    # Wir benutzen das eingebaute CMake-Kommando, um ein Verzeichnis zu kopieren.
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-    # QUELLE: Der "shaders"-Ordner in unserem Projekt
+    # QUELLE: Der "shaders"-Ordner im Hauptverzeichnis deines Projekts.
     "${CMAKE_SOURCE_DIR}/shaders"
-    # ZIEL: Ein neuer "shaders"-Ordner direkt neben der fertigen .exe-Datei
+    # ZIEL: Ein neuer "shaders"-Ordner direkt neben der fertigen .exe-Datei.
     "$<TARGET_FILE_DIR:Minecraft>/shaders"
+    COMMENT "Kopiere Shader in den Build-Ordner"
 )
