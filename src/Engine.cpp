@@ -26,7 +26,7 @@ void Engine::run()
     float lastFrameTime = static_cast<float>(glfwGetTime());
     double lastX, lastY;
     glfwGetCursorPos(m_Window.getGLFWwindow(), &lastX, &lastY);
-    float yaw = glm::pi<float>();
+    float yaw = -glm::half_pi<float>(); // -90°, Blick Richtung -Z
     float pitch = 0.0f;
 
     glm::vec3 cameraPos = {0.0f, 0.0f, 3.0f}; // Startposition etwas weiter weg
@@ -92,19 +92,22 @@ void Engine::run()
         glm::vec3 cameraRight = glm::normalize(glm::cross(cameraFront, glm::vec3(0.f, 1.f, 0.f)));
         glm::vec3 cameraUp = glm::normalize(glm::cross(cameraRight, cameraFront));
 
-        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_W) == GLFW_PRESS) {
+        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_W) == GLFW_PRESS)
+        {
             cameraPos -= cameraFront * moveSpeed * deltaTime;
         }
-        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_S) == GLFW_PRESS) {
+        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_S) == GLFW_PRESS)
+        {
             cameraPos += cameraFront * moveSpeed * deltaTime;
         }
-        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_A) == GLFW_PRESS) {
+        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_A) == GLFW_PRESS)
+        {
             cameraPos -= cameraRight * moveSpeed * deltaTime;
         }
-        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_D) == GLFW_PRESS) {
+        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_D) == GLFW_PRESS)
+        {
             cameraPos += cameraRight * moveSpeed * deltaTime;
         }
-
 
         m_Camera.setViewDirection(cameraPos, cameraFront, cameraUp);
 

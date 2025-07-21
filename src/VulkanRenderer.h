@@ -53,6 +53,42 @@ private:
     VkPipelineLayout m_PipelineLayout;
     VkPipeline m_GraphicsPipeline;
     std::vector<VkFramebuffer> m_SwapChainFramebuffers;
+
+    // NEU: Depth Buffer Ressourcen
+    VkImage m_DepthImage;
+    VkDeviceMemory m_DepthImageMemory;
+    VkImageView m_DepthImageView;
+
+    void createDepthResources();
+    
+    VkFormat findDepthFormat();
+
+    VkFormat findSupportedFormat(
+        const std::vector<VkFormat> &candidates,
+        VkImageTiling tiling,
+        VkFormatFeatureFlags features);
+
+    void createImage(
+        uint32_t width,
+        uint32_t height,
+        VkFormat format,
+        VkImageTiling tiling,
+        VkImageUsageFlags usage,
+        VkMemoryPropertyFlags properties,
+        VkImage &image,
+        VkDeviceMemory &imageMemory);
+
+    VkImageView createImageView(
+        VkImage image,
+        VkFormat format,
+        VkImageAspectFlags aspectFlags);
+
+    void transitionImageLayout(
+        VkImage image,
+        VkFormat format,
+        VkImageLayout oldLayout,
+        VkImageLayout newLayout);
+
     VkCommandPool m_CommandPool;
     std::vector<VkCommandBuffer> m_CommandBuffers;
 
@@ -75,11 +111,24 @@ private:
 
     const int MAX_FRAMES_IN_FLIGHT = 2;
     const std::vector<Vertex> m_Vertices = {
-        {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
-        {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-        {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}},
-        {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}}};
-    const std::vector<uint16_t> m_Indices = {0, 1, 2, 2, 3, 0};
+        //   Positionen           Farben
+        {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+        {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+        {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}},
+        {{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}},
+
+        {{-0.5f, -0.5f, 0.5f}, {1.0f, 0.0f, 0.0f}},
+        {{0.5f, -0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+        {{0.5f, 0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+        {{-0.5f, 0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}};
+    const std::vector<uint16_t> m_Indices = {
+        0, 1, 2, 2, 3, 0, // Hinten
+        4, 5, 6, 6, 7, 4, // Vorne
+        0, 3, 7, 7, 4, 0, // Links
+        1, 2, 6, 6, 5, 1, // Rechts
+        3, 2, 6, 6, 7, 3, // Oben
+        0, 1, 5, 5, 4, 0  // Unten
+    };
     const std::vector<const char *> m_DeviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
 #ifdef NDEBUG
