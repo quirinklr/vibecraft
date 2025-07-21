@@ -29,6 +29,9 @@ void Engine::run()
     float yaw = glm::pi<float>();
     float pitch = 0.0f;
 
+    glm::vec3 cameraPos = {0.0f, 0.0f, 3.0f}; // Startposition etwas weiter weg
+    float moveSpeed = 2.5f;
+
     float lastFPSTime = lastFrameTime;
     int frameCount = 0;
 
@@ -67,7 +70,8 @@ void Engine::run()
             float yawScale = m_Settings.mouseSensitivityX * baseMouseScale;
             float pitchScale = m_Settings.mouseSensitivityY * baseMouseScale;
 
-            yaw += deltaX * yawScale;
+            yaw -= deltaX * yawScale;
+
             if (m_Settings.invertMouseY)
             {
                 pitch += deltaY * pitchScale;
@@ -76,6 +80,7 @@ void Engine::run()
             {
                 pitch -= deltaY * pitchScale;
             }
+
             pitch = glm::clamp(pitch, -glm::half_pi<float>() + 0.01f, glm::half_pi<float>() - 0.01f);
         }
 
@@ -84,9 +89,24 @@ void Engine::run()
         direction.y = sin(pitch);
         direction.z = sin(yaw) * cos(pitch);
         glm::vec3 cameraFront = glm::normalize(direction);
+        glm::vec3 cameraRight = glm::normalize(glm::cross(cameraFront, glm::vec3(0.f, 1.f, 0.f)));
+        glm::vec3 cameraUp = glm::normalize(glm::cross(cameraRight, cameraFront));
 
-        glm::vec3 cameraPos = {2.f, 2.f, 2.f};
-        m_Camera.setViewDirection(cameraPos, cameraFront);
+        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_W) == GLFW_PRESS) {
+            cameraPos -= cameraFront * moveSpeed * deltaTime;
+        }
+        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_S) == GLFW_PRESS) {
+            cameraPos += cameraFront * moveSpeed * deltaTime;
+        }
+        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_A) == GLFW_PRESS) {
+            cameraPos -= cameraRight * moveSpeed * deltaTime;
+        }
+        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_D) == GLFW_PRESS) {
+            cameraPos += cameraRight * moveSpeed * deltaTime;
+        }
+
+
+        m_Camera.setViewDirection(cameraPos, cameraFront, cameraUp);
 
         auto extent = m_Window.getExtent();
         m_Camera.setPerspectiveProjection(glm::radians(45.f), (float)extent.width / (float)extent.height, 0.1f, 100.f);
