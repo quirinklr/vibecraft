@@ -1,17 +1,22 @@
 #include "Engine.h"
-
+#include "GameObject.h" // -> HINZUFÜGEN
 #include <iostream>
 #include <glm/gtc/constants.hpp>
 #include <string>
-#include <sstream> // Für die String-Formatierung
+#include <sstream>
 #include <thread>
 #include <chrono>
 
-Engine::Engine()
-{
-    // Verstecke und fange den Cursor, wenn das Fenster fokussiert ist
+Engine::Engine() {
     glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
+    // Test‑Würfel
+    GameObject a; a.position = { 0.f, 0.f, 0.f };
+    GameObject b; b.position = { 2.f, 0.f, 0.f };
+    GameObject c; c.position = { 0.f, 2.f, 0.f };
+    m_GameObjects = { a, b, c };
 }
+
 
 Engine::~Engine()
 {
@@ -116,7 +121,7 @@ void Engine::run()
 
         auto frameStart = std::chrono::high_resolution_clock::now();
 
-        m_Renderer.drawFrame(m_Camera);
+        m_Renderer.drawFrame(m_Camera, m_GameObjects);
 
         frameCount++;
         if (currentFrameTime - lastFPSTime >= 1.0f)

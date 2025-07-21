@@ -2,6 +2,7 @@
 
 #include "Window.h"
 #include "Settings.h"
+#include "GameObject.h"
 #include "Camera.h"
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -19,7 +20,6 @@ struct Vertex
 
 struct UniformBufferObject
 {
-    alignas(16) glm::mat4 model;
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
 };
@@ -33,7 +33,7 @@ public:
     VulkanRenderer(const VulkanRenderer &) = delete;
     VulkanRenderer &operator=(const VulkanRenderer &) = delete;
 
-    void drawFrame(Camera &camera);
+    void drawFrame(Camera &camera, const std::vector<GameObject> &gameObjects);
 
 private:
     Window &m_Window;
@@ -60,7 +60,7 @@ private:
     VkImageView m_DepthImageView;
 
     void createDepthResources();
-    
+
     VkFormat findDepthFormat();
 
     VkFormat findSupportedFormat(
@@ -160,7 +160,7 @@ private:
     void createCommandBuffers();
     void createSyncObjects();
     void updateUniformBuffer(uint32_t currentImage, Camera &camera);
-    void recordCommandBuffer(int imageIndex);
+    void recordCommandBuffer(uint32_t imageIndex, const std::vector<GameObject> &gameObjects);
 
     struct QueueFamilyIndices;
     struct SwapChainSupportDetails;

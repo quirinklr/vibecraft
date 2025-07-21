@@ -24,13 +24,15 @@ add_executable(Minecraft
     src/Engine.cpp
     src/Window.cpp
     src/VulkanRenderer.cpp
-    src/Camera.cpp # Hinzufügen!
+    src/Camera.cpp
+    src/GameObject.cpp # <-- DIESE ZEILE HINZUFÜGEN
 )
 
 # SCHRITT 3: Include-Verzeichnisse hinzufügen
-target_include_directories(Minecraft PRIVATE
+target_include_directories(Minecraft PUBLIC # <-- PRIVATE zu PUBLIC ändern
     ${Vulkan_INCLUDE_DIRS}
     "${GLFW_ROOT_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/libs"
 )
 
 # SCHRITT 4: Bibliotheken linken

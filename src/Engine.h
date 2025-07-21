@@ -3,8 +3,10 @@
 #include "Window.h"
 #include "VulkanRenderer.h"
 #include "Camera.h"
-#include "Settings.h" // NEUES INCLUDE
+#include "Settings.h"
+#include "GameObject.h" // -> HINZUFÜGEN
 #include <memory>
+#include <vector>        // -> HINZUFÜGEN
 
 class Engine {
 public:
@@ -21,14 +23,10 @@ public:
 
 private:
     Window m_Window{WIDTH, HEIGHT, "Minecraft Vibe Engine"};
+    Settings m_Settings{};
     VulkanRenderer m_Renderer{m_Window, m_Settings}; 
     Camera m_Camera{};
-    
-    // NEU: Settings-Objekt
-    Settings m_Settings{};
 
-    // Wir brauchen keine separaten Member mehr für die Mauslogik
-    // float m_DeltaTime = 0.0f; <-- Wird zur lokalen Variable in run()
-    // float m_LastFrame = 0.0f; <-- Wird zur lokalen Variable in run()
-    // bool m_MouseCaptured = false; <-- Wird zur lokalen Variable in run()
+    // -> DIESE ZEILE HINZUFÜGEN
+    std::vector<GameObject> m_GameObjects; 
 };
