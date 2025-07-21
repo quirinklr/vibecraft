@@ -1,15 +1,13 @@
 #include "VulkanRenderer.h"
-
-// Standard-Includes
 #include <stdexcept>
 #include <set>
 #include <cstdint>
 #include <algorithm>
 #include <fstream>
 #include <iostream>
-#include <optional>                     // <-- FEHLENDES INCLUDE HINZUGEFÜGT
-#include <glm/gtc/matrix_transform.hpp> // Für glm::rotate, lookAt, perspective
-#include <chrono>                       // Für glfwGetTime() Alternative
+#include <optional>
+#include <glm/gtc/matrix_transform.hpp>
+#include <chrono>
 #include <array>
 
 // Hilfsstrukturen (Definitionen)
@@ -57,15 +55,13 @@ std::array<VkVertexInputAttributeDescription, 2> Vertex::getAttributeDescription
     return attributeDescriptions;
 }
 
-// Konstruktor und Destruktor
-VulkanRenderer::VulkanRenderer(Window &window) : m_Window{window}
-{
+VulkanRenderer::VulkanRenderer(Window& window, const Settings& settings) : m_Window{ window }, m_Settings{ settings } {
     initVulkan();
 }
 
 VulkanRenderer::~VulkanRenderer()
 {
-    vkDeviceWaitIdle(m_Device); // Wait for the GPU to finish all operations
+    vkDeviceWaitIdle(m_Device);
 
     // --- Cleanup in reverse order of creation ---
 
@@ -127,9 +123,7 @@ VulkanRenderer::~VulkanRenderer()
     vkDestroyInstance(m_Instance, nullptr);
 }
 
-// Haupt-Initialisierungsfunktion
-void VulkanRenderer::initVulkan()
-{
+void VulkanRenderer::initVulkan() {
     createInstance();
     createSurface();
     pickPhysicalDevice();
@@ -137,15 +131,15 @@ void VulkanRenderer::initVulkan()
     createSwapChain();
     createImageViews();
     createRenderPass();
-    createDescriptorSetLayout(); // NEUER AUFRUF
+    createDescriptorSetLayout();
     createGraphicsPipeline();
     createFramebuffers();
     createCommandPool();
     createVertexBuffer();
-    createIndexBuffer();    // NEUER AUFRUF
-    createUniformBuffers(); // NEUER AUFRUF
-    createDescriptorPool(); // NEUER AUFRUF
-    createDescriptorSets(); // NEUER AUFRUF
+    createIndexBuffer();
+    createUniformBuffers();
+    createDescriptorPool();
+    createDescriptorSets();
     createCommandBuffers();
     createSyncObjects();
 }
@@ -650,9 +644,9 @@ void VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &camera)
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
     UniformBufferObject ubo{};
-    ubo.model = glm::rotate(glm::mat4(1.0f), 0.f, glm::vec3(0.0f, 0.0f, 1.0f));
+    ubo.model = glm::mat4(1.0f); 
     ubo.view = camera.getViewMatrix();       // Kamera-Daten verwenden
-    ubo.proj = camera.getProjectionMatrix(); // Kamera-Daten verwenden
+    ubo.proj = camera.getProjectionMatrix(); 
 
     void *data;
     vkMapMemory(m_Device, m_UniformBuffersMemory[currentImage], 0, sizeof(ubo), 0, &data);
@@ -708,11 +702,11 @@ void VulkanRenderer::createCommandBuffers()
     }
 }
 
-void VulkanRenderer::createSyncObjects()
-{
+void VulkanRenderer::createSyncObjects() {
     m_ImageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     m_RenderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     m_InFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+    m_ImagesInFlight.resize(m_SwapChainImages.size(), VK_NULL_HANDLE);
 
     VkSemaphoreCreateInfo semaphoreInfo{};
     semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -721,16 +715,15 @@ void VulkanRenderer::createSyncObjects()
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
-    {
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         if (vkCreateSemaphore(m_Device, &semaphoreInfo, nullptr, &m_ImageAvailableSemaphores[i]) != VK_SUCCESS ||
             vkCreateSemaphore(m_Device, &semaphoreInfo, nullptr, &m_RenderFinishedSemaphores[i]) != VK_SUCCESS ||
-            vkCreateFence(m_Device, &fenceInfo, nullptr, &m_InFlightFences[i]) != VK_SUCCESS)
-        {
+            vkCreateFence(m_Device, &fenceInfo, nullptr, &m_InFlightFences[i]) != VK_SUCCESS) {
             throw std::runtime_error("failed to create synchronization objects for a frame!");
         }
     }
 }
+
 
 void VulkanRenderer::recordCommandBuffer(int imageIndex)
 {
@@ -785,14 +778,18 @@ void VulkanRenderer::recordCommandBuffer(int imageIndex)
     }
 }
 
-void VulkanRenderer::drawFrame(Camera &camera)
-{
+void VulkanRenderer::drawFrame(Camera& camera) {
     vkWaitForFences(m_Device, 1, &m_InFlightFences[m_CurrentFrame], VK_TRUE, UINT64_MAX);
 
     uint32_t imageIndex;
     vkAcquireNextImageKHR(m_Device, m_SwapChain, UINT64_MAX, m_ImageAvailableSemaphores[m_CurrentFrame], VK_NULL_HANDLE, &imageIndex);
 
-    updateUniformBuffer(m_CurrentFrame, camera); // UBO VOR dem Zeichnen aktualisieren
+    if (m_ImagesInFlight[imageIndex] != VK_NULL_HANDLE) {
+        vkWaitForFences(m_Device, 1, &m_ImagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
+    }
+    m_ImagesInFlight[imageIndex] = m_InFlightFences[m_CurrentFrame];
+
+    updateUniformBuffer(m_CurrentFrame, camera);
 
     vkResetFences(m_Device, 1, &m_InFlightFences[m_CurrentFrame]);
 
@@ -801,19 +798,18 @@ void VulkanRenderer::drawFrame(Camera &camera)
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    VkSemaphore waitSemaphores[] = {m_ImageAvailableSemaphores[m_CurrentFrame]};
-    VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    VkSemaphore waitSemaphores[] = { m_ImageAvailableSemaphores[m_CurrentFrame] };
+    VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
     submitInfo.waitSemaphoreCount = 1;
     submitInfo.pWaitSemaphores = waitSemaphores;
     submitInfo.pWaitDstStageMask = waitStages;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &m_CommandBuffers[m_CurrentFrame];
-    VkSemaphore signalSemaphores[] = {m_RenderFinishedSemaphores[m_CurrentFrame]};
+    VkSemaphore signalSemaphores[] = { m_RenderFinishedSemaphores[m_CurrentFrame] };
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 
-    if (vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, m_InFlightFences[m_CurrentFrame]) != VK_SUCCESS)
-    {
+    if (vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, m_InFlightFences[m_CurrentFrame]) != VK_SUCCESS) {
         throw std::runtime_error("failed to submit draw command buffer!");
     }
 
@@ -821,7 +817,7 @@ void VulkanRenderer::drawFrame(Camera &camera)
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     presentInfo.waitSemaphoreCount = 1;
     presentInfo.pWaitSemaphores = signalSemaphores;
-    VkSwapchainKHR swapChains[] = {m_SwapChain};
+    VkSwapchainKHR swapChains[] = { m_SwapChain };
     presentInfo.swapchainCount = 1;
     presentInfo.pSwapchains = swapChains;
     presentInfo.pImageIndices = &imageIndex;
@@ -936,17 +932,34 @@ VkSurfaceFormatKHR VulkanRenderer::chooseSwapSurfaceFormat(const std::vector<VkS
     }
     return availableFormats[0];
 }
-VkPresentModeKHR VulkanRenderer::chooseSwapPresentMode(const std::vector<VkPresentModeKHR> &availablePresentModes)
-{
-    for (const auto &availablePresentMode : availablePresentModes)
-    {
-        if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR)
-        {
-            return availablePresentMode;
+
+VkPresentModeKHR VulkanRenderer::chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
+    // Wenn V-Sync AUS ist, bevorzuge IMMEDIATE (kein Warten, kann zu Tearing führen)
+    if (!m_Settings.vsync) {
+        for (const auto& availablePresentMode : availablePresentModes) {
+            if (availablePresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
+                std::cout << "Present Mode: Immediate (V-Sync OFF)" << std::endl;
+                return VK_PRESENT_MODE_IMMEDIATE_KHR;
+            }
+        }
+        // Fallback, wenn IMMEDIATE nicht unterstützt wird
+        std::cout << "Present Mode: Immediate not supported, falling back to FIFO (V-Sync ON)" << std::endl;
+        return VK_PRESENT_MODE_FIFO_KHR; // Fallback to FIFO
+    }
+    
+    // Wenn V-Sync AN ist, ist FIFO (Standard V-Sync) die beste Wahl.
+    // Mailbox ist eine gute Alternative für geringere Latenz, aber FIFO ist immer verfügbar.
+    for (const auto& availablePresentMode : availablePresentModes) {
+        if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
+            std::cout << "Present Mode: Mailbox (V-Sync ON, Low Latency)" << std::endl;
+            return VK_PRESENT_MODE_MAILBOX_KHR;
         }
     }
-    return VK_PRESENT_MODE_FIFO_KHR;
+
+    std::cout << "Present Mode: FIFO (V-Sync ON)" << std::endl;
+    return VK_PRESENT_MODE_FIFO_KHR; 
 }
+
 VkExtent2D VulkanRenderer::chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities)
 {
     if (capabilities.currentExtent.width != UINT32_MAX)
