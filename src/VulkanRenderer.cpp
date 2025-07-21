@@ -55,7 +55,8 @@ std::array<VkVertexInputAttributeDescription, 2> Vertex::getAttributeDescription
     return attributeDescriptions;
 }
 
-VulkanRenderer::VulkanRenderer(Window& window, const Settings& settings) : m_Window{ window }, m_Settings{ settings } {
+VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings) : m_Window{window}, m_Settings{settings}
+{
     initVulkan();
 }
 
@@ -123,7 +124,8 @@ VulkanRenderer::~VulkanRenderer()
     vkDestroyInstance(m_Instance, nullptr);
 }
 
-void VulkanRenderer::initVulkan() {
+void VulkanRenderer::initVulkan()
+{
     createInstance();
     createSurface();
     pickPhysicalDevice();
@@ -191,6 +193,7 @@ void VulkanRenderer::createSurface()
 
 void VulkanRenderer::pickPhysicalDevice()
 {
+
     uint32_t deviceCount = 0;
     vkEnumeratePhysicalDevices(m_Instance, &deviceCount, nullptr);
     if (deviceCount == 0)
@@ -201,6 +204,11 @@ void VulkanRenderer::pickPhysicalDevice()
     vkEnumeratePhysicalDevices(m_Instance, &deviceCount, devices.data());
     for (const auto &device : devices)
     {
+        auto modes = querySwapChainSupport(device).presentModes;
+        printf("Present modes for this surface:\n");
+        for (auto m : modes)
+            printf("  %d\n", m);
+
         if (isDeviceSuitable(device))
         {
             m_PhysicalDevice = device;
@@ -637,14 +645,15 @@ void VulkanRenderer::createDescriptorSets()
     }
 }
 
-void VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera& camera) {
+void VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &camera)
+{
     UniformBufferObject ubo{};
     // We keep the object static for now to focus on the camera
     ubo.model = glm::mat4(1.0f);
     ubo.view = camera.getViewMatrix();
     ubo.proj = camera.getProjectionMatrix();
 
-    void* data;
+    void *data;
     vkMapMemory(m_Device, m_UniformBuffersMemory[currentImage], 0, sizeof(ubo), 0, &data);
     memcpy(data, &ubo, sizeof(ubo));
     vkUnmapMemory(m_Device, m_UniformBuffersMemory[currentImage]);
@@ -698,7 +707,8 @@ void VulkanRenderer::createCommandBuffers()
     }
 }
 
-void VulkanRenderer::createSyncObjects() {
+void VulkanRenderer::createSyncObjects()
+{
     m_ImageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     m_RenderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     m_InFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
@@ -711,15 +721,16 @@ void VulkanRenderer::createSyncObjects() {
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+    {
         if (vkCreateSemaphore(m_Device, &semaphoreInfo, nullptr, &m_ImageAvailableSemaphores[i]) != VK_SUCCESS ||
             vkCreateSemaphore(m_Device, &semaphoreInfo, nullptr, &m_RenderFinishedSemaphores[i]) != VK_SUCCESS ||
-            vkCreateFence(m_Device, &fenceInfo, nullptr, &m_InFlightFences[i]) != VK_SUCCESS) {
+            vkCreateFence(m_Device, &fenceInfo, nullptr, &m_InFlightFences[i]) != VK_SUCCESS)
+        {
             throw std::runtime_error("failed to create synchronization objects for a frame!");
         }
     }
 }
-
 
 void VulkanRenderer::recordCommandBuffer(int imageIndex)
 {
@@ -774,7 +785,8 @@ void VulkanRenderer::recordCommandBuffer(int imageIndex)
     }
 }
 
-void VulkanRenderer::drawFrame(Camera& camera) {
+void VulkanRenderer::drawFrame(Camera &camera)
+{
     // Wait for the previous frame to finish
     vkWaitForFences(m_Device, 1, &m_InFlightFences[m_CurrentFrame], VK_TRUE, UINT64_MAX);
 
@@ -782,12 +794,13 @@ void VulkanRenderer::drawFrame(Camera& camera) {
     vkAcquireNextImageKHR(m_Device, m_SwapChain, UINT64_MAX, m_ImageAvailableSemaphores[m_CurrentFrame], VK_NULL_HANDLE, &imageIndex);
 
     // Check if a previous frame is using this image (i.e. there is its fence to wait on)
-    if (m_ImagesInFlight[imageIndex] != VK_NULL_HANDLE) {
+    if (m_ImagesInFlight[imageIndex] != VK_NULL_HANDLE)
+    {
         vkWaitForFences(m_Device, 1, &m_ImagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
     }
     // Mark the image as now being in use by this frame
     m_ImagesInFlight[imageIndex] = m_InFlightFences[m_CurrentFrame];
-    
+
     updateUniformBuffer(m_CurrentFrame, camera);
 
     vkResetFences(m_Device, 1, &m_InFlightFences[m_CurrentFrame]);
@@ -798,8 +811,8 @@ void VulkanRenderer::drawFrame(Camera& camera) {
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-    VkSemaphore waitSemaphores[] = { m_ImageAvailableSemaphores[m_CurrentFrame] };
-    VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+    VkSemaphore waitSemaphores[] = {m_ImageAvailableSemaphores[m_CurrentFrame]};
+    VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     submitInfo.waitSemaphoreCount = 1;
     submitInfo.pWaitSemaphores = waitSemaphores;
     submitInfo.pWaitDstStageMask = waitStages;
@@ -807,11 +820,12 @@ void VulkanRenderer::drawFrame(Camera& camera) {
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &m_CommandBuffers[m_CurrentFrame];
 
-    VkSemaphore signalSemaphores[] = { m_RenderFinishedSemaphores[m_CurrentFrame] };
+    VkSemaphore signalSemaphores[] = {m_RenderFinishedSemaphores[m_CurrentFrame]};
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 
-    if (vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, m_InFlightFences[m_CurrentFrame]) != VK_SUCCESS) {
+    if (vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, m_InFlightFences[m_CurrentFrame]) != VK_SUCCESS)
+    {
         throw std::runtime_error("failed to submit draw command buffer!");
     }
 
@@ -820,7 +834,7 @@ void VulkanRenderer::drawFrame(Camera& camera) {
     presentInfo.waitSemaphoreCount = 1;
     presentInfo.pWaitSemaphores = signalSemaphores;
 
-    VkSwapchainKHR swapChains[] = { m_SwapChain };
+    VkSwapchainKHR swapChains[] = {m_SwapChain};
     presentInfo.swapchainCount = 1;
     presentInfo.pSwapchains = swapChains;
     presentInfo.pImageIndices = &imageIndex;
@@ -936,33 +950,21 @@ VkSurfaceFormatKHR VulkanRenderer::chooseSwapSurfaceFormat(const std::vector<VkS
     return availableFormats[0];
 }
 
-// In VulkanRenderer.cpp
+VkPresentModeKHR VulkanRenderer::chooseSwapPresentMode(
+        const std::vector<VkPresentModeKHR>& modes)
+{
+    if (m_Settings.vsync)
+        return VK_PRESENT_MODE_FIFO_KHR;
 
-VkPresentModeKHR VulkanRenderer::chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
-    // Wenn V-Sync AN ist, bevorzuge Mailbox (besseres V-Sync) oder FIFO (Standard V-Sync).
-    if (m_Settings.vsync) {
-        for (const auto& availablePresentMode : availablePresentModes) {
-            if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
-                std::cout << "Present Mode: Mailbox (V-Sync ON)" << std::endl;
-                return VK_PRESENT_MODE_MAILBOX_KHR;
-            }
-        }
-        std::cout << "Present Mode: FIFO (V-Sync ON)" << std::endl;
-        return VK_PRESENT_MODE_FIFO_KHR; 
-    }
-    
-    // Wenn V-Sync AUS ist, versuche, den uncapped IMMEDIATE Modus zu verwenden.
-    for (const auto& availablePresentMode : availablePresentModes) {
-        if (availablePresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
-            std::cout << "Present Mode: Immediate (V-Sync OFF)" << std::endl;
+    for (auto m : modes)
+        if (m == VK_PRESENT_MODE_IMMEDIATE_KHR)
             return VK_PRESENT_MODE_IMMEDIATE_KHR;
-        }
-    }
 
-    // Fallback, wenn V-Sync aus sein soll, aber IMMEDIATE nicht geht: Nutze FIFO.
-    // In diesem Fall greift der manuelle FPS-Capper der Engine.
-    std::cout << "Present Mode: Immediate not supported, falling back to FIFO (manual cap will apply)" << std::endl;
-    return VK_PRESENT_MODE_FIFO_KHR; 
+    for (auto m : modes)
+        if (m == VK_PRESENT_MODE_MAILBOX_KHR)
+            return VK_PRESENT_MODE_MAILBOX_KHR;
+
+    return VK_PRESENT_MODE_FIFO_KHR;
 }
 
 VkExtent2D VulkanRenderer::chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities)

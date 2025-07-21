@@ -91,6 +91,8 @@ void Engine::run()
         auto extent = m_Window.getExtent();
         m_Camera.setPerspectiveProjection(glm::radians(45.f), (float)extent.width / (float)extent.height, 0.1f, 100.f);
 
+        auto frameStart = std::chrono::high_resolution_clock::now();
+
         m_Renderer.drawFrame(m_Camera);
 
         frameCount++;
@@ -108,17 +110,11 @@ void Engine::run()
 
         if (!m_Settings.vsync && m_Settings.fpsCap > 0)
         {
-            float minFrameTime = 1.0f / m_Settings.fpsCap;
-            float frameEndTime = static_cast<float>(glfwGetTime());
-            float frameDur = frameEndTime - currentFrameTime;
-            if (frameDur < minFrameTime)
-            {
-                float sleepTime = minFrameTime - frameDur;
-                if (sleepTime > 0.0f)
-                {
-                    std::this_thread::sleep_for(std::chrono::duration<float>(sleepTime));
-                }
-            }
+            auto minFrameTime = std::chrono::duration<float>(1.0f / m_Settings.fpsCap);
+            auto frameEnd = std::chrono::high_resolution_clock::now();
+            auto spent = frameEnd - frameStart;
+            if (spent < minFrameTime)
+                std::this_thread::sleep_for(minFrameTime - spent);
         }
 
         lastFrameTime = currentFrameTime;
