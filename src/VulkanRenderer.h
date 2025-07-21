@@ -4,6 +4,7 @@
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <vector>
+#include "Camera.h"
 #include <array>
 
 // Definition der Vertex-Struktur (Position ist jetzt 3D)
@@ -33,7 +34,7 @@ public:
     VulkanRenderer(const VulkanRenderer &) = delete;
     VulkanRenderer &operator=(const VulkanRenderer &) = delete;
 
-    void drawFrame();
+    void drawFrame(Camera& camera);
 
 private:
     // Member-Variablen
@@ -116,7 +117,7 @@ private:
     void createDescriptorSets();
     void createCommandBuffers();
     void createSyncObjects();
-    void updateUniformBuffer(uint32_t currentImage);
+    void updateUniformBuffer(uint32_t currentImage, Camera& camera);
     void recordCommandBuffer(int imageIndex);
 
     struct QueueFamilyIndices;

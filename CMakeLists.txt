@@ -24,8 +24,8 @@ add_executable(Minecraft
     src/Engine.cpp
     src/Window.cpp
     src/VulkanRenderer.cpp
+    src/Camera.cpp # Hinzufügen!
 )
-
 
 # SCHRITT 3: Include-Verzeichnisse hinzufügen
 target_include_directories(Minecraft PRIVATE

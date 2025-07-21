@@ -2,6 +2,7 @@
 
 #include "Window.h"
 #include "VulkanRenderer.h"
+#include "Camera.h"
 #include <memory>
 
 class Engine {
@@ -21,4 +22,5 @@ public:
 private:
     Window m_Window{WIDTH, HEIGHT, "Minecraft Vibe Engine"};
     VulkanRenderer m_Renderer{m_Window};
+    Camera m_Camera{};
 };

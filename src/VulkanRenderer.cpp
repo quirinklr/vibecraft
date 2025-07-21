@@ -643,17 +643,16 @@ void VulkanRenderer::createDescriptorSets()
     }
 }
 
-void VulkanRenderer::updateUniformBuffer(uint32_t currentImage)
+void VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &camera)
 {
     static auto startTime = std::chrono::high_resolution_clock::now();
     auto currentTime = std::chrono::high_resolution_clock::now();
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
     UniformBufferObject ubo{};
-    ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-    ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-    ubo.proj = glm::perspective(glm::radians(45.0f), m_SwapChainExtent.width / (float)m_SwapChainExtent.height, 0.1f, 10.0f);
-    ubo.proj[1][1] *= -1; // Y-Koordinate für Vulkan umkehren
+    ubo.model = glm::rotate(glm::mat4(1.0f), 0.f, glm::vec3(0.0f, 0.0f, 1.0f));
+    ubo.view = camera.getViewMatrix();       // Kamera-Daten verwenden
+    ubo.proj = camera.getProjectionMatrix(); // Kamera-Daten verwenden
 
     void *data;
     vkMapMemory(m_Device, m_UniformBuffersMemory[currentImage], 0, sizeof(ubo), 0, &data);
@@ -786,14 +785,14 @@ void VulkanRenderer::recordCommandBuffer(int imageIndex)
     }
 }
 
-void VulkanRenderer::drawFrame()
+void VulkanRenderer::drawFrame(Camera &camera)
 {
     vkWaitForFences(m_Device, 1, &m_InFlightFences[m_CurrentFrame], VK_TRUE, UINT64_MAX);
 
     uint32_t imageIndex;
     vkAcquireNextImageKHR(m_Device, m_SwapChain, UINT64_MAX, m_ImageAvailableSemaphores[m_CurrentFrame], VK_NULL_HANDLE, &imageIndex);
 
-    updateUniformBuffer(m_CurrentFrame); // UBO VOR dem Zeichnen aktualisieren
+    updateUniformBuffer(m_CurrentFrame, camera); // UBO VOR dem Zeichnen aktualisieren
 
     vkResetFences(m_Device, 1, &m_InFlightFences[m_CurrentFrame]);
 
