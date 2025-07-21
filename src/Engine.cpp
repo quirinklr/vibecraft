@@ -4,6 +4,8 @@
 #include <glm/gtc/constants.hpp>
 #include <string>
 #include <sstream> // Für die String-Formatierung
+#include <thread>
+#include <chrono>
 
 Engine::Engine()
 {
@@ -16,59 +18,43 @@ Engine::~Engine()
     // Destruktor bleibt leer
 }
 
-void Engine::run() {
+void Engine::run()
+{
     bool mouseCaptured = true;
     glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
-    float lastFrameTime = 0.f;
+    float lastFrameTime = static_cast<float>(glfwGetTime());
     double lastX, lastY;
     glfwGetCursorPos(m_Window.getGLFWwindow(), &lastX, &lastY);
     float yaw = glm::pi<float>();
     float pitch = 0.0f;
-    
-    float lastFPSTime = 0.f;
+
+    float lastFPSTime = lastFrameTime;
     int frameCount = 0;
 
-    while (!m_Window.shouldClose()) {
+    constexpr float baseMouseScale = 0.0005f;
+
+    while (!m_Window.shouldClose())
+    {
         float currentFrameTime = static_cast<float>(glfwGetTime());
         float deltaTime = currentFrameTime - lastFrameTime;
 
-        // --- KORREKTE FPS-CAP LOGIK ---
-        if (!m_Settings.vsync && m_Settings.fpsCap > 0) {
-            float minFrameTime = 1.0f / m_Settings.fpsCap;
-            if (deltaTime < minFrameTime) {
-                continue; 
-            }
-        }
-        // WICHTIG: deltaTime wird erst NACH dem Cap aktualisiert
-        lastFrameTime = currentFrameTime;
+        glfwPollEvents();
 
-        // FPS-Titel aktualisieren (mit Yaw/Pitch)
-        frameCount++;
-        if (currentFrameTime - lastFPSTime >= 1.0) {
-            std::stringstream titleStream;
-            titleStream.precision(1);
-            titleStream << std::fixed << "Minecraft Vibe Engine | FPS: " << frameCount 
-                        << " | Yaw: " << glm::degrees(yaw) 
-                        << " | Pitch: " << glm::degrees(pitch);
-            
-            glfwSetWindowTitle(m_Window.getGLFWwindow(), titleStream.str().c_str());
-            frameCount = 0;
-            lastFPSTime = currentFrameTime;
-        }
-
-        // ... (Rest der Funktion: Input, Kamera, Draw Call - bleibt unverändert)
-        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_ESCAPE) == GLFW_PRESS) {
+        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_ESCAPE) == GLFW_PRESS)
+        {
             glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
             mouseCaptured = false;
         }
-        if (!mouseCaptured && glfwGetMouseButton(m_Window.getGLFWwindow(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
-             glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-             mouseCaptured = true;
-             glfwGetCursorPos(m_Window.getGLFWwindow(), &lastX, &lastY);
+        if (!mouseCaptured && glfwGetMouseButton(m_Window.getGLFWwindow(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
+        {
+            glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+            mouseCaptured = true;
+            glfwGetCursorPos(m_Window.getGLFWwindow(), &lastX, &lastY);
         }
 
-        if (mouseCaptured) {
+        if (mouseCaptured)
+        {
             double mouseX, mouseY;
             glfwGetCursorPos(m_Window.getGLFWwindow(), &mouseX, &mouseY);
 
@@ -77,14 +63,18 @@ void Engine::run() {
 
             lastX = mouseX;
             lastY = mouseY;
-            
-            float lookSpeed = 0.1f;
-            yaw   += deltaX * m_Settings.mouseSensitivityX * lookSpeed * deltaTime;
-            
-            if (m_Settings.invertMouseY) {
-                pitch += deltaY * m_Settings.mouseSensitivityY * lookSpeed * deltaTime;
-            } else {
-                pitch -= deltaY * m_Settings.mouseSensitivityY * lookSpeed * deltaTime;
+
+            float yawScale = m_Settings.mouseSensitivityX * baseMouseScale;
+            float pitchScale = m_Settings.mouseSensitivityY * baseMouseScale;
+
+            yaw += deltaX * yawScale;
+            if (m_Settings.invertMouseY)
+            {
+                pitch += deltaY * pitchScale;
+            }
+            else
+            {
+                pitch -= deltaY * pitchScale;
             }
             pitch = glm::clamp(pitch, -glm::half_pi<float>() + 0.01f, glm::half_pi<float>() - 0.01f);
         }
@@ -94,14 +84,43 @@ void Engine::run() {
         direction.y = sin(pitch);
         direction.z = sin(yaw) * cos(pitch);
         glm::vec3 cameraFront = glm::normalize(direction);
-        
+
         glm::vec3 cameraPos = {2.f, 2.f, 2.f};
         m_Camera.setViewDirection(cameraPos, cameraFront);
-        
+
         auto extent = m_Window.getExtent();
         m_Camera.setPerspectiveProjection(glm::radians(45.f), (float)extent.width / (float)extent.height, 0.1f, 100.f);
 
-        glfwPollEvents();
         m_Renderer.drawFrame(m_Camera);
+
+        frameCount++;
+        if (currentFrameTime - lastFPSTime >= 1.0f)
+        {
+            std::stringstream titleStream;
+            titleStream.precision(1);
+            titleStream << std::fixed << "Minecraft Vibe Engine | FPS: " << frameCount
+                        << " | Yaw: " << glm::degrees(yaw)
+                        << " | Pitch: " << glm::degrees(pitch);
+            glfwSetWindowTitle(m_Window.getGLFWwindow(), titleStream.str().c_str());
+            frameCount = 0;
+            lastFPSTime = currentFrameTime;
+        }
+
+        if (!m_Settings.vsync && m_Settings.fpsCap > 0)
+        {
+            float minFrameTime = 1.0f / m_Settings.fpsCap;
+            float frameEndTime = static_cast<float>(glfwGetTime());
+            float frameDur = frameEndTime - currentFrameTime;
+            if (frameDur < minFrameTime)
+            {
+                float sleepTime = minFrameTime - frameDur;
+                if (sleepTime > 0.0f)
+                {
+                    std::this_thread::sleep_for(std::chrono::duration<float>(sleepTime));
+                }
+            }
+        }
+
+        lastFrameTime = currentFrameTime;
     }
 }

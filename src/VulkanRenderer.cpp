@@ -637,18 +637,14 @@ void VulkanRenderer::createDescriptorSets()
     }
 }
 
-void VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &camera)
-{
-    static auto startTime = std::chrono::high_resolution_clock::now();
-    auto currentTime = std::chrono::high_resolution_clock::now();
-    float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-
+void VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera& camera) {
     UniformBufferObject ubo{};
-    ubo.model = glm::mat4(1.0f); 
-    ubo.view = camera.getViewMatrix();       // Kamera-Daten verwenden
-    ubo.proj = camera.getProjectionMatrix(); 
+    // We keep the object static for now to focus on the camera
+    ubo.model = glm::mat4(1.0f);
+    ubo.view = camera.getViewMatrix();
+    ubo.proj = camera.getProjectionMatrix();
 
-    void *data;
+    void* data;
     vkMapMemory(m_Device, m_UniformBuffersMemory[currentImage], 0, sizeof(ubo), 0, &data);
     memcpy(data, &ubo, sizeof(ubo));
     vkUnmapMemory(m_Device, m_UniformBuffersMemory[currentImage]);
@@ -779,16 +775,19 @@ void VulkanRenderer::recordCommandBuffer(int imageIndex)
 }
 
 void VulkanRenderer::drawFrame(Camera& camera) {
+    // Wait for the previous frame to finish
     vkWaitForFences(m_Device, 1, &m_InFlightFences[m_CurrentFrame], VK_TRUE, UINT64_MAX);
 
     uint32_t imageIndex;
     vkAcquireNextImageKHR(m_Device, m_SwapChain, UINT64_MAX, m_ImageAvailableSemaphores[m_CurrentFrame], VK_NULL_HANDLE, &imageIndex);
 
+    // Check if a previous frame is using this image (i.e. there is its fence to wait on)
     if (m_ImagesInFlight[imageIndex] != VK_NULL_HANDLE) {
         vkWaitForFences(m_Device, 1, &m_ImagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
     }
+    // Mark the image as now being in use by this frame
     m_ImagesInFlight[imageIndex] = m_InFlightFences[m_CurrentFrame];
-
+    
     updateUniformBuffer(m_CurrentFrame, camera);
 
     vkResetFences(m_Device, 1, &m_InFlightFences[m_CurrentFrame]);
@@ -798,13 +797,16 @@ void VulkanRenderer::drawFrame(Camera& camera) {
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
     VkSemaphore waitSemaphores[] = { m_ImageAvailableSemaphores[m_CurrentFrame] };
     VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
     submitInfo.waitSemaphoreCount = 1;
     submitInfo.pWaitSemaphores = waitSemaphores;
     submitInfo.pWaitDstStageMask = waitStages;
+
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &m_CommandBuffers[m_CurrentFrame];
+
     VkSemaphore signalSemaphores[] = { m_RenderFinishedSemaphores[m_CurrentFrame] };
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
@@ -817,6 +819,7 @@ void VulkanRenderer::drawFrame(Camera& camera) {
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     presentInfo.waitSemaphoreCount = 1;
     presentInfo.pWaitSemaphores = signalSemaphores;
+
     VkSwapchainKHR swapChains[] = { m_SwapChain };
     presentInfo.swapchainCount = 1;
     presentInfo.pSwapchains = swapChains;
@@ -933,30 +936,32 @@ VkSurfaceFormatKHR VulkanRenderer::chooseSwapSurfaceFormat(const std::vector<VkS
     return availableFormats[0];
 }
 
+// In VulkanRenderer.cpp
+
 VkPresentModeKHR VulkanRenderer::chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
-    // Wenn V-Sync AUS ist, bevorzuge IMMEDIATE (kein Warten, kann zu Tearing führen)
-    if (!m_Settings.vsync) {
+    // Wenn V-Sync AN ist, bevorzuge Mailbox (besseres V-Sync) oder FIFO (Standard V-Sync).
+    if (m_Settings.vsync) {
         for (const auto& availablePresentMode : availablePresentModes) {
-            if (availablePresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
-                std::cout << "Present Mode: Immediate (V-Sync OFF)" << std::endl;
-                return VK_PRESENT_MODE_IMMEDIATE_KHR;
+            if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
+                std::cout << "Present Mode: Mailbox (V-Sync ON)" << std::endl;
+                return VK_PRESENT_MODE_MAILBOX_KHR;
             }
         }
-        // Fallback, wenn IMMEDIATE nicht unterstützt wird
-        std::cout << "Present Mode: Immediate not supported, falling back to FIFO (V-Sync ON)" << std::endl;
-        return VK_PRESENT_MODE_FIFO_KHR; // Fallback to FIFO
+        std::cout << "Present Mode: FIFO (V-Sync ON)" << std::endl;
+        return VK_PRESENT_MODE_FIFO_KHR; 
     }
     
-    // Wenn V-Sync AN ist, ist FIFO (Standard V-Sync) die beste Wahl.
-    // Mailbox ist eine gute Alternative für geringere Latenz, aber FIFO ist immer verfügbar.
+    // Wenn V-Sync AUS ist, versuche, den uncapped IMMEDIATE Modus zu verwenden.
     for (const auto& availablePresentMode : availablePresentModes) {
-        if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
-            std::cout << "Present Mode: Mailbox (V-Sync ON, Low Latency)" << std::endl;
-            return VK_PRESENT_MODE_MAILBOX_KHR;
+        if (availablePresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
+            std::cout << "Present Mode: Immediate (V-Sync OFF)" << std::endl;
+            return VK_PRESENT_MODE_IMMEDIATE_KHR;
         }
     }
 
-    std::cout << "Present Mode: FIFO (V-Sync ON)" << std::endl;
+    // Fallback, wenn V-Sync aus sein soll, aber IMMEDIATE nicht geht: Nutze FIFO.
+    // In diesem Fall greift der manuelle FPS-Capper der Engine.
+    std::cout << "Present Mode: Immediate not supported, falling back to FIFO (manual cap will apply)" << std::endl;
     return VK_PRESENT_MODE_FIFO_KHR; 
 }
 
