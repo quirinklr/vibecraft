@@ -7,16 +7,20 @@
 #include <thread>
 #include <chrono>
 
-Engine::Engine() {
+Engine::Engine()
+{
     glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
-    // Test‑Würfel
-    GameObject a; a.position = { 0.f, 0.f, 0.f };
-    GameObject b; b.position = { 2.f, 0.f, 0.f };
-    GameObject c; c.position = { 0.f, 2.f, 0.f };
-    m_GameObjects = { a, b, c };
+    for (int z = 0; z < 4; ++z)
+        for (int y = 0; y < 4; ++y)
+            for (int x = 0; x < 4; ++x)
+            {
+                GameObject b;
+                b.position = {static_cast<float>(x), static_cast<float>(y),
+                              static_cast<float>(-z)}; // -z damit Welt nach vorne wächst
+                m_GameObjects.push_back(b);
+            }
 }
-
 
 Engine::~Engine()
 {
