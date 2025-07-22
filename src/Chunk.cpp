@@ -210,7 +210,7 @@ void Chunk::generateMesh(VulkanRenderer &renderer)
 {
     // vorhandene GPU‑Resourcen aus vorherigem Lauf aufräumen
     if (m_VertexBuffer != VK_NULL_HANDLE)
-        cleanup(renderer.getDevice());
+        cleanup(renderer);
 
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
@@ -314,24 +314,25 @@ void Chunk::generateMesh(VulkanRenderer &renderer)
     m_State.store(State::GPU_PENDING, std::memory_order_release);
 }
 
-void Chunk::cleanup(VkDevice dev)
+void Chunk::cleanup(VulkanRenderer &r)
 {
+    /* Staging + Fence sofort frei */
     if (m_Upload.fence)
-        vkDestroyFence(dev, m_Upload.fence, nullptr);
+        vkDestroyFence(r.getDevice(), m_Upload.fence, nullptr);
     if (m_Upload.stagingVB)
-        vkDestroyBuffer(dev, m_Upload.stagingVB, nullptr);
+        vkDestroyBuffer(r.getDevice(), m_Upload.stagingVB, nullptr);
     if (m_Upload.stagingVBMem)
-        vkFreeMemory(dev, m_Upload.stagingVBMem, nullptr);
+        vkFreeMemory(r.getDevice(), m_Upload.stagingVBMem, nullptr);
     if (m_Upload.stagingIB)
-        vkDestroyBuffer(dev, m_Upload.stagingIB, nullptr);
+        vkDestroyBuffer(r.getDevice(), m_Upload.stagingIB, nullptr);
     if (m_Upload.stagingIBMem)
-        vkFreeMemory(dev, m_Upload.stagingIBMem, nullptr);
-    if (m_VertexBuffer)
-        vkDestroyBuffer(dev, m_VertexBuffer, nullptr);
-    if (m_VertexBufferMemory)
-        vkFreeMemory(dev, m_VertexBufferMemory, nullptr);
-    if (m_IndexBuffer)
-        vkDestroyBuffer(dev, m_IndexBuffer, nullptr);
-    if (m_IndexBufferMemory)
-        vkFreeMemory(dev, m_IndexBufferMemory, nullptr);
+        vkFreeMemory(r.getDevice(), m_Upload.stagingIBMem, nullptr);
+    m_Upload = {};
+
+    /* Mesh‑Buffer asynchron frei­geben */
+    r.enqueueDestroy(m_VertexBuffer, m_VertexBufferMemory);
+    r.enqueueDestroy(m_IndexBuffer, m_IndexBufferMemory);
+
+    m_VertexBuffer = m_IndexBuffer = VK_NULL_HANDLE;
+    m_VertexBufferMemory = m_IndexBufferMemory = VK_NULL_HANDLE;
 }

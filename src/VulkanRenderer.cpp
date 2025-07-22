@@ -361,7 +361,7 @@ void VulkanRenderer::createTextureImage()
     std::cout << "[VR] Lade Textur textures/blocks/gold_ore.png\n";
 
     int texWidth, texHeight, texChannels;
-    stbi_uc *pixels = stbi_load("../../textures/blocks/gold_ore.png",
+    stbi_uc *pixels = stbi_load("../../textures/blocks/planks_oak.png",
                                 &texWidth, &texHeight, &texChannels,
                                 STBI_rgb_alpha);
     VkDeviceSize imageSize = texWidth * texHeight * 4;
@@ -1122,13 +1122,25 @@ void VulkanRenderer::recordCommandBuffer(
         throw std::runtime_error("failed to record command buffer!");
 }
 
-void VulkanRenderer::drawFrame(Camera &camera, const std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less> &chunks)
+void VulkanRenderer::drawFrame(Camera &camera, const std::map<glm::ivec3,
+                                                              std::unique_ptr<Chunk>, ivec3_less> &chunks)
 {
-    // Wait for the previous frame to finish
+    /* 0) auf vorherigen Frame warten */
     vkWaitForFences(m_Device, 1, &m_InFlightFences[m_CurrentFrame], VK_TRUE, UINT64_MAX);
 
+    /* 1) Ressourcen dieses Frames freigeben */
+    for (auto &p : m_Destroy[m_CurrentFrame])
+    {
+        vkDestroyBuffer(m_Device, p.buf, nullptr);
+        vkFreeMemory(m_Device, p.mem, nullptr);
+    }
+    m_Destroy[m_CurrentFrame].clear();
+
+    /* 2) Bild holen */
     uint32_t imageIndex;
-    vkAcquireNextImageKHR(m_Device, m_SwapChain, UINT64_MAX, m_ImageAvailableSemaphores[m_CurrentFrame], VK_NULL_HANDLE, &imageIndex);
+    vkAcquireNextImageKHR(m_Device, m_SwapChain, UINT64_MAX,
+                          m_ImageAvailableSemaphores[m_CurrentFrame],
+                          VK_NULL_HANDLE, &imageIndex);
 
     // Check if a previous frame is using this image (i.e. there is its fence to wait on)
     if (m_ImagesInFlight[imageIndex] != VK_NULL_HANDLE)
@@ -1261,6 +1273,13 @@ void VulkanRenderer::createChunkMeshBuffers(const std::vector<Vertex> &v,
     vkCreateFence(m_Device, &fi, nullptr, &up.fence);
 
     vkQueueSubmit(m_GraphicsQueue, 1, &s, up.fence);
+}
+
+void VulkanRenderer::enqueueDestroy(VkBuffer buf, VkDeviceMemory mem)
+{
+    if (buf == VK_NULL_HANDLE)
+        return;
+    m_Destroy[m_CurrentFrame].push_back({buf, mem});
 }
 
 void VulkanRenderer::createDescriptorSetLayout()

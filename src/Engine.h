@@ -33,6 +33,7 @@ private:
     // --- Chunk‑Verwaltung ---
     static constexpr int RENDER_DISTANCE = 6; // Radius in Chunks
     std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less> m_Chunks;
+    std::vector<std::unique_ptr<Chunk>> m_Garbage;
 
     void generateChunk(const glm::ivec3 &pos);     // neu
     void updateChunks(const glm::vec3 &cameraPos); // neu
