@@ -40,151 +40,111 @@ void Chunk::generateTerrain(FastNoiseLite &noise)
     }
 }
 
+// ────────────────────────────────────────────────────────────────────
+//  Erzeugt für **jeden** sichtbaren Block eine einfache Quad‑Fläche.
+//  (Naiver Mesher – zuerst Korrektheit, Optimierung kommt später.)
+// ────────────────────────────────────────────────────────────────────
 void Chunk::generateMesh(VulkanRenderer &renderer)
 {
-    // ──────────────────────────────────────────────────────────────
-    // Hilfs‑Lambdas, damit wir nicht mehr außerhalb des Vektors lesen
-    // ──────────────────────────────────────────────────────────────
-    auto inside = [](int X, int Y, int Z) noexcept
-    {
-        return X >= 0 && X < WIDTH &&
-               Y >= 0 && Y < HEIGHT &&
-               Z >= 0 && Z < DEPTH;
-    };
-    auto idx = [](int X, int Y, int Z) noexcept -> size_t
-    {
-        return static_cast<size_t>(Y) * WIDTH * DEPTH + Z * WIDTH + X;
-    };
+    // vorhandene GPU‑Resourcen aus vorherigem Lauf aufräumen
+    if (m_VertexBuffer != VK_NULL_HANDLE)
+        cleanup(renderer.getDevice());
 
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
-    std::vector<bool> visited(WIDTH * HEIGHT * DEPTH, false);
 
-    // ──────────────────────────────────────────────────────────────
-    // 6 Durchläufe = 6 Flächenrichtungen
-    // ──────────────────────────────────────────────────────────────
-    for (int face = 0; face < 6; ++face)
+    auto addQuad = [&](const glm::vec3 &v0,
+                       const glm::vec3 &v1,
+                       const glm::vec3 &v2,
+                       const glm::vec3 &v3)
     {
-        int u = (face + 1) % 3;
-        int v = (face + 2) % 3;
-        int d = face / 2;
+        uint32_t start = static_cast<uint32_t>(vertices.size());
 
-        glm::ivec3 dir(0);
-        dir[d] = 1 - 2 * (face % 2);
+        vertices.push_back({v0, {1, 1, 1}, {0, 0}});
+        vertices.push_back({v1, {1, 1, 1}, {1, 0}});
+        vertices.push_back({v2, {1, 1, 1}, {1, 1}});
+        vertices.push_back({v3, {1, 1, 1}, {0, 1}});
 
-        glm::ivec3 x(0);
-        glm::ivec3 q(0); // Schrittvektor in d‑Richtung
-        q[d] = 1;
+        // Front‑Face: clockwise ➜ VkFrontFace::VK_FRONT_FACE_CLOCKWISE
+        indices.push_back(start + 0);
+        indices.push_back(start + 1);
+        indices.push_back(start + 2);
 
-        for (x[d] = -1; x[d] < WIDTH;)
-        { // Sweeping‑Ebene
-            ++x[d];
+        indices.push_back(start + 0);
+        indices.push_back(start + 2);
+        indices.push_back(start + 3);
+    };
 
-            for (x[v] = 0; x[v] < HEIGHT; ++x[v])
+    // 6 Richtungen (x+, x‑, y+, y‑, z+, z‑)
+    const glm::ivec3 dirs[6] = {
+        {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+
+    for (int z = 0; z < DEPTH; ++z)
+        for (int y = 0; y < HEIGHT; ++y)
+            for (int x = 0; x < WIDTH; ++x)
             {
-                for (x[u] = 0; x[u] < DEPTH; ++x[u])
+                if (getBlock(x, y, z) == 0)
+                    continue; // Luft → nichts zu tun
+
+                glm::vec3 p = {x, y, z}; // linke‑untere Ecke d. Blocks
+
+                // ► für jede der sechs Seiten prüfen, ob Nachbar Luft ist
+                for (int d = 0; d < 6; ++d)
                 {
+                    glm::ivec3 n = {x + dirs[d].x,
+                                    y + dirs[d].y,
+                                    z + dirs[d].z};
 
-                    BlockID cur = inside(x[0], x[1], x[2]) ? getBlock(x[0], x[1], x[2]) : 0;
-                    BlockID adj = inside(x[0] + dir[0],
-                                         x[1] + dir[1],
-                                         x[2] + dir[2])
-                                      ? getBlock(x[0] + dir[0],
-                                                 x[1] + dir[1],
-                                                 x[2] + dir[2])
-                                      : 0;
+                    if (getBlock(n.x, n.y, n.z) != 0)
+                        continue; // verdeckt
 
-                    bool isOpaque = (cur != 0);
-                    bool isAdjacentOpaque = (adj != 0);
-                    bool alreadyVisited = inside(x[0], x[1], x[2]) &&
-                                          visited[idx(x[0], x[1], x[2])];
-
-                    if (isOpaque == isAdjacentOpaque || alreadyVisited)
-                        continue;
-
-                    // ───────── Greedy‑Ausdehnung in u‑ und v‑Richtung ────────
-                    int w = 1, h = 1;
-
-                    // Breite
-                    while (x[u] + w < DEPTH &&
-                           inside(x[0] + w * q[u], x[1], x[2] + w * q[u]) &&
-                           !visited[idx(x[0] + w * q[u], x[1], x[2] + w * q[u])] &&
-                           getBlock(x[0] + w * q[u], x[1], x[2] + w * q[u]) == cur)
-                        ++w;
-
-                    // Höhe
-                    bool done = false;
-                    while (!done && x[v] + h < HEIGHT)
+                    switch (d)
                     {
-                        for (int k = 0; k < w; ++k)
-                        {
-                            int X = x[0] + k * q[u], Y = x[1] + h, Z = x[2] + k * q[u];
-                            if (!inside(X, Y, Z) ||
-                                visited[idx(X, Y, Z)] ||
-                                getBlock(X, Y, Z) != cur)
-                            {
-                                done = true;
-                                break;
-                            }
-                        }
-                        if (!done)
-                            ++h;
+                    case 0: // +X
+                        addQuad(p + glm::vec3(1, 0, 0),
+                                p + glm::vec3(1, 0, 1),
+                                p + glm::vec3(1, 1, 1),
+                                p + glm::vec3(1, 1, 0));
+                        break;
+                    case 1: // -X
+                        addQuad(p + glm::vec3(0, 0, 1),
+                                p + glm::vec3(0, 0, 0),
+                                p + glm::vec3(0, 1, 0),
+                                p + glm::vec3(0, 1, 1));
+                        break;
+                    case 2: // +Y (Top)
+                        addQuad(p + glm::vec3(0, 1, 1),
+                                p + glm::vec3(1, 1, 1),
+                                p + glm::vec3(1, 1, 0),
+                                p + glm::vec3(0, 1, 0));
+                        break;
+                    case 3: // -Y (Bottom)
+                        addQuad(p + glm::vec3(0, 0, 0),
+                                p + glm::vec3(1, 0, 0),
+                                p + glm::vec3(1, 0, 1),
+                                p + glm::vec3(0, 0, 1));
+                        break;
+                    case 4: // +Z
+                        addQuad(p + glm::vec3(0, 0, 1),
+                                p + glm::vec3(1, 0, 1),
+                                p + glm::vec3(1, 1, 1),
+                                p + glm::vec3(0, 1, 1));
+                        break;
+                    case 5: // -Z
+                        addQuad(p + glm::vec3(1, 0, 0),
+                                p + glm::vec3(0, 0, 0),
+                                p + glm::vec3(0, 1, 0),
+                                p + glm::vec3(1, 1, 0));
+                        break;
                     }
-
-                    // ───────── Quad erzeugen ─────────
-                    glm::vec3 du(0), dv(0);
-                    du[u] = 1;
-                    dv[v] = 1;
-
-                    glm::vec3 v1 = glm::vec3(x);
-                    glm::vec3 v2 = v1 + du * (float)w;
-                    glm::vec3 v3 = v1 + du * (float)w + dv * (float)h;
-                    glm::vec3 v4 = v1 + dv * (float)h;
-
-                    // Indices (CW / CCW je nach Normale)
-                    if (dir[d] > 0)
-                    {
-                        indices.insert(indices.end(),
-                                       {uint32_t(vertices.size() + 0),
-                                        uint32_t(vertices.size() + 2),
-                                        uint32_t(vertices.size() + 1),
-                                        uint32_t(vertices.size() + 0),
-                                        uint32_t(vertices.size() + 3),
-                                        uint32_t(vertices.size() + 2)});
-                    }
-                    else
-                    {
-                        indices.insert(indices.end(),
-                                       {uint32_t(vertices.size() + 0),
-                                        uint32_t(vertices.size() + 1),
-                                        uint32_t(vertices.size() + 2),
-                                        uint32_t(vertices.size() + 2),
-                                        uint32_t(vertices.size() + 3),
-                                        uint32_t(vertices.size() + 0)});
-                    }
-
-                    vertices.push_back({v1, {1, 1, 1}, {0, 0}});
-                    vertices.push_back({v2, {1, 1, 1}, {(float)w, 0}});
-                    vertices.push_back({v3, {1, 1, 1}, {(float)w, (float)h}});
-                    vertices.push_back({v4, {1, 1, 1}, {0, (float)h}});
-
-                    // Markiere alle zusammengefassten Blöcke als besucht
-                    for (int yy = 0; yy < h; ++yy)
-                        for (int xx = 0; xx < w; ++xx)
-                        {
-                            int X = x[0] + xx * q[u], Y = x[1] + yy, Z = x[2] + xx * q[u];
-                            if (inside(X, Y, Z))
-                                visited[idx(X, Y, Z)] = true;
-                        }
                 }
             }
-        }
-    }
 
     if (indices.empty())
-        return;
+        return; // komplett leer
 
     m_IndexCount = static_cast<uint32_t>(indices.size());
+
     renderer.createChunkMeshBuffers(
         vertices, indices,
         m_VertexBuffer, m_VertexBufferMemory,
