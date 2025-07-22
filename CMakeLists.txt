@@ -50,3 +50,10 @@ add_custom_command(TARGET Minecraft POST_BUILD
     "$<TARGET_FILE_DIR:Minecraft>/shaders"
     COMMENT "Kopiere Shader in den Build-Ordner"
 )
+
+add_custom_command(TARGET Minecraft POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_SOURCE_DIR}/textures"
+    "$<TARGET_FILE_DIR:Minecraft>/textures"
+    COMMENT "Kopiere Texturen in den Build-Ordner"
+)

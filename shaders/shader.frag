@@ -1,11 +1,13 @@
 #version 450
 
-// Nimmt die Farbe vom Vertex Shader entgegen
 layout(location = 0) in vec3 fragColor;
+layout(location = 1) in vec2 fragTexCoord; // NEU
 
-// Gibt die finale Farbe für den Pixel aus
+layout(set = 0, binding = 1) uniform sampler2D texSampler; // NEU
+
 layout(location = 0) out vec4 outColor;
 
 void main() {
-    outColor = vec4(fragColor, 1.0);
+    // Nur die Texturfarbe verwenden
+    outColor = texture(texSampler, fragTexCoord);
 }

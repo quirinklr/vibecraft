@@ -14,8 +14,10 @@ struct Vertex
 {
     glm::vec3 pos;
     glm::vec3 color;
+    glm::vec2 texCoord; // NEU
+
     static VkVertexInputBindingDescription getBindingDescription();
-    static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions();
+    static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescriptions(); // WICHTIG: 2 -> 3
 };
 
 struct UniformBufferObject
@@ -83,12 +85,6 @@ private:
         VkFormat format,
         VkImageAspectFlags aspectFlags);
 
-    void transitionImageLayout(
-        VkImage image,
-        VkFormat format,
-        VkImageLayout oldLayout,
-        VkImageLayout newLayout);
-
     VkCommandPool m_CommandPool;
     std::vector<VkCommandBuffer> m_CommandBuffers;
 
@@ -109,18 +105,24 @@ private:
     VkDescriptorPool m_DescriptorPool;
     std::vector<VkDescriptorSet> m_DescriptorSets;
 
+    VkImage m_TextureImage;
+    VkDeviceMemory m_TextureImageMemory;
+    VkImageView m_TextureImageView;
+    VkSampler m_TextureSampler;
+
     const int MAX_FRAMES_IN_FLIGHT = 2;
     const std::vector<Vertex> m_Vertices = {
-        //   Positionen           Farben
-        {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-        {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-        {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}},
-        {{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}},
+        // Positionen            Farben                Texturkoordinaten (Y ist gespiegelt)
+        {{-0.5f, -0.5f, -0.5f}, {1.f, 1.f, 1.f}, {1.0f, 0.0f}},
+        {{0.5f, -0.5f, -0.5f}, {1.f, 1.f, 1.f}, {0.0f, 0.0f}},
+        {{0.5f, 0.5f, -0.5f}, {1.f, 1.f, 1.f}, {0.0f, 1.0f}},
+        {{-0.5f, 0.5f, -0.5f}, {1.f, 1.f, 1.f}, {1.0f, 1.0f}},
 
-        {{-0.5f, -0.5f, 0.5f}, {1.0f, 0.0f, 0.0f}},
-        {{0.5f, -0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
-        {{0.5f, 0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
-        {{-0.5f, 0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}};
+        {{-0.5f, -0.5f, 0.5f}, {1.f, 1.f, 1.f}, {0.0f, 0.0f}},
+        {{0.5f, -0.5f, 0.5f}, {1.f, 1.f, 1.f}, {1.0f, 0.0f}},
+        {{0.5f, 0.5f, 0.5f}, {1.f, 1.f, 1.f}, {1.0f, 1.0f}},
+        {{-0.5f, 0.5f, 0.5f}, {1.f, 1.f, 1.f}, {0.0f, 1.0f}}};
+
     const std::vector<uint16_t> m_Indices = {
         0, 1, 2, 2, 3, 0, // Hinten
         4, 5, 6, 6, 7, 4, // Vorne
@@ -161,6 +163,11 @@ private:
     void createSyncObjects();
     void updateUniformBuffer(uint32_t currentImage, Camera &camera);
     void recordCommandBuffer(uint32_t imageIndex, const std::vector<GameObject> &gameObjects);
+    void createTextureImage();
+    void createTextureImageView();
+    void createTextureSampler();
+    void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
+    void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
 
     struct QueueFamilyIndices;
     struct SwapChainSupportDetails;
