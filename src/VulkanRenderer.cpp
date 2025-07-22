@@ -361,7 +361,7 @@ void VulkanRenderer::createTextureImage()
     std::cout << "[VR] Lade Textur textures/blocks/gold_ore.png\n";
 
     int texWidth, texHeight, texChannels;
-    stbi_uc *pixels = stbi_load("../../textures/blocks/planks_oak.png",
+    stbi_uc *pixels = stbi_load("../../textures/blocks/redstone_block.png",
                                 &texWidth, &texHeight, &texChannels,
                                 STBI_rgb_alpha);
     VkDeviceSize imageSize = texWidth * texHeight * 4;
