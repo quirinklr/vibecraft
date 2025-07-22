@@ -1,21 +1,28 @@
-#include "Engine.h"
+//  main.cpp
 #include <iostream>
-#include <stdexcept>
+#include <exception>
+#include "Engine.h"
 
 int main()
 {
-    Engine engine;
+    glfwSetErrorCallback([](int code, const char *desc)
+                         { std::cerr << "GLFW‑Error (" << code << "): " << desc << std::endl; });
 
     try
     {
+        std::cout << "Starte Engine ...\n";
+        Engine engine;
         engine.run();
+        std::cout << "run() beendet\n";
     }
     catch (const std::exception &e)
     {
-        std::cerr << e.what() << std::endl;
-        std::cin.get(); // Hält die Konsole bei einem Fehler offen
-        return EXIT_FAILURE;
+        std::cerr << "\n============\nEXCEPTION: " << e.what()
+                  << "\n============\n";
+        std::cin.get(); // hier pausieren
     }
 
-    return EXIT_SUCCESS;
+    std::cout << "Programmende – <Return> druecken …";
+    std::cin.get();
+    return 0;
 }

@@ -40,6 +40,7 @@ Engine::~Engine()
 }
 void Engine::run()
 {
+    std::cout << ">>> loop begin" << std::endl;
     // ────────────────────────────
     // Setup
     // ────────────────────────────
@@ -171,62 +172,74 @@ void Engine::run()
 
         lastFrameTime = current;
     }
+
+    std::cout << "<<< loop end"   << std::endl;
 }
 
+// -----------------------------------------------------------------
+//  Lädt einen Chunk, wenn er noch nicht existiert, und startet
+//  einen Worker‑Thread für Terrain‑ und CPU‑Mesh‑Erstellung.
+// -----------------------------------------------------------------
 void Engine::generateChunk(const glm::ivec3& pos)
 {
-    // Doppelte vermeiden
-    if (m_Chunks.find(pos) != m_Chunks.end()) return;
-
-    static FastNoiseLite noise;            // einmalig initialisiert
-    static bool noiseInit = false;
-    if (!noiseInit) {
-        noise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
-        noise.SetFrequency(0.01f);
-        noiseInit = true;
-    }
+    // C++17: std::map hat noch kein contains() ⇒ find()
+    if (m_Chunks.find(pos) != m_Chunks.end())
+        return;                       // Chunk schon da
 
     auto chunk = std::make_unique<Chunk>(pos);
-    chunk->generateTerrain(noise);
-    chunk->generateMesh(m_Renderer);
-    m_Chunks[pos] = std::move(chunk);
+    Chunk* raw = chunk.get();         // rohen Zeiger für Thread
+    m_Chunks[pos] = std::move(chunk); // in Map einhängen
+
+    // Worker‑Thread: Terrain bauen + CPU‑Meshing
+    std::thread([raw]{
+        FastNoiseLite noise;
+        noise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+        noise.SetFrequency(0.01f);
+
+        raw->generateTerrain(noise);
+        raw->buildMeshCpu();
+    }).detach();                      // fire‑and‑forget
 }
 
-
-// ------------------------------------------------------------
-// Laufend aufrufen: lädt neue Chunks nach & räumt alte weg
-// ------------------------------------------------------------
 void Engine::updateChunks(const glm::vec3& cameraPos)
 {
-    // In welchen Chunk befindet sich die Kamera?
-    glm::ivec3 camChunk = {
+    // ─── 0) Kameraposition → Chunk‑Koordinate ───────────────────
+    glm::ivec3 camChunk{
         static_cast<int>(std::floor(cameraPos.x / Chunk::WIDTH)),
         0,
-        static_cast<int>(std::floor(cameraPos.z / Chunk::DEPTH))
-    };
+        static_cast<int>(std::floor(cameraPos.z / Chunk::DEPTH)) };
 
-    // --------- 1) Chunks **nachladen** ---------
+    // ─── 1) Benötigte Chunks sicherstellen ──────────────────────
     for (int dz = -RENDER_DISTANCE; dz <= RENDER_DISTANCE; ++dz)
         for (int dx = -RENDER_DISTANCE; dx <= RENDER_DISTANCE; ++dx)
-        {
-            glm::ivec3 pos = camChunk + glm::ivec3{dx, 0, dz};
-            generateChunk(pos);
-        }
+            generateChunk(camChunk + glm::ivec3{dx,0,dz});
 
-    // --------- 2) Chunks **entfernen**, die zu weit weg sind ---------
+    // ─── 2) Zu weit entfernte Chunks einsammeln ─────────────────
     std::vector<glm::ivec3> toRemove;
-    for (auto& pair : m_Chunks)
+    for (auto& [pos,chunk] : m_Chunks)
     {
-        glm::ivec3 pos = pair.first;
         int dx = pos.x - camChunk.x;
         int dz = pos.z - camChunk.z;
         if (std::max(std::abs(dx), std::abs(dz)) > RENDER_DISTANCE)
             toRemove.push_back(pos);
     }
 
+    // >>> **WICHTIG** – GPU erst fertig rechnen lassen
+    if (!toRemove.empty())
+        vkDeviceWaitIdle(m_Renderer.getDevice());
+
     for (auto& pos : toRemove)
     {
         m_Chunks[pos]->cleanup(m_Renderer.getDevice());
         m_Chunks.erase(pos);
+    }
+
+    // ─── 3) Pro Frame nur wenige CPU‑Meshes hochladen ───────────
+    int uploaded = 0;
+    for (auto& [pos,ch] : m_Chunks)
+    {
+        if (uploaded >= 2) break;            // kleines Frame‑Budget
+        if (ch->uploadMesh(m_Renderer))
+            ++uploaded;
     }
 }

@@ -13,6 +13,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <chrono>
 #include <array>
+#include <filesystem>
 #include "math/Ivec3Less.h"
 
 // Hilfsstrukturen (Definitionen)
@@ -42,8 +43,8 @@ struct VulkanRenderer::SwapChainSupportDetails
 VkVertexInputBindingDescription Vertex::getBindingDescription()
 {
     VkVertexInputBindingDescription binding{};
-    binding.binding   = 0;
-    binding.stride    = sizeof(Vertex);          // ganze Struktur pro Vertex
+    binding.binding = 0;
+    binding.stride = sizeof(Vertex); // ganze Struktur pro Vertex
     binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
     return binding;
 }
@@ -53,22 +54,22 @@ std::array<VkVertexInputAttributeDescription, 3> Vertex::getAttributeDescription
     std::array<VkVertexInputAttributeDescription, 3> attrs{};
 
     // ── Position  (location 0) ──────────────────────────────
-    attrs[0].binding  = 0;
+    attrs[0].binding = 0;
     attrs[0].location = 0;
-    attrs[0].format   = VK_FORMAT_R32G32B32_SFLOAT;   // vec3
-    attrs[0].offset   = offsetof(Vertex, pos);
+    attrs[0].format = VK_FORMAT_R32G32B32_SFLOAT; // vec3
+    attrs[0].offset = offsetof(Vertex, pos);
 
     // ── Farbe      (location 1) ─────────────────────────────
-    attrs[1].binding  = 0;
+    attrs[1].binding = 0;
     attrs[1].location = 1;
-    attrs[1].format   = VK_FORMAT_R32G32B32_SFLOAT;   // vec3
-    attrs[1].offset   = offsetof(Vertex, color);
+    attrs[1].format = VK_FORMAT_R32G32B32_SFLOAT; // vec3
+    attrs[1].offset = offsetof(Vertex, color);
 
     // ── UV         (location 2) ─────────────────────────────
-    attrs[2].binding  = 0;
+    attrs[2].binding = 0;
     attrs[2].location = 2;
-    attrs[2].format   = VK_FORMAT_R32G32_SFLOAT;      // vec2
-    attrs[2].offset   = offsetof(Vertex, texCoord);
+    attrs[2].format = VK_FORMAT_R32G32_SFLOAT; // vec2
+    attrs[2].offset = offsetof(Vertex, texCoord);
 
     return attrs;
 }
@@ -268,7 +269,7 @@ VulkanRenderer::~VulkanRenderer()
     }
 
     // Destroy index and vertex buffers
-    
+
     // --- END OF NEW PART ---
 
     vkDestroySampler(m_Device, m_TextureSampler, nullptr);
@@ -357,14 +358,16 @@ void VulkanRenderer::createSurface()
 
 void VulkanRenderer::createTextureImage()
 {
+    std::cout << "[VR] Lade Textur textures/blocks/gold_ore.png\n";
+
     int texWidth, texHeight, texChannels;
-    stbi_uc *pixels = stbi_load("textures/blocks/gold_ore.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+    stbi_uc *pixels = stbi_load("../../textures/blocks/gold_ore.png",
+                                &texWidth, &texHeight, &texChannels,
+                                STBI_rgb_alpha);
     VkDeviceSize imageSize = texWidth * texHeight * 4;
 
     if (!pixels)
-    {
-        throw std::runtime_error("failed to load texture image!");
-    }
+        throw std::runtime_error("failed to load texture image: ../../textures/blocks/gold_ore.png");
 
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingBufferMemory;
@@ -428,9 +431,6 @@ void VulkanRenderer::pickPhysicalDevice()
     for (const auto &device : devices)
     {
         auto modes = querySwapChainSupport(device).presentModes;
-        printf("Present modes for this surface:\n");
-        for (auto m : modes)
-            printf("  %d\n", m);
 
         if (isDeviceSuitable(device))
         {
@@ -670,6 +670,9 @@ void VulkanRenderer::createRenderPass()
 
 void VulkanRenderer::createGraphicsPipeline()
 {
+    std::cout << "[VR] Lade Shader ... (cwd = "
+              << std::filesystem::current_path() << ")\n";
+
     auto vertShaderCode = readFile("shaders/vert.spv");
     auto fragShaderCode = readFile("shaders/frag.spv");
     VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
@@ -824,39 +827,46 @@ uint32_t VulkanRenderer::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFla
     throw std::runtime_error("failed to find suitable memory type!");
 }
 
-void VulkanRenderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
+// VulkanRenderer.cpp
+void VulkanRenderer::copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size, VkFence *outFence)
 {
-    // Temporären Command Buffer für die Kopieroperation erstellen
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool = m_CommandPool;
-    allocInfo.commandBufferCount = 1;
+    VkCommandBufferAllocateInfo a{};
+    a.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    a.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    a.commandPool = m_CommandPool;
+    a.commandBufferCount = 1;
 
-    VkCommandBuffer commandBuffer;
-    vkAllocateCommandBuffers(m_Device, &allocInfo, &commandBuffer);
+    VkCommandBuffer cmd;
+    vkAllocateCommandBuffers(m_Device, &a, &cmd);
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VkCommandBufferBeginInfo b{};
+    b.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    b.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &b);
 
-    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+    VkBufferCopy r{0, 0, size};
+    vkCmdCopyBuffer(cmd, src, dst, 1, &r);
+    vkEndCommandBuffer(cmd);
 
-    VkBufferCopy copyRegion{};
-    copyRegion.size = size;
-    vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+    VkSubmitInfo s{};
+    s.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    s.commandBufferCount = 1;
+    s.pCommandBuffers = &cmd;
 
-    vkEndCommandBuffer(commandBuffer);
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-
-    vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(m_GraphicsQueue);
-
-    vkFreeCommandBuffers(m_Device, m_CommandPool, 1, &commandBuffer);
+    if (outFence)
+    {
+        if (*outFence == VK_NULL_HANDLE)
+        {
+            VkFenceCreateInfo f{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+            vkCreateFence(m_Device, &f, nullptr, outFence);
+        }
+        vkQueueSubmit(m_GraphicsQueue, 1, &s, *outFence);
+    }
+    else
+    {
+        vkQueueSubmit(m_GraphicsQueue, 1, &s, VK_NULL_HANDLE);
+        vkQueueWaitIdle(m_GraphicsQueue);
+    }
 }
 
 void VulkanRenderer::createUniformBuffers()
@@ -1025,71 +1035,94 @@ void VulkanRenderer::createSyncObjects()
         }
     }
 }
-void VulkanRenderer::recordCommandBuffer(uint32_t imageIndex, const std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less>& chunks) 
+void VulkanRenderer::recordCommandBuffer(
+    uint32_t imageIndex,
+    const std::map<glm::ivec3,
+                   std::unique_ptr<Chunk>,
+                   ivec3_less> &chunks)
 {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     if (vkBeginCommandBuffer(m_CommandBuffers[m_CurrentFrame], &beginInfo) != VK_SUCCESS)
         throw std::runtime_error("failed to begin recording command buffer!");
 
-    VkRenderPassBeginInfo renderPassInfo{};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    renderPassInfo.renderPass = m_RenderPass;
-    renderPassInfo.framebuffer = m_SwapChainFramebuffers[imageIndex];
-    renderPassInfo.renderArea.offset = {0, 0};
-    renderPassInfo.renderArea.extent = m_SwapChainExtent;
+    /* ------------------------------------------------ */
+    /*        Render‑Pass‑Setup (wie bisher)            */
+    /* ------------------------------------------------ */
+    VkRenderPassBeginInfo rp{};
+    rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rp.renderPass = m_RenderPass;
+    rp.framebuffer = m_SwapChainFramebuffers[imageIndex];
+    rp.renderArea = {{0, 0}, m_SwapChainExtent};
 
-    std::array<VkClearValue, 2> clearValues{};
-    clearValues[0].color = {{0.f, 0.f, 0.f, 1.f}};
-    clearValues[1].depthStencil = {1.f, 0};
-    renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-    renderPassInfo.pClearValues = clearValues.data();
+    std::array<VkClearValue, 2> clear{};
+    clear[0].color = {{0.f, 0.f, 0.f, 1.f}};
+    clear[1].depthStencil = {1.f, 0};
+    rp.clearValueCount = static_cast<uint32_t>(clear.size());
+    rp.pClearValues = clear.data();
 
-    vkCmdBeginRenderPass(m_CommandBuffers[m_CurrentFrame], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-    vkCmdBindPipeline(m_CommandBuffers[m_CurrentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, m_GraphicsPipeline);
+    vkCmdBeginRenderPass(m_CommandBuffers[m_CurrentFrame],
+                         &rp, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(m_CommandBuffers[m_CurrentFrame],
+                      VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      m_GraphicsPipeline);
 
-    VkViewport vp{};
-    vp.x = 0.f;
-    vp.y = 0.f;
-    vp.width = static_cast<float>(m_SwapChainExtent.width);
-    vp.height = static_cast<float>(m_SwapChainExtent.height);
-    vp.minDepth = 0.f;
-    vp.maxDepth = 1.f;
+    /*  Viewport / Scissor dynamisch ----------------- */
+    VkViewport vp{0, 0,
+                  (float)m_SwapChainExtent.width,
+                  (float)m_SwapChainExtent.height,
+                  0.f, 1.f};
+    VkRect2D sc{{0, 0}, m_SwapChainExtent};
     vkCmdSetViewport(m_CommandBuffers[m_CurrentFrame], 0, 1, &vp);
-
-    VkRect2D sc{};
-    sc.offset = {0, 0};
-    sc.extent = m_SwapChainExtent;
     vkCmdSetScissor(m_CommandBuffers[m_CurrentFrame], 0, 1, &sc);
 
-    vkCmdBindDescriptorSets(m_CommandBuffers[m_CurrentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineLayout, 0, 1, &m_DescriptorSets[m_CurrentFrame], 0, nullptr);
+    vkCmdBindDescriptorSets(
+        m_CommandBuffers[m_CurrentFrame],
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        m_PipelineLayout,
+        0, 1, &m_DescriptorSets[m_CurrentFrame],
+        0, nullptr);
 
-     for (const auto& pair : chunks) {
-        const auto& chunk = pair.second;
-        if (chunk->isMeshGenerated()) {
-            VkBuffer vertexBuffers[] = { chunk->getVertexBuffer() };
-            VkDeviceSize offsets[] = { 0 };
-            vkCmdBindVertexBuffers(m_CommandBuffers[m_CurrentFrame], 0, 1, vertexBuffers, offsets);
-            vkCmdBindIndexBuffer(m_CommandBuffers[m_CurrentFrame], chunk->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+    /* ----------- ALLE CHUNKS --------------- */
+    for (const auto &[pos, chunkPtr] : chunks)
+    {
+        Chunk *c = chunkPtr.get();
 
-            vkCmdPushConstants(
-                m_CommandBuffers[m_CurrentFrame],
-                m_PipelineLayout,
-                VK_SHADER_STAGE_VERTEX_BIT,
-                0,
-                sizeof(glm::mat4),
-                &chunk->getModelMatrix());
+        /* 1) evtl. Upload‑Fence prüfen               */
+        c->markReady(m_Device);
+        if (!c->isReady()) // GPU‑Kopie noch nicht fertig
+            continue;
 
-            vkCmdDrawIndexed(m_CommandBuffers[m_CurrentFrame], chunk->getIndexCount(), 1, 0, 0, 0);
-        }
+        /* 2) GPU‑Mesh binden und zeichnen           */
+        VkBuffer vb[] = {c->getVertexBuffer()};
+        VkDeviceSize off[] = {0};
+        vkCmdBindVertexBuffers(
+            m_CommandBuffers[m_CurrentFrame], 0, 1, vb, off);
+
+        vkCmdBindIndexBuffer(
+            m_CommandBuffers[m_CurrentFrame],
+            c->getIndexBuffer(), 0,
+            VK_INDEX_TYPE_UINT32);
+
+        vkCmdPushConstants(
+            m_CommandBuffers[m_CurrentFrame],
+            m_PipelineLayout,
+            VK_SHADER_STAGE_VERTEX_BIT,
+            0, sizeof(glm::mat4),
+            &c->getModelMatrix());
+
+        vkCmdDrawIndexed(
+            m_CommandBuffers[m_CurrentFrame],
+            c->getIndexCount(), 1, 0, 0, 0);
     }
 
     vkCmdEndRenderPass(m_CommandBuffers[m_CurrentFrame]);
+
     if (vkEndCommandBuffer(m_CommandBuffers[m_CurrentFrame]) != VK_SUCCESS)
         throw std::runtime_error("failed to record command buffer!");
 }
 
-void VulkanRenderer::drawFrame(Camera& camera, const std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less>& chunks)
+void VulkanRenderer::drawFrame(Camera &camera, const std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less> &chunks)
 {
     // Wait for the previous frame to finish
     vkWaitForFences(m_Device, 1, &m_InFlightFences[m_CurrentFrame], VK_TRUE, UINT64_MAX);
@@ -1148,34 +1181,86 @@ void VulkanRenderer::drawFrame(Camera& camera, const std::map<glm::ivec3, std::u
     m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
-void VulkanRenderer::createChunkMeshBuffers(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, VkBuffer& vertexBuffer, VkDeviceMemory& vertexMemory, VkBuffer& indexBuffer, VkDeviceMemory& indexMemory) {
-    VkDeviceSize vertexBufferSize = sizeof(vertices[0]) * vertices.size();
-    VkDeviceSize indexBufferSize = sizeof(indices[0]) * indices.size();
+#include "VulkanRenderer.h"
+#include "Chunk.h"
 
-    VkBuffer vertexStagingBuffer, indexStagingBuffer;
-    VkDeviceMemory vertexStagingMemory, indexStagingMemory;
+void VulkanRenderer::createChunkMeshBuffers(const std::vector<Vertex> &v,
+                                            const std::vector<uint32_t> &i,
+                                            UploadJob &up,
+                                            VkBuffer &vb, VkDeviceMemory &vm,
+                                            VkBuffer &ib, VkDeviceMemory &im)
+{
+    /* ───── leere Meshes überspringen ───── */
+    if (v.empty() || i.empty())
+    {
+        vb = ib = VK_NULL_HANDLE;
+        vm = im = VK_NULL_HANDLE;
+        up.fence = VK_NULL_HANDLE;
+        return;
+    }
 
-    createBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, vertexStagingBuffer, vertexStagingMemory);
-    void* data;
-    vkMapMemory(m_Device, vertexStagingMemory, 0, vertexBufferSize, 0, &data);
-    memcpy(data, vertices.data(), (size_t)vertexBufferSize);
-    vkUnmapMemory(m_Device, vertexStagingMemory);
+    VkDeviceSize vs = sizeof(Vertex) * v.size();
+    VkDeviceSize is = sizeof(uint32_t) * i.size();
 
-    createBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, indexStagingBuffer, indexStagingMemory);
-    vkMapMemory(m_Device, indexStagingMemory, 0, indexBufferSize, 0, &data);
-    memcpy(data, indices.data(), (size_t)indexBufferSize);
-    vkUnmapMemory(m_Device, indexStagingMemory);
+    /* ───── Staging‑Buffer anlegen + füllen ───── */
+    createBuffer(vs, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                 up.stagingVB, up.stagingVBMem);
 
-    createBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexMemory);
-    copyBuffer(vertexStagingBuffer, vertexBuffer, vertexBufferSize);
+    void *data;
+    vkMapMemory(m_Device, up.stagingVBMem, 0, vs, 0, &data);
+    memcpy(data, v.data(), static_cast<size_t>(vs));
+    vkUnmapMemory(m_Device, up.stagingVBMem);
 
-    createBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer, indexMemory);
-    copyBuffer(indexStagingBuffer, indexBuffer, indexBufferSize);
+    createBuffer(is, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                 up.stagingIB, up.stagingIBMem);
 
-    vkDestroyBuffer(m_Device, vertexStagingBuffer, nullptr);
-    vkFreeMemory(m_Device, vertexStagingMemory, nullptr);
-    vkDestroyBuffer(m_Device, indexStagingBuffer, nullptr);
-    vkFreeMemory(m_Device, indexStagingMemory, nullptr);
+    vkMapMemory(m_Device, up.stagingIBMem, 0, is, 0, &data);
+    memcpy(data, i.data(), static_cast<size_t>(is));
+    vkUnmapMemory(m_Device, up.stagingIBMem);
+
+    /* ───── Device‑lokale Ziel‑Buffer ───── */
+    createBuffer(vs, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                 vb, vm);
+
+    createBuffer(is, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                 ib, im);
+
+    /* ───── EIN Cmd‑Buffer, zwei Kopien, EIN Fence ───── */
+    VkCommandBufferAllocateInfo a{};
+    a.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    a.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    a.commandPool = m_CommandPool;
+    a.commandBufferCount = 1;
+
+    VkCommandBuffer cmd;
+    vkAllocateCommandBuffers(m_Device, &a, &cmd);
+
+    VkCommandBufferBeginInfo b{};
+    b.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    b.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &b);
+
+    VkBufferCopy cv{0, 0, vs};
+    vkCmdCopyBuffer(cmd, up.stagingVB, vb, 1, &cv);
+
+    VkBufferCopy ci{0, 0, is};
+    vkCmdCopyBuffer(cmd, up.stagingIB, ib, 1, &ci);
+
+    vkEndCommandBuffer(cmd);
+
+    VkSubmitInfo s{};
+    s.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    s.commandBufferCount = 1;
+    s.pCommandBuffers = &cmd;
+
+    VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    vkCreateFence(m_Device, &fi, nullptr, &up.fence);
+
+    vkQueueSubmit(m_GraphicsQueue, 1, &s, up.fence);
 }
 
 void VulkanRenderer::createDescriptorSetLayout()
