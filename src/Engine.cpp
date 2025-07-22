@@ -147,6 +147,9 @@ void Engine::run()
         m_Camera.setPerspectiveProjection(glm::radians(45.f),
                                           static_cast<float>(ext.width) / ext.height,
                                           0.1f, 1000.f); // Far‑Plane 1000
+        
+        // ----- NEU: Streaming auf Basis Kamera -----
+        updateChunks(cameraPos);
 
         /* --- Rendern --- */
         m_Renderer.drawFrame(m_Camera, m_Chunks);
@@ -167,5 +170,63 @@ void Engine::run()
         }
 
         lastFrameTime = current;
+    }
+}
+
+void Engine::generateChunk(const glm::ivec3& pos)
+{
+    // Doppelte vermeiden
+    if (m_Chunks.find(pos) != m_Chunks.end()) return;
+
+    static FastNoiseLite noise;            // einmalig initialisiert
+    static bool noiseInit = false;
+    if (!noiseInit) {
+        noise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+        noise.SetFrequency(0.01f);
+        noiseInit = true;
+    }
+
+    auto chunk = std::make_unique<Chunk>(pos);
+    chunk->generateTerrain(noise);
+    chunk->generateMesh(m_Renderer);
+    m_Chunks[pos] = std::move(chunk);
+}
+
+
+// ------------------------------------------------------------
+// Laufend aufrufen: lädt neue Chunks nach & räumt alte weg
+// ------------------------------------------------------------
+void Engine::updateChunks(const glm::vec3& cameraPos)
+{
+    // In welchen Chunk befindet sich die Kamera?
+    glm::ivec3 camChunk = {
+        static_cast<int>(std::floor(cameraPos.x / Chunk::WIDTH)),
+        0,
+        static_cast<int>(std::floor(cameraPos.z / Chunk::DEPTH))
+    };
+
+    // --------- 1) Chunks **nachladen** ---------
+    for (int dz = -RENDER_DISTANCE; dz <= RENDER_DISTANCE; ++dz)
+        for (int dx = -RENDER_DISTANCE; dx <= RENDER_DISTANCE; ++dx)
+        {
+            glm::ivec3 pos = camChunk + glm::ivec3{dx, 0, dz};
+            generateChunk(pos);
+        }
+
+    // --------- 2) Chunks **entfernen**, die zu weit weg sind ---------
+    std::vector<glm::ivec3> toRemove;
+    for (auto& pair : m_Chunks)
+    {
+        glm::ivec3 pos = pair.first;
+        int dx = pos.x - camChunk.x;
+        int dz = pos.z - camChunk.z;
+        if (std::max(std::abs(dx), std::abs(dz)) > RENDER_DISTANCE)
+            toRemove.push_back(pos);
+    }
+
+    for (auto& pos : toRemove)
+    {
+        m_Chunks[pos]->cleanup(m_Renderer.getDevice());
+        m_Chunks.erase(pos);
     }
 }
