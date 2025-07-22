@@ -1,4 +1,6 @@
 #include "VulkanRenderer.h"
+#include "Chunk.h"
+
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 #include <stdexcept>
@@ -11,6 +13,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <chrono>
 #include <array>
+#include "math/Ivec3Less.h"
 
 // Hilfsstrukturen (Definitionen)
 struct VulkanRenderer::QueueFamilyIndices
@@ -265,10 +268,7 @@ VulkanRenderer::~VulkanRenderer()
     }
 
     // Destroy index and vertex buffers
-    vkDestroyBuffer(m_Device, m_IndexBuffer, nullptr);
-    vkFreeMemory(m_Device, m_IndexBufferMemory, nullptr);
-    vkDestroyBuffer(m_Device, m_VertexBuffer, nullptr);
-    vkFreeMemory(m_Device, m_VertexBufferMemory, nullptr);
+    
     // --- END OF NEW PART ---
 
     vkDestroySampler(m_Device, m_TextureSampler, nullptr);
@@ -276,9 +276,6 @@ VulkanRenderer::~VulkanRenderer()
     vkDestroyImage(m_Device, m_TextureImage, nullptr);
     vkFreeMemory(m_Device, m_TextureImageMemory, nullptr);
 
-    vkDestroyDevice(m_Device, nullptr);
-
-    // 8. Destroy logical device
     vkDestroyDevice(m_Device, nullptr);
 
     // 9. Destroy surface and instance
@@ -306,8 +303,6 @@ void VulkanRenderer::initVulkan()
     createTextureImage();     // NEU
     createTextureImageView(); // NEU
     createTextureSampler();   // NEU
-    createVertexBuffer();
-    createIndexBuffer();
     createUniformBuffers();
     createDescriptorPool();
     createDescriptorSets();
@@ -864,48 +859,6 @@ void VulkanRenderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDevice
     vkFreeCommandBuffers(m_Device, m_CommandPool, 1, &commandBuffer);
 }
 
-void VulkanRenderer::createVertexBuffer()
-{
-    VkDeviceSize bufferSize = sizeof(m_Vertices[0]) * m_Vertices.size();
-
-    VkBuffer stagingBuffer;
-    VkDeviceMemory stagingBufferMemory;
-    createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
-
-    void *data;
-    vkMapMemory(m_Device, stagingBufferMemory, 0, bufferSize, 0, &data);
-    memcpy(data, m_Vertices.data(), (size_t)bufferSize);
-    vkUnmapMemory(m_Device, stagingBufferMemory);
-
-    createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_VertexBuffer, m_VertexBufferMemory);
-
-    copyBuffer(stagingBuffer, m_VertexBuffer, bufferSize);
-
-    vkDestroyBuffer(m_Device, stagingBuffer, nullptr);
-    vkFreeMemory(m_Device, stagingBufferMemory, nullptr);
-}
-
-void VulkanRenderer::createIndexBuffer()
-{
-    VkDeviceSize bufferSize = sizeof(m_Indices[0]) * m_Indices.size();
-
-    VkBuffer stagingBuffer;
-    VkDeviceMemory stagingBufferMemory;
-    createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
-
-    void *data;
-    vkMapMemory(m_Device, stagingBufferMemory, 0, bufferSize, 0, &data);
-    memcpy(data, m_Indices.data(), (size_t)bufferSize);
-    vkUnmapMemory(m_Device, stagingBufferMemory);
-
-    createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_IndexBuffer, m_IndexBufferMemory);
-
-    copyBuffer(stagingBuffer, m_IndexBuffer, bufferSize);
-
-    vkDestroyBuffer(m_Device, stagingBuffer, nullptr);
-    vkFreeMemory(m_Device, stagingBufferMemory, nullptr);
-}
-
 void VulkanRenderer::createUniformBuffers()
 {
     VkDeviceSize bufferSize = sizeof(UniformBufferObject);
@@ -1072,7 +1025,7 @@ void VulkanRenderer::createSyncObjects()
         }
     }
 }
-void VulkanRenderer::recordCommandBuffer(uint32_t imageIndex, const std::vector<GameObject> &gameObjects)
+void VulkanRenderer::recordCommandBuffer(uint32_t imageIndex, const std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less>& chunks) 
 {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -1095,11 +1048,6 @@ void VulkanRenderer::recordCommandBuffer(uint32_t imageIndex, const std::vector<
     vkCmdBeginRenderPass(m_CommandBuffers[m_CurrentFrame], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(m_CommandBuffers[m_CurrentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, m_GraphicsPipeline);
 
-    VkBuffer vertexBuffers[] = {m_VertexBuffer};
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(m_CommandBuffers[m_CurrentFrame], 0, 1, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(m_CommandBuffers[m_CurrentFrame], m_IndexBuffer, 0, VK_INDEX_TYPE_UINT16);
-
     VkViewport vp{};
     vp.x = 0.f;
     vp.y = 0.f;
@@ -1116,11 +1064,24 @@ void VulkanRenderer::recordCommandBuffer(uint32_t imageIndex, const std::vector<
 
     vkCmdBindDescriptorSets(m_CommandBuffers[m_CurrentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineLayout, 0, 1, &m_DescriptorSets[m_CurrentFrame], 0, nullptr);
 
-    for (const auto &obj : gameObjects)
-    {
-        const glm::mat4 &model = obj.getModelMatrix();
-        vkCmdPushConstants(m_CommandBuffers[m_CurrentFrame], m_PipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
-        vkCmdDrawIndexed(m_CommandBuffers[m_CurrentFrame], static_cast<uint32_t>(m_Indices.size()), 1, 0, 0, 0);
+     for (const auto& pair : chunks) {
+        const auto& chunk = pair.second;
+        if (chunk->isMeshGenerated()) {
+            VkBuffer vertexBuffers[] = { chunk->getVertexBuffer() };
+            VkDeviceSize offsets[] = { 0 };
+            vkCmdBindVertexBuffers(m_CommandBuffers[m_CurrentFrame], 0, 1, vertexBuffers, offsets);
+            vkCmdBindIndexBuffer(m_CommandBuffers[m_CurrentFrame], chunk->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
+            vkCmdPushConstants(
+                m_CommandBuffers[m_CurrentFrame],
+                m_PipelineLayout,
+                VK_SHADER_STAGE_VERTEX_BIT,
+                0,
+                sizeof(glm::mat4),
+                &chunk->getModelMatrix());
+
+            vkCmdDrawIndexed(m_CommandBuffers[m_CurrentFrame], chunk->getIndexCount(), 1, 0, 0, 0);
+        }
     }
 
     vkCmdEndRenderPass(m_CommandBuffers[m_CurrentFrame]);
@@ -1128,7 +1089,7 @@ void VulkanRenderer::recordCommandBuffer(uint32_t imageIndex, const std::vector<
         throw std::runtime_error("failed to record command buffer!");
 }
 
-void VulkanRenderer::drawFrame(Camera &camera, const std::vector<GameObject> &gameObjects)
+void VulkanRenderer::drawFrame(Camera& camera, const std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less>& chunks)
 {
     // Wait for the previous frame to finish
     vkWaitForFences(m_Device, 1, &m_InFlightFences[m_CurrentFrame], VK_TRUE, UINT64_MAX);
@@ -1149,7 +1110,7 @@ void VulkanRenderer::drawFrame(Camera &camera, const std::vector<GameObject> &ga
     vkResetFences(m_Device, 1, &m_InFlightFences[m_CurrentFrame]);
 
     vkResetCommandBuffer(m_CommandBuffers[m_CurrentFrame], 0);
-    recordCommandBuffer(imageIndex, gameObjects);
+    recordCommandBuffer(imageIndex, chunks);
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -1185,6 +1146,36 @@ void VulkanRenderer::drawFrame(Camera &camera, const std::vector<GameObject> &ga
     vkQueuePresentKHR(m_PresentQueue, &presentInfo);
 
     m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+}
+
+void VulkanRenderer::createChunkMeshBuffers(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, VkBuffer& vertexBuffer, VkDeviceMemory& vertexMemory, VkBuffer& indexBuffer, VkDeviceMemory& indexMemory) {
+    VkDeviceSize vertexBufferSize = sizeof(vertices[0]) * vertices.size();
+    VkDeviceSize indexBufferSize = sizeof(indices[0]) * indices.size();
+
+    VkBuffer vertexStagingBuffer, indexStagingBuffer;
+    VkDeviceMemory vertexStagingMemory, indexStagingMemory;
+
+    createBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, vertexStagingBuffer, vertexStagingMemory);
+    void* data;
+    vkMapMemory(m_Device, vertexStagingMemory, 0, vertexBufferSize, 0, &data);
+    memcpy(data, vertices.data(), (size_t)vertexBufferSize);
+    vkUnmapMemory(m_Device, vertexStagingMemory);
+
+    createBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, indexStagingBuffer, indexStagingMemory);
+    vkMapMemory(m_Device, indexStagingMemory, 0, indexBufferSize, 0, &data);
+    memcpy(data, indices.data(), (size_t)indexBufferSize);
+    vkUnmapMemory(m_Device, indexStagingMemory);
+
+    createBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexMemory);
+    copyBuffer(vertexStagingBuffer, vertexBuffer, vertexBufferSize);
+
+    createBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer, indexMemory);
+    copyBuffer(indexStagingBuffer, indexBuffer, indexBufferSize);
+
+    vkDestroyBuffer(m_Device, vertexStagingBuffer, nullptr);
+    vkFreeMemory(m_Device, vertexStagingMemory, nullptr);
+    vkDestroyBuffer(m_Device, indexStagingBuffer, nullptr);
+    vkFreeMemory(m_Device, indexStagingMemory, nullptr);
 }
 
 void VulkanRenderer::createDescriptorSetLayout()

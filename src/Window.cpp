@@ -2,16 +2,19 @@
 #include <stdexcept>
 
 Window::Window(int width, int height, std::string title)
-    : m_Width{ width }, m_Height{ height }, m_Title{ title } {
+    : m_Width{width}, m_Height{height}, m_Title{title}
+{
     initWindow();
 }
 
-Window::~Window() {
+Window::~Window()
+{
     glfwDestroyWindow(m_Window);
     glfwTerminate();
 }
 
-void Window::initWindow() {
+void Window::initWindow()
+{
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API); // Kein OpenGL Kontext
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);   // Größenänderung vorerst deaktiviert
@@ -19,8 +22,10 @@ void Window::initWindow() {
     m_Window = glfwCreateWindow(m_Width, m_Height, m_Title.c_str(), nullptr, nullptr);
 }
 
-void Window::createWindowSurface(VkInstance instance, VkSurfaceKHR* surface) {
-    if (glfwCreateWindowSurface(instance, m_Window, nullptr, surface) != VK_SUCCESS) {
+void Window::createWindowSurface(VkInstance instance, VkSurfaceKHR *surface)
+{
+    if (glfwCreateWindowSurface(instance, m_Window, nullptr, surface) != VK_SUCCESS)
+    {
         throw std::runtime_error("failed to create window surface!");
     }
 }

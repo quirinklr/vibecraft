@@ -1,0 +1,163 @@
+Refactor the entire project to implement a chunk-based procedural world with greedy meshing, following these steps: 1. Delete the files `src/GameObject.h` and `src/GameObject.cpp`. 2. Create a new file `src/Chunk.h` with this exact content: R"(#pragma once
+#include <vulkan/vulkan.h>
+#include <glm/glm.hpp>
+#include <vector>
+#include "VulkanRenderer.h"
+
+using BlockID = uint8_t;
+class FastNoiseLite;
+
+class Chunk {
+public:
+    static constexpr int WIDTH = 32;
+    static constexpr int HEIGHT = 256;
+    static constexpr int DEPTH = 32;
+
+    Chunk(glm::ivec3 position);
+    ~Chunk();
+
+    void generateTerrain(FastNoiseLite& noise);
+    void generateMesh(VulkanRenderer& renderer);
+    void cleanup(VkDevice device);
+
+    bool isMeshGenerated() const { return m_IndexCount > 0; }
+    const VkBuffer& getVertexBuffer() const { return m_VertexBuffer; }
+    const VkBuffer& getIndexBuffer() const { return m_IndexBuffer; }
+    uint32_t getIndexCount() const { return m_IndexCount; }
+    const glm::mat4& getModelMatrix() const { return m_ModelMatrix; }
+
+private:
+    BlockID getBlock(int x, int y, int z) const;
+
+    glm::ivec3 m_Position;
+    std::vector<BlockID> m_Blocks;
+    glm::mat4 m_ModelMatrix;
+
+    VkBuffer m_VertexBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory m_VertexBufferMemory = VK_NULL_HANDLE;
+    VkBuffer m_IndexBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory m_IndexBufferMemory = VK_NULL_HANDLE;
+    uint32_t m_IndexCount = 0;
+};
+)". 3. Create a new file `src/Chunk.cpp` with this exact content: R"(#include "Chunk.h"
+#include "libs/FastNoiseLite.h"
+
+Chunk::Chunk(glm::ivec3 position) : m_Position(position) {
+    m_Blocks.resize(WIDTH * HEIGHT * DEPTH, 0);
+    m_ModelMatrix = glm::translate(glm::mat4(1.f), glm::vec3(position.x * WIDTH, position.y * HEIGHT, position.z * DEPTH));
+}
+
+Chunk::~Chunk() {}
+
+BlockID Chunk::getBlock(int x, int y, int z) const {
+    if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT || z < 0 || z >= DEPTH) {
+        return 0;
+    }
+    return m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x];
+}
+
+void Chunk::generateTerrain(FastNoiseLite& noise) {
+    for (int x = 0; x < WIDTH; ++x) {
+        for (int z = 0; z < DEPTH; ++z) {
+            float globalX = (float)(m_Position.x * WIDTH + x);
+            float globalZ = (float)(m_Position.z * DEPTH + z);
+
+            float heightNoise = noise.GetNoise(globalX, globalZ);
+            int groundHeight = 64 + static_cast<int>(heightNoise * 30.f);
+
+            for (int y = 0; y < groundHeight; ++y) {
+                 m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x] = 1; // Stein
+            }
+        }
+    }
+}
+
+void Chunk::generateMesh(VulkanRenderer& renderer) {
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+    std::vector<bool> visited(WIDTH * HEIGHT * DEPTH, false);
+
+    for (int face = 0; face < 6; ++face) {
+        int u = (face + 1) % 3;
+        int v = (face + 2) % 3;
+        int d = face / 2;
+
+        glm::ivec3 dir(0);
+        dir[d] = 1 - 2 * (face % 2);
+
+        glm::ivec3 x(0);
+        glm::ivec3 q(0);
+        q[d] = 1;
+
+        for (x[d] = -1; x[d] < WIDTH;) {
+            int n = 0;
+            for (x[v] = 0; x[v] < HEIGHT; ++x[v]) {
+                for (x[u] = 0; x[u] < DEPTH; ++x[u]) {
+                    BlockID currentBlock = getBlock(x[0], x[1], x[2]);
+                    BlockID adjacentBlock = getBlock(x[0] + dir[0], x[1] + dir[1], x[2] + dir[2]);
+                    bool isOpaque = currentBlock != 0;
+                    bool isAdjacentOpaque = adjacentBlock != 0;
+
+                    if (isOpaque == isAdjacentOpaque || visited[x[1] * WIDTH * DEPTH + x[2] * WIDTH + x[0]]) {
+                        continue;
+                    }
+                    
+                    int w, h;
+                    for (w = 1; x[u] + w < DEPTH && getBlock(x[0] + w * q[u], x[1], x[2] + w * q[u]) == currentBlock && !visited[x[1] * WIDTH * DEPTH + (x[2] + w * q[u]) * WIDTH + (x[0] + w * q[u])]; ++w) {}
+                    
+                    bool done = false;
+                    for (h = 1; x[v] + h < HEIGHT; ++h) {
+                        for (int k = 0; k < w; ++k) {
+                            if (getBlock(x[0] + k * q[u], x[1] + h, x[2] + k * q[u]) != currentBlock || visited[(x[1] + h) * WIDTH * DEPTH + (x[2] + k * q[u]) * WIDTH + (x[0] + k * q[u])]) {
+                                done = true;
+                                break;
+                            }
+                        }
+                        if (done) break;
+                    }
+
+                    glm::vec3 du(0), dv(0);
+                    du[u] = 1;
+                    dv[v] = 1;
+
+                    glm::vec3 v1 = glm::vec3(x);
+                    glm::vec3 v2 = v1 + du * (float)w;
+                    glm::vec3 v3 = v1 + du * (float)w + dv * (float)h;
+                    glm::vec3 v4 = v1 + dv * (float)h;
+                    
+                    if (dir[d] > 0) {
+                        indices.push_back(vertices.size() + 0); indices.push_back(vertices.size() + 2); indices.push_back(vertices.size() + 1);
+                        indices.push_back(vertices.size() + 0); indices.push_back(vertices.size() + 3); indices.push_back(vertices.size() + 2);
+                    } else {
+                        indices.push_back(vertices.size() + 0); indices.push_back(vertices.size() + 1); indices.push_back(vertices.size() + 2);
+                        indices.push_back(vertices.size() + 2); indices.push_back(vertices.size() + 3); indices.push_back(vertices.size() + 0);
+                    }
+                    
+                    vertices.push_back({v1, {1,1,1}, {0,0}});
+                    vertices.push_back({v2, {1,1,1}, {(float)w,0}});
+                    vertices.push_back({v3, {1,1,1}, {(float)w,(float)h}});
+                    vertices.push_back({v4, {1,1,1}, {0,(float)h}});
+
+                    for (int l = 0; l < h; ++l) {
+                        for (int k = 0; k < w; ++k) {
+                            visited[(x[1] + l) * WIDTH * DEPTH + (x[2] + k * q[u]) * WIDTH + (x[0] + k * q[u])] = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    if (indices.empty()) return;
+    
+    m_IndexCount = indices.size();
+    renderer.createChunkMeshBuffers(vertices, indices, m_VertexBuffer, m_VertexBufferMemory, m_IndexBuffer, m_IndexBufferMemory);
+}
+
+void Chunk::cleanup(VkDevice device) {
+    vkDestroyBuffer(device, m_IndexBuffer, nullptr);
+    vkFreeMemory(device, m_IndexBufferMemory, nullptr);
+    vkDestroyBuffer(device, m_VertexBuffer, nullptr);
+    vkFreeMemory(device, m_VertexBufferMemory, nullptr);
+}
+)". 4. In `CMakeLists.txt`, replace the `add_executable` block with: `add_executable(Minecraft src/main.cpp src/Engine.cpp src/Window.cpp src/VulkanRenderer.cpp src/Camera.cpp src/Chunk.cpp)`. 5. In `Engine.h`, replace `std::vector<GameObject> m_GameObjects;` with `#include <map>` and `std::map<glm::ivec3, Chunk> m_Chunks;`. Also `#include "Chunk.h"`. 6. In `Engine.cpp`, `#include "FastNoiseLite.h"`. Then, replace the entire `Engine::Engine()` constructor with: `Engine::Engine() { glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED); FastNoiseLite noise; noise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2); noise.SetFrequency(0.01f); const int worldSize = 8; for (int x = -worldSize/2; x < worldSize/2; ++x) for (int z = -worldSize/2; z < worldSize/2; ++z) { glm::ivec3 pos = {x, 0, z}; m_Chunks.emplace(std::piecewise_construct, std::forward_as_tuple(pos), std::forward_as_tuple(pos)); m_Chunks.at(pos).generateTerrain(noise); m_Chunks.at(pos).generateMesh(m_Renderer); } }`. And in `Engine::run()`, replace the `drawFrame` call with `m_Renderer.drawFrame(m_Camera, m_Chunks);`. 7. In `VulkanRenderer.h`, add a forward declaration `class Chunk;` at the top. Change `drawFrame` to accept `const std::map<glm::ivec3, Chunk>& chunks`. Add a new public function: `void createChunkMeshBuffers(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, VkBuffer& vertexBuffer, VkDeviceMemory& vertexMemory, VkBuffer& indexBuffer, VkDeviceMemory& indexMemory);`. Change `recordCommandBuffer` to accept `const std::map<glm::ivec3, Chunk>& chunks`. 8. In `VulkanRenderer.cpp`, first add `#include "Chunk.h"`. Then, add the full implementation for `createChunkMeshBuffers`: `void VulkanRenderer::createChunkMeshBuffers(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, VkBuffer& vertexBuffer, VkDeviceMemory& vertexMemory, VkBuffer& indexBuffer, VkDeviceMemory& indexMemory) { VkDeviceSize vertexBufferSize = sizeof(vertices[0]) * vertices.size(); VkBuffer vertexStagingBuffer; VkDeviceMemory vertexStagingBufferMemory; createBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, vertexStagingBuffer, vertexStagingBufferMemory); void* data; vkMapMemory(m_Device, vertexStagingBufferMemory, 0, vertexBufferSize, 0, &data); memcpy(data, vertices.data(), (size_t)vertexBufferSize); vkUnmapMemory(m_Device, vertexStagingBufferMemory); createBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexMemory); copyBuffer(vertexStagingBuffer, vertexBuffer, vertexBufferSize); vkDestroyBuffer(m_Device, vertexStagingBuffer, nullptr); vkFreeMemory(m_Device, vertexStagingBufferMemory, nullptr); VkDeviceSize indexBufferSize = sizeof(indices[0]) * indices.size(); VkBuffer indexStagingBuffer; VkDeviceMemory indexStagingBufferMemory; createBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, indexStagingBuffer, indexStagingBufferMemory); vkMapMemory(m_Device, indexStagingBufferMemory, 0, indexBufferSize, 0, &data); memcpy(data, indices.data(), (size_t)indexBufferSize); vkUnmapMemory(m_Device, indexStagingBufferMemory); createBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer, indexMemory); copyBuffer(indexStagingBuffer, indexBuffer, indexBufferSize); vkDestroyBuffer(m_Device, indexStagingBuffer, nullptr); vkFreeMemory(m_Device, indexStagingBufferMemory, nullptr); }`. Change the signature of `drawFrame` and `recordCommandBuffer` to accept `const std::map<glm::ivec3, Chunk>& chunks`. Finally, replace the `for` loop inside `recordCommandBuffer` with this new loop: `for (const auto& pair : chunks) { const Chunk& chunk = pair.second; if (!chunk.isMeshGenerated()) continue; vkCmdBindVertexBuffers(m_CommandBuffers[m_CurrentFrame], 0, 1, &chunk.getVertexBuffer(), offsets); vkCmdBindIndexBuffer(m_CommandBuffers[m_CurrentFrame], chunk.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32); vkCmdPushConstants(m_CommandBuffers[m_CurrentFrame], m_PipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &chunk.getModelMatrix()); vkCmdDrawIndexed(m_CommandBuffers[m_CurrentFrame], chunk.getIndexCount(), 1, 0, 0, 0); }`. Also, in `VulkanRenderer::~VulkanRenderer()`, remove the destruction of the old, single `m_VertexBuffer` and `m_IndexBuffer`.

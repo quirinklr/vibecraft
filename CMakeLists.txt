@@ -25,7 +25,7 @@ add_executable(Minecraft
     src/Window.cpp
     src/VulkanRenderer.cpp
     src/Camera.cpp
-    src/GameObject.cpp # <-- DIESE ZEILE HINZUFÜGEN
+    src/Chunk.cpp 
 )
 
 # SCHRITT 3: Include-Verzeichnisse hinzufügen

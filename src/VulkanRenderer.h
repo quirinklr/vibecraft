@@ -1,26 +1,27 @@
 #pragma once
 
-#include "Window.h"
+#include "Window.h" // Nötig für m_Window
 #include "Settings.h"
-#include "GameObject.h"
 #include "Camera.h"
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <glm/glm.hpp>
+#include <glm/glm.hpp> // Nur die Kern-glm
 #include <vector>
 #include <array>
+#include <map>
+#include <memory>
+#include "math/Ivec3Less.h"
 
-//   wie viele Tiles (16×16‑Pixel Bilder) liegen pro Reihe der Atlas‑Textur?
-constexpr int ATLAS_TILES = 1; // bei 256‑px‑Atlas -> 16 Tiles á 16px
+class Chunk; // Forward declaration
 
 struct Vertex
 {
-    glm::vec3 pos;      // Position
-    glm::vec3 color;    // Debug‑Farbe (kann später raus)
-    glm::vec2 texCoord; // *****  NEU  *****
+    glm::vec3 pos;
+    glm::vec3 color;
+    glm::vec2 texCoord;
 
     static VkVertexInputBindingDescription getBindingDescription();
-    static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescriptions(); // WICHTIG: 2 -> 3
+    static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescriptions();
 };
 
 struct UniformBufferObject
@@ -38,7 +39,13 @@ public:
     VulkanRenderer(const VulkanRenderer &) = delete;
     VulkanRenderer &operator=(const VulkanRenderer &) = delete;
 
-    void drawFrame(Camera &camera, const std::vector<GameObject> &gameObjects);
+    void drawFrame(
+        Camera &camera,
+        const std::map<glm::ivec3,
+                       std::unique_ptr<Chunk>,
+                       ivec3_less> &chunks);
+    void createChunkMeshBuffers(const std::vector<Vertex> &vertices, const std::vector<uint32_t> &indices, VkBuffer &vertexBuffer, VkDeviceMemory &vertexMemory, VkBuffer &indexBuffer, VkDeviceMemory &indexMemory);
+    VkDevice getDevice() const { return m_Device; }
 
 private:
     Window &m_Window;
@@ -97,11 +104,6 @@ private:
     std::vector<VkFence> m_ImagesInFlight;
     uint32_t m_CurrentFrame = 0;
 
-    VkBuffer m_VertexBuffer;
-    VkDeviceMemory m_VertexBufferMemory;
-    VkBuffer m_IndexBuffer;
-    VkDeviceMemory m_IndexBufferMemory;
-
     std::vector<VkBuffer> m_UniformBuffers;
     std::vector<VkDeviceMemory> m_UniformBuffersMemory;
     VkDescriptorSetLayout m_DescriptorSetLayout;
@@ -114,75 +116,6 @@ private:
     VkSampler m_TextureSampler;
 
     const int MAX_FRAMES_IN_FLIGHT = 2;
-    // ---------- NEU: Helfer, um atlas‑korrekte UVs zu bauen ----------
-    static glm::vec2 tileUV(glm::ivec2 tile, glm::vec2 local)
-    {
-        const float ts = 1.0f / ATLAS_TILES;   // Tile‑Breite im UV‑Raum
-        return (glm::vec2(tile) + local) * ts; // Offset + lokaler Anteil
-    }
-
-    // ---------- NEU: erzeugt 36 Vertices für EINEN Würfel ----------
-    static std::vector<Vertex> makeCube(glm::ivec2 side,
-                                        glm::ivec2 top,
-                                        glm::ivec2 bottom)
-    {
-        using V = Vertex;
-        const glm::vec3 C = {1, 1, 1}; // Farbe vorerst weiß, wird eh per Textur ersetzt
-        std::vector<V> out;
-        out.reserve(36);
-
-        auto quad = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c, glm::vec3 d,
-                        glm::ivec2 tile)
-        {
-            //     a----b    Wir wollen zwei Triangles a‑b‑c und c‑d‑a
-            //     |   /|
-            //     d--c
-            out.push_back({a, C, tileUV(tile, {0, 0})});
-            out.push_back({b, C, tileUV(tile, {1, 0})});
-            out.push_back({c, C, tileUV(tile, {1, 1})});
-
-            out.push_back({c, C, tileUV(tile, {1, 1})});
-            out.push_back({d, C, tileUV(tile, {0, 1})});
-            out.push_back({a, C, tileUV(tile, {0, 0})});
-        };
-
-        // Würfel‑Ecken ( +/-0.5 um Mittelpunkt )
-        glm::vec3 p000{-.5, -.5, -.5}, p001{-.5, -.5, .5},
-            p010{-.5, .5, -.5}, p011{-.5, .5, .5},
-            p100{.5, -.5, -.5}, p101{.5, -.5, .5},
-            p110{.5, .5, -.5}, p111{.5, .5, .5};
-
-        // +X  (rechte Seite)
-        quad(p100, p101, p111, p110, side);
-        // -X  (linke Seite)
-        quad(p001, p000, p010, p011, side);
-        // +Z  (Vorderseite)
-        quad(p101, p001, p011, p111, side);
-        // -Z  (Rückseite)
-        quad(p000, p100, p110, p010, side);
-        // +Y  (Deckel)
-        quad(p110, p111, p011, p010, top);
-        // -Y  (Boden)
-        quad(p000, p001, p101, p100, bottom);
-
-        return out;
-    }
-
-    // -----------------------------
-    //          **AUFRUF**
-    // -----------------------------
-    std::vector<Vertex> m_Vertices = makeCube(
-        /*side  */ {1, 3}, // Diamant‑Erz‑Tile in deinem Atlas
-        /*top   */ {1, 3},
-        /*bottom*/ {1, 3});
-
-    const std::vector<uint16_t> m_Indices = {
-        0, 1, 2, 3, 4, 5,
-        6, 7, 8, 9, 10, 11,
-        12, 13, 14, 15, 16, 17,
-        18, 19, 20, 21, 22, 23,
-        24, 25, 26, 27, 28, 29,
-        30, 31, 32, 33, 34, 35};
 
     const std::vector<const char *> m_DeviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
@@ -215,7 +148,12 @@ private:
     void createCommandBuffers();
     void createSyncObjects();
     void updateUniformBuffer(uint32_t currentImage, Camera &camera);
-    void recordCommandBuffer(uint32_t imageIndex, const std::vector<GameObject> &gameObjects);
+    void recordCommandBuffer(
+        uint32_t imageIndex,
+        const std::map<glm::ivec3,
+                       std::unique_ptr<Chunk>,
+                       ivec3_less> &chunks);
+
     void createTextureImage();
     void createTextureImageView();
     void createTextureSampler();

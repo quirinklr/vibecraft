@@ -1,154 +1,171 @@
 #include "Engine.h"
-#include "GameObject.h" // -> HINZUFÜGEN
+#include "FastNoiseLite.h"
 #include <iostream>
 #include <glm/gtc/constants.hpp>
 #include <string>
 #include <sstream>
 #include <thread>
 #include <chrono>
+#include "math/Ivec3Less.h"
+#include <iomanip>
 
 Engine::Engine()
 {
     glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
-    for (int z = 0; z < 4; ++z)
-        for (int y = 0; y < 4; ++y)
-            for (int x = 0; x < 4; ++x)
-            {
-                GameObject b;
-                b.position = {static_cast<float>(x), static_cast<float>(y),
-                              static_cast<float>(-z)}; // -z damit Welt nach vorne wächst
-                m_GameObjects.push_back(b);
-            }
+    FastNoiseLite noise;
+    noise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+    noise.SetFrequency(0.01f);
+
+    const int worldSize = 8;
+    for (int x = -worldSize / 2; x < worldSize / 2; ++x)
+    {
+        for (int z = -worldSize / 2; z < worldSize / 2; ++z)
+        {
+            glm::ivec3 pos = {x, 0, z};
+            auto chunk = std::make_unique<Chunk>(pos);
+            chunk->generateTerrain(noise);
+            chunk->generateMesh(m_Renderer);
+            m_Chunks[pos] = std::move(chunk);
+        }
+    }
 }
 
 Engine::~Engine()
 {
-    // Destruktor bleibt leer
+    for (auto &pair : m_Chunks)
+    {
+        pair.second->cleanup(m_Renderer.getDevice());
+    }
 }
-
 void Engine::run()
 {
-    bool mouseCaptured = true;
+    // ────────────────────────────
+    // Setup
+    // ────────────────────────────
     glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    bool mouseCaptured = true;
 
     float lastFrameTime = static_cast<float>(glfwGetTime());
+
     double lastX, lastY;
     glfwGetCursorPos(m_Window.getGLFWwindow(), &lastX, &lastY);
-    float yaw = -glm::half_pi<float>(); // -90°, Blick Richtung -Z
+
+    float yaw = -glm::half_pi<float>(); // -90°, Blick -Z
     float pitch = 0.0f;
 
-    glm::vec3 cameraPos = {0.0f, 0.0f, 3.0f}; // Startposition etwas weiter weg
-    float moveSpeed = 2.5f;
+    glm::vec3 cameraPos = {0.0f, 100.0f, 3.0f}; // ► Start über Terrain
 
+    // Bewegungsparameter
+    float baseSpeed = 10.0f;      // m/s
+    const float boostMul = 4.0f;  // Sprint (Shift hält)
+    const float speedStep = 2.0f; // Q/E‑Änderung pro Sek.
+
+    // FPS‑Anzeige
     float lastFPSTime = lastFrameTime;
     int frameCount = 0;
 
-    constexpr float baseMouseScale = 0.0005f;
+    constexpr float mouseScale = 0.0005f;
 
+    // ────────────────────────────
+    // Haupt‑Loop
+    // ────────────────────────────
     while (!m_Window.shouldClose())
     {
-        float currentFrameTime = static_cast<float>(glfwGetTime());
-        float deltaTime = currentFrameTime - lastFrameTime;
+        float current = static_cast<float>(glfwGetTime());
+        float dt = current - lastFrameTime;
 
         glfwPollEvents();
 
+        /* --- Maus‑Capture toggeln --- */
         if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_ESCAPE) == GLFW_PRESS)
         {
             glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
             mouseCaptured = false;
         }
-        if (!mouseCaptured && glfwGetMouseButton(m_Window.getGLFWwindow(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
+        if (!mouseCaptured &&
+            glfwGetMouseButton(m_Window.getGLFWwindow(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
         {
             glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
             mouseCaptured = true;
             glfwGetCursorPos(m_Window.getGLFWwindow(), &lastX, &lastY);
         }
 
+        /* --- Blickrichtung --- */
         if (mouseCaptured)
         {
-            double mouseX, mouseY;
-            glfwGetCursorPos(m_Window.getGLFWwindow(), &mouseX, &mouseY);
+            double mx, my;
+            glfwGetCursorPos(m_Window.getGLFWwindow(), &mx, &my);
 
-            float deltaX = static_cast<float>(mouseX - lastX);
-            float deltaY = static_cast<float>(mouseY - lastY);
+            float dX = static_cast<float>(mx - lastX);
+            float dY = static_cast<float>(my - lastY);
+            lastX = mx;
+            lastY = my;
 
-            lastX = mouseX;
-            lastY = mouseY;
+            yaw -= dX * m_Settings.mouseSensitivityX * mouseScale;
+            pitch += (m_Settings.invertMouseY ? dY : -dY) * m_Settings.mouseSensitivityY * mouseScale;
 
-            float yawScale = m_Settings.mouseSensitivityX * baseMouseScale;
-            float pitchScale = m_Settings.mouseSensitivityY * baseMouseScale;
-
-            yaw -= deltaX * yawScale;
-
-            if (m_Settings.invertMouseY)
-            {
-                pitch += deltaY * pitchScale;
-            }
-            else
-            {
-                pitch -= deltaY * pitchScale;
-            }
-
-            pitch = glm::clamp(pitch, -glm::half_pi<float>() + 0.01f, glm::half_pi<float>() - 0.01f);
+            pitch = glm::clamp(pitch,
+                               -glm::half_pi<float>() + 0.01f,
+                               glm::half_pi<float>() - 0.01f);
         }
 
-        glm::vec3 direction;
-        direction.x = cos(yaw) * cos(pitch);
-        direction.y = sin(pitch);
-        direction.z = sin(yaw) * cos(pitch);
-        glm::vec3 cameraFront = glm::normalize(direction);
-        glm::vec3 cameraRight = glm::normalize(glm::cross(cameraFront, glm::vec3(0.f, 1.f, 0.f)));
-        glm::vec3 cameraUp = glm::normalize(glm::cross(cameraRight, cameraFront));
+        /* --- Richtungs‑Vektoren --- */
+        glm::vec3 forward{
+            cos(yaw) * cos(pitch),
+            sin(pitch),
+            sin(yaw) * cos(pitch)};
+        forward = glm::normalize(forward);
 
+        glm::vec3 right = glm::normalize(glm::cross(forward, {0.f, 1.f, 0.f}));
+        glm::vec3 up = glm::normalize(glm::cross(right, forward));
+
+        /* --- Laufgeschwindigkeit anpassen (E/Q) --- */
+        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_E) == GLFW_PRESS)
+            baseSpeed += speedStep * dt * 10.f; // schneller
+        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_Q) == GLFW_PRESS)
+            baseSpeed = glm::max(1.f, baseSpeed - speedStep * dt * 10.f); // langsamer
+
+        float speed = baseSpeed;
+        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
+            speed *= boostMul; // Sprint
+
+        /* --- WASD Bewegung --- */
         if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_W) == GLFW_PRESS)
-        {
-            cameraPos -= cameraFront * moveSpeed * deltaTime;
-        }
+            cameraPos += forward * speed * dt;
         if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_S) == GLFW_PRESS)
-        {
-            cameraPos += cameraFront * moveSpeed * deltaTime;
-        }
+            cameraPos -= forward * speed * dt;
         if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_A) == GLFW_PRESS)
-        {
-            cameraPos -= cameraRight * moveSpeed * deltaTime;
-        }
+            cameraPos -= right * speed * dt;
         if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_D) == GLFW_PRESS)
-        {
-            cameraPos += cameraRight * moveSpeed * deltaTime;
-        }
+            cameraPos += right * speed * dt;
 
-        m_Camera.setViewDirection(cameraPos, cameraFront, cameraUp);
+        /* --- Kamera setzen --- */
+        m_Camera.setViewDirection(cameraPos, forward, up);
 
-        auto extent = m_Window.getExtent();
-        m_Camera.setPerspectiveProjection(glm::radians(45.f), (float)extent.width / (float)extent.height, 0.1f, 100.f);
+        auto ext = m_Window.getExtent();
+        m_Camera.setPerspectiveProjection(glm::radians(45.f),
+                                          static_cast<float>(ext.width) / ext.height,
+                                          0.1f, 1000.f); // Far‑Plane 1000
 
-        auto frameStart = std::chrono::high_resolution_clock::now();
+        /* --- Rendern --- */
+        m_Renderer.drawFrame(m_Camera, m_Chunks);
 
-        m_Renderer.drawFrame(m_Camera, m_GameObjects);
-
+        /* --- FPS‑Anzeige --- */
         frameCount++;
-        if (currentFrameTime - lastFPSTime >= 1.0f)
+        if (current - lastFPSTime >= 1.0f)
         {
-            std::stringstream titleStream;
-            titleStream.precision(1);
-            titleStream << std::fixed << "Minecraft Vibe Engine | FPS: " << frameCount
-                        << " | Yaw: " << glm::degrees(yaw)
-                        << " | Pitch: " << glm::degrees(pitch);
-            glfwSetWindowTitle(m_Window.getGLFWwindow(), titleStream.str().c_str());
+            std::stringstream ss;
+            ss << std::fixed << std::setprecision(1)
+               << "Minecraft Vibe Engine | FPS: " << frameCount
+               << " | Yaw: " << glm::degrees(yaw)
+               << " | Pitch: " << glm::degrees(pitch)
+               << " | Speed: " << baseSpeed;
+            glfwSetWindowTitle(m_Window.getGLFWwindow(), ss.str().c_str());
             frameCount = 0;
-            lastFPSTime = currentFrameTime;
+            lastFPSTime = current;
         }
 
-        if (!m_Settings.vsync && m_Settings.fpsCap > 0)
-        {
-            auto minFrameTime = std::chrono::duration<float>(1.0f / m_Settings.fpsCap);
-            auto frameEnd = std::chrono::high_resolution_clock::now();
-            auto spent = frameEnd - frameStart;
-            if (spent < minFrameTime)
-                std::this_thread::sleep_for(minFrameTime - spent);
-        }
-
-        lastFrameTime = currentFrameTime;
+        lastFrameTime = current;
     }
 }
