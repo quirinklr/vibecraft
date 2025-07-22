@@ -32,35 +32,42 @@ struct VulkanRenderer::SwapChainSupportDetails
     std::vector<VkPresentModeKHR> presentModes;
 };
 
+// ======================================================================
+//  Vertex‑Funktionen  – stehen *einmalig* in VulkanRenderer.cpp
+// ======================================================================
+
 VkVertexInputBindingDescription Vertex::getBindingDescription()
 {
-    VkVertexInputBindingDescription bindingDescription{};
-    bindingDescription.binding = 0;
-    bindingDescription.stride = sizeof(Vertex);
-    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    return bindingDescription;
+    VkVertexInputBindingDescription binding{};
+    binding.binding   = 0;
+    binding.stride    = sizeof(Vertex);          // ganze Struktur pro Vertex
+    binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    return binding;
 }
 
 std::array<VkVertexInputAttributeDescription, 3> Vertex::getAttributeDescriptions()
-{ // WICHTIG: 2 -> 3
-    std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
-    // Position
-    attributeDescriptions[0].binding = 0;
-    attributeDescriptions[0].location = 0;
-    attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[0].offset = offsetof(Vertex, pos);
-    // Farbe
-    attributeDescriptions[1].binding = 0;
-    attributeDescriptions[1].location = 1;
-    attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[1].offset = offsetof(Vertex, color);
-    // NEU: Texturkoordinate
-    attributeDescriptions[2].binding = 0;
-    attributeDescriptions[2].location = 2;
-    attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
-    attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
+{
+    std::array<VkVertexInputAttributeDescription, 3> attrs{};
 
-    return attributeDescriptions;
+    // ── Position  (location 0) ──────────────────────────────
+    attrs[0].binding  = 0;
+    attrs[0].location = 0;
+    attrs[0].format   = VK_FORMAT_R32G32B32_SFLOAT;   // vec3
+    attrs[0].offset   = offsetof(Vertex, pos);
+
+    // ── Farbe      (location 1) ─────────────────────────────
+    attrs[1].binding  = 0;
+    attrs[1].location = 1;
+    attrs[1].format   = VK_FORMAT_R32G32B32_SFLOAT;   // vec3
+    attrs[1].offset   = offsetof(Vertex, color);
+
+    // ── UV         (location 2) ─────────────────────────────
+    attrs[2].binding  = 0;
+    attrs[2].location = 2;
+    attrs[2].format   = VK_FORMAT_R32G32_SFLOAT;      // vec2
+    attrs[2].offset   = offsetof(Vertex, texCoord);
+
+    return attrs;
 }
 
 VkImageView VulkanRenderer::createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags)
@@ -356,7 +363,7 @@ void VulkanRenderer::createSurface()
 void VulkanRenderer::createTextureImage()
 {
     int texWidth, texHeight, texChannels;
-    stbi_uc* pixels = stbi_load("textures/blocks/diamond_ore.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+    stbi_uc *pixels = stbi_load("textures/blocks/diamond_ore.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
     VkDeviceSize imageSize = texWidth * texHeight * 4;
 
     if (!pixels)
@@ -912,74 +919,69 @@ void VulkanRenderer::createUniformBuffers()
     }
 }
 
-void VulkanRenderer::createDescriptorPool() {
-    std::array<VkDescriptorPoolSize,2> poolSizes{};
-    poolSizes[0].type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = MAX_FRAMES_IN_FLIGHT;          // one per frame
-    poolSizes[1].type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = MAX_FRAMES_IN_FLIGHT;          // one per frame
+void VulkanRenderer::createDescriptorPool()
+{
+    VkDescriptorPoolSize sizes[2]{};
+    sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    sizes[0].descriptorCount = MAX_FRAMES_IN_FLIGHT;
+    sizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    sizes[1].descriptorCount = MAX_FRAMES_IN_FLIGHT;
 
     VkDescriptorPoolCreateInfo info{};
-    info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    info.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-    info.pPoolSizes    = poolSizes.data();
-    info.maxSets       = MAX_FRAMES_IN_FLIGHT;
+    info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    info.poolSizeCount = 2;
+    info.pPoolSizes = sizes;
+    info.maxSets = MAX_FRAMES_IN_FLIGHT;
 
-    if (vkCreateDescriptorPool(m_Device,&info,nullptr,&m_DescriptorPool)!=VK_SUCCESS)
-        throw std::runtime_error("failed to create descriptor pool");
+    if (vkCreateDescriptorPool(m_Device, &info, nullptr, &m_DescriptorPool) != VK_SUCCESS)
+        throw std::runtime_error("failed to create descriptor pool!");
 }
 
-
-void VulkanRenderer::createDescriptorSets() {
+void VulkanRenderer::createDescriptorSets()
+{
     std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, m_DescriptorSetLayout);
 
     VkDescriptorSetAllocateInfo alloc{};
-    alloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    alloc.descriptorPool     = m_DescriptorPool;
+    alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    alloc.descriptorPool = m_DescriptorPool;
     alloc.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
-    alloc.pSetLayouts        = layouts.data();
+    alloc.pSetLayouts = layouts.data();
 
     m_DescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
-    if (vkAllocateDescriptorSets(m_Device,&alloc,m_DescriptorSets.data())!=VK_SUCCESS)
+    if (vkAllocateDescriptorSets(m_Device, &alloc, m_DescriptorSets.data()) != VK_SUCCESS)
         throw std::runtime_error("failed to allocate descriptor sets");
 
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+    {
+        VkDescriptorBufferInfo bufInfo{};
+        bufInfo.buffer = m_UniformBuffers[i];
+        bufInfo.offset = 0;
+        bufInfo.range = sizeof(UniformBufferObject);
 
-        // UBO (binding 0)
-        VkDescriptorBufferInfo uboInfo{};
-        uboInfo.buffer = m_UniformBuffers[i];
-        uboInfo.offset = 0;
-        uboInfo.range  = sizeof(UniformBufferObject);
-
-        VkWriteDescriptorSet uboWrite{};
-        uboWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        uboWrite.dstSet          = m_DescriptorSets[i];
-        uboWrite.dstBinding      = 0;
-        uboWrite.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        uboWrite.descriptorCount = 1;
-        uboWrite.pBufferInfo     = &uboInfo;
-
-        // Sampler + Image (binding 1)
         VkDescriptorImageInfo imgInfo{};
         imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imgInfo.imageView   = m_TextureImageView;
-        imgInfo.sampler     = m_TextureSampler;
+        imgInfo.imageView = m_TextureImageView;
+        imgInfo.sampler = m_TextureSampler;
 
-        VkWriteDescriptorSet samplerWrite{};
-        samplerWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        samplerWrite.dstSet          = m_DescriptorSets[i];
-        samplerWrite.dstBinding      = 1;
-        samplerWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        samplerWrite.descriptorCount = 1;
-        samplerWrite.pImageInfo      = &imgInfo;
+        VkWriteDescriptorSet writes[2]{};
 
-        std::array<VkWriteDescriptorSet,2> writes{uboWrite,samplerWrite};
-        vkUpdateDescriptorSets(m_Device,
-                               static_cast<uint32_t>(writes.size()), writes.data(),
-                               0, nullptr);
+        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[0].dstSet = m_DescriptorSets[i];
+        writes[0].dstBinding = 0;
+        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[0].descriptorCount = 1;
+        writes[0].pBufferInfo = &bufInfo;
+
+        writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[1].dstSet = m_DescriptorSets[i];
+        writes[1].dstBinding = 1;
+        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[1].descriptorCount = 1;
+        writes[1].pImageInfo = &imgInfo;
+
+        vkUpdateDescriptorSets(m_Device, 2, writes, 0, nullptr);
     }
 }
-
 
 void VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &camera)
 {
@@ -1185,32 +1187,32 @@ void VulkanRenderer::drawFrame(Camera &camera, const std::vector<GameObject> &ga
     m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
-void VulkanRenderer::createDescriptorSetLayout() {
+void VulkanRenderer::createDescriptorSetLayout()
+{
     // --- binding 0: UBO (wie gehabt) ---
     VkDescriptorSetLayoutBinding ubo{};
-    ubo.binding            = 0;
-    ubo.descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    ubo.descriptorCount    = 1;
-    ubo.stageFlags         = VK_SHADER_STAGE_VERTEX_BIT;
+    ubo.binding = 0;
+    ubo.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    ubo.descriptorCount = 1;
+    ubo.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
     // --- binding 1: combined image sampler (NEU) ---
     VkDescriptorSetLayoutBinding sampler{};
-    sampler.binding         = 1;
-    sampler.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    sampler.binding = 1;
+    sampler.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     sampler.descriptorCount = 1;
-    sampler.stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
+    sampler.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    std::array<VkDescriptorSetLayoutBinding,2> bindings{ubo,sampler};
+    std::array<VkDescriptorSetLayoutBinding, 2> bindings{ubo, sampler};
 
     VkDescriptorSetLayoutCreateInfo info{};
-    info.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     info.bindingCount = static_cast<uint32_t>(bindings.size());
-    info.pBindings    = bindings.data();
+    info.pBindings = bindings.data();
 
-    if (vkCreateDescriptorSetLayout(m_Device,&info,nullptr,&m_DescriptorSetLayout)!=VK_SUCCESS)
+    if (vkCreateDescriptorSetLayout(m_Device, &info, nullptr, &m_DescriptorSetLayout) != VK_SUCCESS)
         throw std::runtime_error("failed to create descriptor set layout");
 }
-
 
 // Implementierung der verbleibenden Hilfsfunktionen...
 VulkanRenderer::QueueFamilyIndices VulkanRenderer::findQueueFamilies(const VkPhysicalDevice pdevice)
