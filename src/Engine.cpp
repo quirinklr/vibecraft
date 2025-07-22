@@ -13,20 +13,13 @@ Engine::Engine()
 {
     glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
-    FastNoiseLite noise;
-    noise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
-    noise.SetFrequency(0.01f);
-
     const int worldSize = 8;
     for (int x = -worldSize / 2; x < worldSize / 2; ++x)
     {
         for (int z = -worldSize / 2; z < worldSize / 2; ++z)
         {
             glm::ivec3 pos = {x, 0, z};
-            auto chunk = std::make_unique<Chunk>(pos);
-            chunk->generateTerrain(noise);
-            chunk->generateMesh(m_Renderer);
-            m_Chunks[pos] = std::move(chunk);
+            generateChunk(pos);
         }
     }
 }
