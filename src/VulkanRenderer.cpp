@@ -297,7 +297,8 @@ void VulkanRenderer::createCrosshairPipeline()
 
     std::vector<VkDynamicState> dynamicStates = {
         VK_DYNAMIC_STATE_VIEWPORT,
-        VK_DYNAMIC_STATE_SCISSOR};
+        VK_DYNAMIC_STATE_SCISSOR,
+        VK_DYNAMIC_STATE_LINE_WIDTH};
     VkPipelineDynamicStateCreateInfo dynamicState{};
     dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
     dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
@@ -639,6 +640,7 @@ void VulkanRenderer::createLogicalDevice()
     }
 
     VkPhysicalDeviceFeatures deviceFeatures{};
+    deviceFeatures.wideLines = VK_TRUE;
     deviceFeatures.logicOp = VK_TRUE;
 
     VkDeviceCreateInfo createInfo{};
@@ -799,7 +801,7 @@ void VulkanRenderer::createRenderPass()
 void VulkanRenderer::createCrosshairVertexBuffer()
 {
 
-    const float crosshairLen = 0.025f;
+    const float crosshairLen = 0.015f;
     const float aspect = (float)m_SwapChainExtent.width / (float)m_SwapChainExtent.height;
 
     std::vector<glm::vec2> vertices = {
@@ -1257,7 +1259,7 @@ void VulkanRenderer::recordCommandBuffer(
     vkCmdNextSubpass(m_CommandBuffers[m_CurrentFrame], VK_SUBPASS_CONTENTS_INLINE);
 
     vkCmdBindPipeline(m_CommandBuffers[m_CurrentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, m_CrosshairPipeline);
-
+    vkCmdSetLineWidth(m_CommandBuffers[m_CurrentFrame], 1.5f);
     vkCmdSetViewport(m_CommandBuffers[m_CurrentFrame], 0, 1, &vp);
     vkCmdSetScissor(m_CommandBuffers[m_CurrentFrame], 0, 1, &sc);
 
