@@ -42,7 +42,7 @@ public:
     const glm::mat4 &getModelMatrix() const { return m_ModelMatrix; }
 
     void generateMesh(VulkanRenderer &renderer);
-    void cleanup(VulkanRenderer& renderer);
+    void cleanup(VulkanRenderer &renderer);
 
 private:
     BlockID getBlock(int x, int y, int z) const;

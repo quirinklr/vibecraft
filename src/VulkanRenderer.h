@@ -90,6 +90,11 @@ private:
     VkDescriptorPool m_DescriptorPool{VK_NULL_HANDLE};
     std::vector<VkDescriptorSet> m_DescriptorSets;
 
+    VkPipeline m_CrosshairPipeline{VK_NULL_HANDLE};
+    VkPipelineLayout m_CrosshairPipelineLayout{VK_NULL_HANDLE};
+    VkBuffer m_CrosshairVertexBuffer{VK_NULL_HANDLE};
+    VkDeviceMemory m_CrosshairVertexBufferMemory{VK_NULL_HANDLE};
+
     VkImage m_TextureImage{VK_NULL_HANDLE};
     VkDeviceMemory m_TextureImageMemory{VK_NULL_HANDLE};
     VkImageView m_TextureImageView{VK_NULL_HANDLE};
@@ -132,6 +137,8 @@ private:
     void createCommandBuffers();
     void createSyncObjects();
     void updateUniformBuffer(uint32_t currentImage, Camera &camera);
+    void createCrosshairPipeline();
+    void createCrosshairVertexBuffer();
     void recordCommandBuffer(uint32_t imageIndex, const std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less> &chunks);
     void createTextureImage();
     void createTextureImageView();

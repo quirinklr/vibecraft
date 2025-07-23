@@ -30,11 +30,10 @@ private:
     VulkanRenderer m_Renderer{m_Window, m_Settings};
     Camera m_Camera{};
 
-    // --- Chunk‑Verwaltung ---
-    static constexpr int RENDER_DISTANCE = 6; // Radius in Chunks
+    static constexpr int RENDER_DISTANCE = 6;
     std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less> m_Chunks;
     std::vector<std::unique_ptr<Chunk>> m_Garbage;
 
-    void generateChunk(const glm::ivec3 &pos);     // neu
-    void updateChunks(const glm::vec3 &cameraPos); // neu
+    void generateChunk(const glm::ivec3 &pos);
+    void updateChunks(const glm::vec3 &cameraPos);
 };

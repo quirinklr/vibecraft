@@ -1,7 +1,7 @@
 #include "Chunk.h"
-#include "FastNoiseLite.h"              // KORREKTER INCLUDE
-#include "VulkanRenderer.h"             // Gibt uns die Vertex-Definition
-#include <glm/gtc/matrix_transform.hpp> // Für glm::translate
+#include "FastNoiseLite.h"
+#include "VulkanRenderer.h"
+#include <glm/gtc/matrix_transform.hpp>
 #include <stdexcept>
 
 Chunk::Chunk(glm::ivec3 pos) : m_Pos(pos)
@@ -30,11 +30,11 @@ void Chunk::generateTerrain(FastNoiseLite &noise)
             float gx = float(m_Pos.x * WIDTH + x);
             float gz = float(m_Pos.z * DEPTH + z);
 
-            float h = noise.GetNoise(gx, gz); // ‑1 … 1
+            float h = noise.GetNoise(gx, gz);
             int ground = 64 + int(h * 30.f);
 
             for (int y = 0; y < ground && y < HEIGHT; ++y)
-                m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x] = 1; // Stein
+                m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x] = 1;
         }
 
     m_State.store(State::TERRAIN_READY, std::memory_order_release);
@@ -48,8 +48,6 @@ void Chunk::buildMeshCpu()
     m_Vertices.clear();
     m_Indices.clear();
 
-    // ── Grobe Vorab‑Reservierung: obere Abschätzung
-    //    (max. 6 Flächen × 4 Vertices pro Block der Höhe 128)
     constexpr size_t MAX_FACES_PER_CHUNK = WIDTH * DEPTH * 128 * 6;
     m_Vertices.reserve(MAX_FACES_PER_CHUNK * 4);
     m_Indices.reserve(MAX_FACES_PER_CHUNK * 6);
@@ -66,7 +64,6 @@ void Chunk::buildMeshCpu()
         m_Vertices.push_back({v2, {1, 1, 1}, {1, 1}});
         m_Vertices.push_back({v3, {1, 1, 1}, {0, 1}});
 
-        // clockwise → FrontFace = CLOCKWISE
         m_Indices.push_back(start + 0);
         m_Indices.push_back(start + 1);
         m_Indices.push_back(start + 2);
@@ -146,7 +143,6 @@ void Chunk::markReady(VkDevice dev)
     if (m_State.load(std::memory_order_acquire) != State::GPU_PENDING)
         return;
 
-    /* Safety: kein Fence → sofort READY */
     if (m_Upload.fence == VK_NULL_HANDLE)
     {
         m_State.store(State::GPU_READY, std::memory_order_release);
@@ -177,7 +173,6 @@ bool Chunk::uploadMesh(VulkanRenderer &r)
     if (m_State.load(std::memory_order_acquire) != State::CPU_MESH_READY)
         return false;
 
-    /* leer? → sofort fertig */
     if (m_Vertices.empty() || m_Indices.empty())
     {
         m_State.store(State::GPU_READY, std::memory_order_release);
@@ -193,7 +188,6 @@ bool Chunk::uploadMesh(VulkanRenderer &r)
     m_Vertices.clear();
     m_Indices.clear();
 
-    /* Fence vorhanden? → asynchron, sonst direkt fertig */
     if (m_Upload.fence == VK_NULL_HANDLE)
         m_State.store(State::GPU_READY, std::memory_order_release);
     else
@@ -202,28 +196,20 @@ bool Chunk::uploadMesh(VulkanRenderer &r)
     return true;
 }
 
-// ────────────────────────────────────────────────────────────────────
-//  Erzeugt für **jeden** sichtbaren Block eine einfache Quad‑Fläche.
-//  (Naiver Mesher – zuerst Korrektheit, Optimierung kommt später.)
-// ────────────────────────────────────────────────────────────────────
-void Chunk::generateMesh(VulkanRenderer& renderer)
+void Chunk::generateMesh(VulkanRenderer &renderer)
 {
-    /* Falls schon einmal ein GPU‑Mesh existiert → sauber entsorgen */
+
     if (m_VertexBuffer != VK_NULL_HANDLE)
         cleanup(renderer);
 
-    /* 1) CPU‑Mesh erzeugen */
     buildMeshCpu();
 
-    /* 2) Sofort auf die GPU hochladen,
-          damit Start‑Chunks ohne Latenz sichtbar sind */
     uploadMesh(renderer);
 }
 
-
 void Chunk::cleanup(VulkanRenderer &r)
 {
-    /* Staging + Fence sofort frei */
+
     if (m_Upload.fence)
         vkDestroyFence(r.getDevice(), m_Upload.fence, nullptr);
     if (m_Upload.stagingVB)
@@ -236,7 +222,6 @@ void Chunk::cleanup(VulkanRenderer &r)
         vkFreeMemory(r.getDevice(), m_Upload.stagingIBMem, nullptr);
     m_Upload = {};
 
-    /* Mesh‑Buffer asynchron frei­geben */
     r.enqueueDestroy(m_VertexBuffer, m_VertexBufferMemory);
     r.enqueueDestroy(m_IndexBuffer, m_IndexBufferMemory);
 

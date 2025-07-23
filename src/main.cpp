@@ -1,4 +1,4 @@
-//  main.cpp
+
 #include <iostream>
 #include <exception>
 #include "Engine.h"
@@ -19,7 +19,7 @@ int main()
     {
         std::cerr << "\n============\nEXCEPTION: " << e.what()
                   << "\n============\n";
-        std::cin.get(); // hier pausieren
+        std::cin.get();
     }
 
     std::cout << "Programmende – <Return> druecken …";

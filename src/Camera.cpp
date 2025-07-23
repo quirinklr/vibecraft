@@ -3,7 +3,7 @@
 
 void Camera::setViewDirection(glm::vec3 position, glm::vec3 direction, glm::vec3 up)
 {
-    // LookAt-Matrix für eine "Ziel"-basierte Kamera
+
     const glm::vec3 w{glm::normalize(direction)};
     const glm::vec3 u{glm::normalize(glm::cross(w, up))};
     const glm::vec3 v{glm::cross(w, u)};
@@ -26,5 +26,5 @@ void Camera::setViewDirection(glm::vec3 position, glm::vec3 direction, glm::vec3
 void Camera::setPerspectiveProjection(float fovy, float aspect, float near, float far)
 {
     m_ProjectionMatrix = glm::perspective(fovy, aspect, near, far);
-    m_ProjectionMatrix[1][1] *= -1; // Y-Flip für Vulkan
+    m_ProjectionMatrix[1][1] *= -1;
 }

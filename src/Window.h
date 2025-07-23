@@ -8,10 +8,9 @@
 class Window
 {
 public:
-    Window(int width, int height, std::string title, const Settings& settings);
+    Window(int width, int height, std::string title, const Settings &settings);
     ~Window();
 
-    // Verhindert das Kopieren des Fensters
     Window(const Window &) = delete;
     Window &operator=(const Window &) = delete;
 
@@ -31,5 +30,5 @@ private:
     bool m_FramebufferResized = false;
     std::string m_Title;
     GLFWwindow *m_Window;
-    const Settings& m_Settings;
+    const Settings &m_Settings;
 };
