@@ -141,7 +141,7 @@ void Engine::run()
         m_Camera.setViewDirection(cameraPos, forward, up);
 
         auto ext = m_Window.getExtent();
-        m_Camera.setPerspectiveProjection(glm::radians(45.f),
+        m_Camera.setPerspectiveProjection(glm::radians(m_Settings.fov),
                                           static_cast<float>(ext.width) / ext.height,
                                           0.1f, 1000.f); // Far‑Plane 1000
 
