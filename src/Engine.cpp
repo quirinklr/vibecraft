@@ -10,6 +10,7 @@
 #include <iomanip>
 
 Engine::Engine()
+    : m_Window(1280, 720, "Minecraft Vibe", m_Settings)
 {
     glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 

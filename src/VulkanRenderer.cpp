@@ -1138,9 +1138,18 @@ void VulkanRenderer::drawFrame(Camera &camera, const std::map<glm::ivec3,
 
     /* 2) Bild holen */
     uint32_t imageIndex;
-    vkAcquireNextImageKHR(m_Device, m_SwapChain, UINT64_MAX,
+    VkResult result = vkAcquireNextImageKHR(m_Device, m_SwapChain, UINT64_MAX,
                           m_ImageAvailableSemaphores[m_CurrentFrame],
                           VK_NULL_HANDLE, &imageIndex);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        recreateSwapChain();
+        return;
+    }
+    else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+        throw std::runtime_error("failed to acquire swap chain image!");
+    }
+
 
     // Check if a previous frame is using this image (i.e. there is its fence to wait on)
     if (m_ImagesInFlight[imageIndex] != VK_NULL_HANDLE)
@@ -1188,7 +1197,15 @@ void VulkanRenderer::drawFrame(Camera &camera, const std::map<glm::ivec3,
     presentInfo.pSwapchains = swapChains;
     presentInfo.pImageIndices = &imageIndex;
 
-    vkQueuePresentKHR(m_PresentQueue, &presentInfo);
+    result = vkQueuePresentKHR(m_PresentQueue, &presentInfo);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || m_Window.wasWindowResized()) {
+        m_Window.resetWindowResizedFlag();
+        recreateSwapChain();
+    }
+    else if (result != VK_SUCCESS) {
+        throw std::runtime_error("failed to present swap chain image!");
+    }
 
     m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
@@ -1456,4 +1473,36 @@ VkShaderModule VulkanRenderer::createShaderModule(const std::vector<char> &code)
         throw std::runtime_error("failed to create shader module!");
     }
     return shaderModule;
+}
+
+void VulkanRenderer::recreateSwapChain()
+{
+    int width = 0, height = 0;
+    glfwGetFramebufferSize(m_Window.getGLFWwindow(), &width, &height);
+    while (width == 0 || height == 0) {
+        glfwGetFramebufferSize(m_Window.getGLFWwindow(), &width, &height);
+        glfwWaitEvents();
+    }
+
+    vkDeviceWaitIdle(m_Device);
+
+    // Cleanup old resources
+    for (auto framebuffer : m_SwapChainFramebuffers)
+    {
+        vkDestroyFramebuffer(m_Device, framebuffer, nullptr);
+    }
+    for (auto imageView : m_SwapChainImageViews)
+    {
+        vkDestroyImageView(m_Device, imageView, nullptr);
+    }
+    vkDestroySwapchainKHR(m_Device, m_SwapChain, nullptr);
+    vkDestroyImageView(m_Device, m_DepthImageView, nullptr);
+    vkDestroyImage(m_Device, m_DepthImage, nullptr);
+    vkFreeMemory(m_Device, m_DepthImageMemory, nullptr);
+
+    // Recreate swap chain and dependent resources
+    createSwapChain();
+    createImageViews();
+    createDepthResources();
+    createFramebuffers();
 }

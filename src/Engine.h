@@ -25,8 +25,8 @@ public:
     void run();
 
 private:
-    Window m_Window{WIDTH, HEIGHT, "Minecraft Vibe Engine"};
     Settings m_Settings{};
+    Window m_Window{WIDTH, HEIGHT, "Minecraft Vibe Engine", m_Settings};
     VulkanRenderer m_Renderer{m_Window, m_Settings};
     Camera m_Camera{};
 

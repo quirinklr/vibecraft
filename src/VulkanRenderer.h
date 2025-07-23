@@ -49,6 +49,7 @@ public:
     VkDevice getDevice() const { return m_Device; }
 
 private:
+    void recreateSwapChain();
     Window &m_Window;
     const Settings &m_Settings;
 
