@@ -12,6 +12,8 @@
 #include <map>
 #include <memory>
 #include "math/Ivec3Less.h"
+
+#include <vulkan/vulkan.h>
 #include "vk_mem_alloc.h"
 
 struct Vertex
@@ -40,18 +42,18 @@ public:
     VulkanRenderer &operator=(const VulkanRenderer &) = delete;
 
     void drawFrame(Camera &camera, const std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less> &chunks);
-    void createChunkMeshBuffers(const std::vector<Vertex> &verts,
-                                const std::vector<uint32_t> &inds,
+
+    void createChunkMeshBuffers(const std::vector<Vertex> &v,
+                                const std::vector<uint32_t> &i,
                                 UploadJob &up,
-                                VkBuffer &vb, VkDeviceMemory &vm,
-                                VkBuffer &ib, VkDeviceMemory &im);
-    void enqueueDestroy(VkBuffer buf, VkDeviceMemory mem);
+                                VkBuffer &vb, VmaAllocation &va,
+                                VkBuffer &ib, VmaAllocation &ia);
+
+    void enqueueDestroy(VkBuffer buf, VmaAllocation alloc);
 
     VkDevice getDevice() const { return m_Device; }
 
 private:
-    VmaAllocator m_Allocator{VK_NULL_HANDLE};
-
     void recreateSwapChain();
     Window &m_Window;
     const Settings &m_Settings;
@@ -62,6 +64,8 @@ private:
     VkDevice m_Device{VK_NULL_HANDLE};
     VkQueue m_GraphicsQueue{VK_NULL_HANDLE};
     VkQueue m_PresentQueue{VK_NULL_HANDLE};
+
+    VmaAllocator m_Allocator{VK_NULL_HANDLE};
 
     VkSwapchainKHR m_SwapChain{VK_NULL_HANDLE};
     std::vector<VkImage> m_SwapChainImages;
@@ -75,7 +79,7 @@ private:
     std::vector<VkFramebuffer> m_SwapChainFramebuffers;
 
     VkImage m_DepthImage{VK_NULL_HANDLE};
-    VkDeviceMemory m_DepthImageMemory{VK_NULL_HANDLE};
+    VmaAllocation m_DepthImageAllocation{VK_NULL_HANDLE};
     VkImageView m_DepthImageView{VK_NULL_HANDLE};
 
     VkCommandPool m_CommandPool{VK_NULL_HANDLE};
@@ -90,7 +94,6 @@ private:
     std::vector<VkBuffer> m_UniformBuffers;
     std::vector<VmaAllocation> m_UniformBuffersAllocation;
     std::vector<void *> m_UniformBuffersMapped;
-    VmaAllocation m_TextureImageAllocation{VK_NULL_HANDLE};
 
     VkDescriptorSetLayout m_DescriptorSetLayout{VK_NULL_HANDLE};
     VkDescriptorPool m_DescriptorPool{VK_NULL_HANDLE};
@@ -102,6 +105,7 @@ private:
     VmaAllocation m_CrosshairVertexBufferAllocation{VK_NULL_HANDLE};
 
     VkImage m_TextureImage{VK_NULL_HANDLE};
+    VmaAllocation m_TextureImageAllocation{VK_NULL_HANDLE};
     VkImageView m_TextureImageView{VK_NULL_HANDLE};
     VkSampler m_TextureSampler{VK_NULL_HANDLE};
 
@@ -114,7 +118,7 @@ private:
     struct Pending
     {
         VkBuffer buf;
-        VkDeviceMemory mem;
+        VmaAllocation alloc;
     };
     std::vector<Pending> m_Destroy[3];
 
@@ -132,9 +136,7 @@ private:
     void createFramebuffers();
     void createCommandPool();
 
-    void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &bufferMemory);
     void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size, VkFence *outFence = nullptr);
-    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
 
     void createUniformBuffers();
     void createDescriptorPool();
@@ -151,7 +153,6 @@ private:
     VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
     void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
     void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
-    void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage &image, VkDeviceMemory &imageMemory);
     VkFormat findSupportedFormat(const std::vector<VkFormat> &candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
     VkFormat findDepthFormat();
     struct QueueFamilyIndices;

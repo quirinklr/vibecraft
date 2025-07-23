@@ -485,14 +485,13 @@ void VulkanRenderer::createTextureImage()
 
     int texWidth, texHeight, texChannels;
 
-    stbi_uc *pixels = stbi_load("../../textures/blocks/cobblestone.png",
+    stbi_uc *pixels = stbi_load("../../textures/blocks/diamond_block.png",
                                 &texWidth, &texHeight, &texChannels,
                                 STBI_rgb_alpha);
     VkDeviceSize imageSize = texWidth * texHeight * 4;
 
     if (!pixels)
     {
-
         throw std::runtime_error("failed to load texture image: ../../textures/blocks/cobblestone.png");
     }
 
@@ -624,49 +623,29 @@ VkFormat VulkanRenderer::findDepthFormat()
         VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
 }
 
-void VulkanRenderer::createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage &image, VkDeviceMemory &imageMemory)
-{
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = width;
-    imageInfo.extent.height = height;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.format = format;
-    imageInfo.tiling = tiling;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = usage;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    if (vkCreateImage(m_Device, &imageInfo, nullptr, &image) != VK_SUCCESS)
-    {
-        throw std::runtime_error("failed to create image!");
-    }
-
-    VkMemoryRequirements memRequirements;
-    vkGetImageMemoryRequirements(m_Device, image, &memRequirements);
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
-
-    if (vkAllocateMemory(m_Device, &allocInfo, nullptr, &imageMemory) != VK_SUCCESS)
-    {
-        throw std::runtime_error("failed to allocate image memory!");
-    }
-
-    vkBindImageMemory(m_Device, image, imageMemory, 0);
-}
-
 void VulkanRenderer::createDepthResources()
 {
     VkFormat depthFormat = findDepthFormat();
 
-    createImage(m_SwapChainExtent.width, m_SwapChainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_DepthImage, m_DepthImageMemory);
+    VkImageCreateInfo imageInfo = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.extent.width = m_SwapChainExtent.width;
+    imageInfo.extent.height = m_SwapChainExtent.height;
+    imageInfo.extent.depth = 1;
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.format = depthFormat;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo allocInfo = {};
+    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    vmaCreateImage(m_Allocator, &imageInfo, &allocInfo, &m_DepthImage, &m_DepthImageAllocation, nullptr);
+
     m_DepthImageView = createImageView(m_DepthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
 }
 
@@ -1014,51 +993,6 @@ void VulkanRenderer::createGraphicsPipeline()
     vkDestroyShaderModule(m_Device, vertShaderModule, nullptr);
 }
 
-void VulkanRenderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &bufferMemory)
-{
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = usage;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    if (vkCreateBuffer(m_Device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS)
-    {
-        throw std::runtime_error("failed to create buffer!");
-    }
-
-    VkMemoryRequirements memRequirements;
-    vkGetBufferMemoryRequirements(m_Device, buffer, &memRequirements);
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
-
-    if (vkAllocateMemory(m_Device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS)
-    {
-        throw std::runtime_error("failed to allocate buffer memory!");
-    }
-
-    vkBindBufferMemory(m_Device, buffer, bufferMemory, 0);
-}
-
-uint32_t VulkanRenderer::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties)
-{
-    VkPhysicalDeviceMemoryProperties memProperties;
-    vkGetPhysicalDeviceMemoryProperties(m_PhysicalDevice, &memProperties);
-
-    for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++)
-    {
-        if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties)
-        {
-            return i;
-        }
-    }
-
-    throw std::runtime_error("failed to find suitable memory type!");
-}
-
 void VulkanRenderer::copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size, VkFence *outFence)
 {
     VkCommandBufferAllocateInfo a{};
@@ -1294,7 +1228,7 @@ void VulkanRenderer::recordCommandBuffer(
     rp.framebuffer = m_SwapChainFramebuffers[imageIndex];
     rp.renderArea = {{0, 0}, m_SwapChainExtent};
     std::array<VkClearValue, 2> clears{};
-    clears[0].color = {{0, 0, 0, 1}};
+    clears[0].color = {{0.5f, 0.7f, 1.0f, 1.0f}};
     clears[1].depthStencil = {1.0f, 0};
     rp.clearValueCount = (uint32_t)clears.size();
     rp.pClearValues = clears.data();
@@ -1312,7 +1246,9 @@ void VulkanRenderer::recordCommandBuffer(
     for (auto const &[pos, chunkPtr] : chunks)
     {
         Chunk *c = chunkPtr.get();
-        c->markReady(m_Device);
+
+        c->markReady(*this);
+
         if (!c->isReady() || c->getIndexCount() == 0)
             continue;
 
@@ -1347,13 +1283,11 @@ void VulkanRenderer::recordCommandBuffer(
 void VulkanRenderer::drawFrame(Camera &camera, const std::map<glm::ivec3,
                                                               std::unique_ptr<Chunk>, ivec3_less> &chunks)
 {
-
     vkWaitForFences(m_Device, 1, &m_InFlightFences[m_CurrentFrame], VK_TRUE, UINT64_MAX);
 
     for (auto &p : m_Destroy[m_CurrentFrame])
     {
-        vkDestroyBuffer(m_Device, p.buf, nullptr);
-        vkFreeMemory(m_Device, p.mem, nullptr);
+        vmaDestroyBuffer(m_Allocator, p.buf, p.alloc);
     }
     m_Destroy[m_CurrentFrame].clear();
 
@@ -1432,20 +1366,17 @@ void VulkanRenderer::drawFrame(Camera &camera, const std::map<glm::ivec3,
     m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
-#include "VulkanRenderer.h"
-#include "Chunk.h"
-
 void VulkanRenderer::createChunkMeshBuffers(const std::vector<Vertex> &v,
                                             const std::vector<uint32_t> &i,
                                             UploadJob &up,
-                                            VkBuffer &vb, VkDeviceMemory &vm,
-                                            VkBuffer &ib, VkDeviceMemory &im)
+                                            VkBuffer &vb, VmaAllocation &va,
+                                            VkBuffer &ib, VmaAllocation &ia)
 {
 
     if (v.empty() || i.empty())
     {
         vb = ib = VK_NULL_HANDLE;
-        vm = im = VK_NULL_HANDLE;
+        va = ia = VK_NULL_HANDLE;
         up.fence = VK_NULL_HANDLE;
         return;
     }
@@ -1453,30 +1384,50 @@ void VulkanRenderer::createChunkMeshBuffers(const std::vector<Vertex> &v,
     VkDeviceSize vs = sizeof(Vertex) * v.size();
     VkDeviceSize is = sizeof(uint32_t) * i.size();
 
-    createBuffer(vs, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                 up.stagingVB, up.stagingVBMem);
+    VkBufferCreateInfo stagingVbInfo = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    stagingVbInfo.size = vs;
+    stagingVbInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+    VmaAllocationCreateInfo stagingVaInfo = {};
+    stagingVaInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
+
+    vmaCreateBuffer(m_Allocator, &stagingVbInfo, &stagingVaInfo, &up.stagingVB, &up.stagingVbAlloc, nullptr);
 
     void *data;
-    vkMapMemory(m_Device, up.stagingVBMem, 0, vs, 0, &data);
+    vmaMapMemory(m_Allocator, up.stagingVbAlloc, &data);
     memcpy(data, v.data(), static_cast<size_t>(vs));
-    vkUnmapMemory(m_Device, up.stagingVBMem);
+    vmaUnmapMemory(m_Allocator, up.stagingVbAlloc);
 
-    createBuffer(is, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                 up.stagingIB, up.stagingIBMem);
+    VkBufferCreateInfo stagingIbInfo = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    stagingIbInfo.size = is;
+    stagingIbInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 
-    vkMapMemory(m_Device, up.stagingIBMem, 0, is, 0, &data);
+    VmaAllocationCreateInfo stagingIaInfo = {};
+    stagingIaInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
+
+    vmaCreateBuffer(m_Allocator, &stagingIbInfo, &stagingIaInfo, &up.stagingIB, &up.stagingIbAlloc, nullptr);
+
+    vmaMapMemory(m_Allocator, up.stagingIbAlloc, &data);
     memcpy(data, i.data(), static_cast<size_t>(is));
-    vkUnmapMemory(m_Device, up.stagingIBMem);
+    vmaUnmapMemory(m_Allocator, up.stagingIbAlloc);
 
-    createBuffer(vs, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                 vb, vm);
+    VkBufferCreateInfo vbInfo = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    vbInfo.size = vs;
+    vbInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
 
-    createBuffer(is, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                 ib, im);
+    VmaAllocationCreateInfo vaInfo = {};
+    vaInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    vmaCreateBuffer(m_Allocator, &vbInfo, &vaInfo, &vb, &va, nullptr);
+
+    VkBufferCreateInfo ibInfo = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    ibInfo.size = is;
+    ibInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+
+    VmaAllocationCreateInfo iaInfo = {};
+    iaInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    vmaCreateBuffer(m_Allocator, &ibInfo, &iaInfo, &ib, &ia, nullptr);
 
     VkCommandBufferAllocateInfo a{};
     a.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -1511,11 +1462,11 @@ void VulkanRenderer::createChunkMeshBuffers(const std::vector<Vertex> &v,
     vkQueueSubmit(m_GraphicsQueue, 1, &s, up.fence);
 }
 
-void VulkanRenderer::enqueueDestroy(VkBuffer buf, VkDeviceMemory mem)
+void VulkanRenderer::enqueueDestroy(VkBuffer buf, VmaAllocation alloc)
 {
     if (buf == VK_NULL_HANDLE)
         return;
-    m_Destroy[m_CurrentFrame].push_back({buf, mem});
+    m_Destroy[m_CurrentFrame].push_back({buf, alloc});
 }
 
 void VulkanRenderer::createDescriptorSetLayout()
@@ -1714,8 +1665,8 @@ void VulkanRenderer::recreateSwapChain()
     }
     vkDestroySwapchainKHR(m_Device, m_SwapChain, nullptr);
     vkDestroyImageView(m_Device, m_DepthImageView, nullptr);
-    vkDestroyImage(m_Device, m_DepthImage, nullptr);
-    vkFreeMemory(m_Device, m_DepthImageMemory, nullptr);
+
+    vmaDestroyImage(m_Allocator, m_DepthImage, m_DepthImageAllocation);
 
     createSwapChain();
     createImageViews();
