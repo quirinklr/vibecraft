@@ -12,6 +12,7 @@
 #include <map>
 #include <memory>
 #include "math/Ivec3Less.h"
+#include "vk_mem_alloc.h"
 
 struct Vertex
 {
@@ -49,6 +50,8 @@ public:
     VkDevice getDevice() const { return m_Device; }
 
 private:
+    VmaAllocator m_Allocator{VK_NULL_HANDLE};
+
     void recreateSwapChain();
     Window &m_Window;
     const Settings &m_Settings;
@@ -85,7 +88,10 @@ private:
     uint32_t m_CurrentFrame{0};
 
     std::vector<VkBuffer> m_UniformBuffers;
-    std::vector<VkDeviceMemory> m_UniformBuffersMemory;
+    std::vector<VmaAllocation> m_UniformBuffersAllocation;
+    std::vector<void *> m_UniformBuffersMapped;
+    VmaAllocation m_TextureImageAllocation{VK_NULL_HANDLE};
+
     VkDescriptorSetLayout m_DescriptorSetLayout{VK_NULL_HANDLE};
     VkDescriptorPool m_DescriptorPool{VK_NULL_HANDLE};
     std::vector<VkDescriptorSet> m_DescriptorSets;
@@ -93,10 +99,9 @@ private:
     VkPipeline m_CrosshairPipeline{VK_NULL_HANDLE};
     VkPipelineLayout m_CrosshairPipelineLayout{VK_NULL_HANDLE};
     VkBuffer m_CrosshairVertexBuffer{VK_NULL_HANDLE};
-    VkDeviceMemory m_CrosshairVertexBufferMemory{VK_NULL_HANDLE};
+    VmaAllocation m_CrosshairVertexBufferAllocation{VK_NULL_HANDLE};
 
     VkImage m_TextureImage{VK_NULL_HANDLE};
-    VkDeviceMemory m_TextureImageMemory{VK_NULL_HANDLE};
     VkImageView m_TextureImageView{VK_NULL_HANDLE};
     VkSampler m_TextureSampler{VK_NULL_HANDLE};
 
