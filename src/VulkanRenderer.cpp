@@ -799,44 +799,51 @@ void VulkanRenderer::createRenderPass()
 }
 void VulkanRenderer::createCrosshairVertexBuffer()
 {
-    const float pixelHalfLen = 15.0f;
-    float ndcHalfLenX = pixelHalfLen * 2.0f / float(m_SwapChainExtent.width);
-    float ndcHalfLenY = pixelHalfLen * 2.0f / float(m_SwapChainExtent.height);
+    const float halfLenPx = 10.0f;
+    float w = float(m_SwapChainExtent.width);
+    float h = float(m_SwapChainExtent.height);
 
-    std::vector<glm::vec2> vertices = {
-        { -ndcHalfLenX,  0.0f },
-        {  ndcHalfLenX,  0.0f },
-        {  0.0f, -ndcHalfLenY },
-        {  0.0f,  ndcHalfLenY },
-    };
+    float ndcHalfX = halfLenPx * 2.0f / w;
+    float ndcHalfY = halfLenPx * 2.0f / h;
 
-    VkDeviceSize size = sizeof(glm::vec2) * vertices.size();
+    std::array<glm::vec2, 4> verts = {{
+        {-ndcHalfX, 0.0f},
+        {+ndcHalfX, 0.0f},
+        {0.0f, -ndcHalfY},
+        {0.0f, +ndcHalfY},
+    }};
 
-    if (m_CrosshairVertexBuffer != VK_NULL_HANDLE) {
+    VkDeviceSize size = sizeof(verts);
+
+    if (m_CrosshairVertexBuffer)
+    {
         vkDestroyBuffer(m_Device, m_CrosshairVertexBuffer, nullptr);
         vkFreeMemory(m_Device, m_CrosshairVertexBufferMemory, nullptr);
     }
 
-    VkBuffer staging; VkDeviceMemory stagingMem;
-    createBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+    VkBuffer staging;
+    VkDeviceMemory stagingMem;
+    createBuffer(size,
+                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                  staging, stagingMem);
 
-    void* data;
+    void *data;
     vkMapMemory(m_Device, stagingMem, 0, size, 0, &data);
-    memcpy(data, vertices.data(), (size_t)size);
+    memcpy(data, verts.data(), (size_t)size);
     vkUnmapMemory(m_Device, stagingMem);
 
-    createBuffer(size, VK_BUFFER_USAGE_TRANSFER_DST_BIT|VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+    createBuffer(size,
+                 VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                 m_CrosshairVertexBuffer, m_CrosshairVertexBufferMemory);
+                 m_CrosshairVertexBuffer,
+                 m_CrosshairVertexBufferMemory);
 
     copyBuffer(staging, m_CrosshairVertexBuffer, size);
 
     vkDestroyBuffer(m_Device, staging, nullptr);
     vkFreeMemory(m_Device, stagingMem, nullptr);
 }
-
 
 void VulkanRenderer::createGraphicsPipeline()
 {
@@ -1210,40 +1217,33 @@ void VulkanRenderer::recordCommandBuffer(
                    std::unique_ptr<Chunk>,
                    ivec3_less> &chunks)
 {
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    if (vkBeginCommandBuffer(m_CommandBuffers[m_CurrentFrame], &beginInfo) != VK_SUCCESS)
+    auto cb = m_CommandBuffers[m_CurrentFrame];
+
+    VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    if (vkBeginCommandBuffer(cb, &beginInfo) != VK_SUCCESS)
         throw std::runtime_error("failed to begin recording command buffer!");
 
-    VkRenderPassBeginInfo rp{};
-    rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    VkRenderPassBeginInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     rp.renderPass = m_RenderPass;
     rp.framebuffer = m_SwapChainFramebuffers[imageIndex];
     rp.renderArea = {{0, 0}, m_SwapChainExtent};
+    std::array<VkClearValue, 2> clears{};
+    clears[0].color = {{0, 0, 0, 1}};
+    clears[1].depthStencil = {1.0f, 0};
+    rp.clearValueCount = (uint32_t)clears.size();
+    rp.pClearValues = clears.data();
 
-    std::array<VkClearValue, 2> clear{};
-    clear[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-    clear[1].depthStencil = {1.f, 0};
-    rp.clearValueCount = static_cast<uint32_t>(clear.size());
-    rp.pClearValues = clear.data();
+    vkCmdBeginRenderPass(cb, &rp, VK_SUBPASS_CONTENTS_INLINE);
 
-    vkCmdBeginRenderPass(m_CommandBuffers[m_CurrentFrame], &rp, VK_SUBPASS_CONTENTS_INLINE);
-
-    vkCmdBindPipeline(m_CommandBuffers[m_CurrentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, m_GraphicsPipeline);
-
-    VkViewport vp{0, 0, (float)m_SwapChainExtent.width, (float)m_SwapChainExtent.height, 0.f, 1.f};
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_GraphicsPipeline);
+    VkViewport vp{0, 0, float(m_SwapChainExtent.width), float(m_SwapChainExtent.height), 0, 1};
     VkRect2D sc{{0, 0}, m_SwapChainExtent};
-    vkCmdSetViewport(m_CommandBuffers[m_CurrentFrame], 0, 1, &vp);
-    vkCmdSetScissor(m_CommandBuffers[m_CurrentFrame], 0, 1, &sc);
+    vkCmdSetViewport(cb, 0, 1, &vp);
+    vkCmdSetScissor(cb, 0, 1, &sc);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineLayout,
+                            0, 1, &m_DescriptorSets[m_CurrentFrame], 0, nullptr);
 
-    vkCmdBindDescriptorSets(
-        m_CommandBuffers[m_CurrentFrame],
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
-        m_PipelineLayout,
-        0, 1, &m_DescriptorSets[m_CurrentFrame],
-        0, nullptr);
-
-    for (const auto &[pos, chunkPtr] : chunks)
+    for (auto const &[pos, chunkPtr] : chunks)
     {
         Chunk *c = chunkPtr.get();
         c->markReady(m_Device);
@@ -1251,29 +1251,30 @@ void VulkanRenderer::recordCommandBuffer(
             continue;
 
         VkBuffer vb[] = {c->getVertexBuffer()};
-        VkDeviceSize off[] = {0};
-        vkCmdBindVertexBuffers(m_CommandBuffers[m_CurrentFrame], 0, 1, vb, off);
-        vkCmdBindIndexBuffer(m_CommandBuffers[m_CurrentFrame], c->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
-        vkCmdPushConstants(m_CommandBuffers[m_CurrentFrame], m_PipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &c->getModelMatrix());
-        vkCmdDrawIndexed(m_CommandBuffers[m_CurrentFrame], c->getIndexCount(), 1, 0, 0, 0);
+        VkDeviceSize offs[] = {0};
+        vkCmdBindVertexBuffers(cb, 0, 1, vb, offs);
+        vkCmdBindIndexBuffer(cb, c->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+        vkCmdPushConstants(cb, m_PipelineLayout,
+                           VK_SHADER_STAGE_VERTEX_BIT, 0,
+                           sizeof(glm::mat4), &c->getModelMatrix());
+        vkCmdDrawIndexed(cb, c->getIndexCount(), 1, 0, 0, 0);
     }
 
-    vkCmdNextSubpass(m_CommandBuffers[m_CurrentFrame], VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
 
-    vkCmdBindPipeline(m_CommandBuffers[m_CurrentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, m_CrosshairPipeline);
-    vkCmdSetLineWidth(m_CommandBuffers[m_CurrentFrame], 5.0f);
-    vkCmdSetViewport(m_CommandBuffers[m_CurrentFrame], 0, 1, &vp);
-    vkCmdSetScissor(m_CommandBuffers[m_CurrentFrame], 0, 1, &sc);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_CrosshairPipeline);
+    vkCmdSetLineWidth(cb, 2.5f);
+    vkCmdSetViewport(cb, 0, 1, &vp);
+    vkCmdSetScissor(cb, 0, 1, &sc);
 
-    VkBuffer vertexBuffers[] = {m_CrosshairVertexBuffer};
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(m_CommandBuffers[m_CurrentFrame], 0, 1, vertexBuffers, offsets);
+    VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(cb, 0, 1, &m_CrosshairVertexBuffer, &offset);
 
-    vkCmdDraw(m_CommandBuffers[m_CurrentFrame], 4, 1, 0, 0);
+    vkCmdDraw(cb, 4, 1, 0, 0);
 
-    vkCmdEndRenderPass(m_CommandBuffers[m_CurrentFrame]);
+    vkCmdEndRenderPass(cb);
 
-    if (vkEndCommandBuffer(m_CommandBuffers[m_CurrentFrame]) != VK_SUCCESS)
+    if (vkEndCommandBuffer(cb) != VK_SUCCESS)
         throw std::runtime_error("failed to record command buffer!");
 }
 
