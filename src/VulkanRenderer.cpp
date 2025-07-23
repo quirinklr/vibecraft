@@ -797,44 +797,46 @@ void VulkanRenderer::createRenderPass()
         throw std::runtime_error("failed to create render pass!");
     }
 }
-
 void VulkanRenderer::createCrosshairVertexBuffer()
 {
-
-    const float crosshairLen = 0.015f;
-    const float aspect = (float)m_SwapChainExtent.width / (float)m_SwapChainExtent.height;
+    const float pixelHalfLen = 15.0f;
+    float ndcHalfLenX = pixelHalfLen * 2.0f / float(m_SwapChainExtent.width);
+    float ndcHalfLenY = pixelHalfLen * 2.0f / float(m_SwapChainExtent.height);
 
     std::vector<glm::vec2> vertices = {
-
-        {-crosshairLen / aspect, 0.0f},
-        {crosshairLen / aspect, 0.0f},
-
-        {0.0f, -crosshairLen},
-        {0.0f, crosshairLen},
+        { -ndcHalfLenX,  0.0f },
+        {  ndcHalfLenX,  0.0f },
+        {  0.0f, -ndcHalfLenY },
+        {  0.0f,  ndcHalfLenY },
     };
 
-    VkDeviceSize bufferSize = sizeof(glm::vec2) * vertices.size();
+    VkDeviceSize size = sizeof(glm::vec2) * vertices.size();
 
-    VkBuffer stagingBuffer;
-    VkDeviceMemory stagingBufferMemory;
-    createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                 stagingBuffer, stagingBufferMemory);
+    if (m_CrosshairVertexBuffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(m_Device, m_CrosshairVertexBuffer, nullptr);
+        vkFreeMemory(m_Device, m_CrosshairVertexBufferMemory, nullptr);
+    }
 
-    void *data;
-    vkMapMemory(m_Device, stagingBufferMemory, 0, bufferSize, 0, &data);
-    memcpy(data, vertices.data(), (size_t)bufferSize);
-    vkUnmapMemory(m_Device, stagingBufferMemory);
+    VkBuffer staging; VkDeviceMemory stagingMem;
+    createBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                 staging, stagingMem);
 
-    createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+    void* data;
+    vkMapMemory(m_Device, stagingMem, 0, size, 0, &data);
+    memcpy(data, vertices.data(), (size_t)size);
+    vkUnmapMemory(m_Device, stagingMem);
+
+    createBuffer(size, VK_BUFFER_USAGE_TRANSFER_DST_BIT|VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                  m_CrosshairVertexBuffer, m_CrosshairVertexBufferMemory);
 
-    copyBuffer(stagingBuffer, m_CrosshairVertexBuffer, bufferSize);
+    copyBuffer(staging, m_CrosshairVertexBuffer, size);
 
-    vkDestroyBuffer(m_Device, stagingBuffer, nullptr);
-    vkFreeMemory(m_Device, stagingBufferMemory, nullptr);
+    vkDestroyBuffer(m_Device, staging, nullptr);
+    vkFreeMemory(m_Device, stagingMem, nullptr);
 }
+
 
 void VulkanRenderer::createGraphicsPipeline()
 {
@@ -1259,7 +1261,7 @@ void VulkanRenderer::recordCommandBuffer(
     vkCmdNextSubpass(m_CommandBuffers[m_CurrentFrame], VK_SUBPASS_CONTENTS_INLINE);
 
     vkCmdBindPipeline(m_CommandBuffers[m_CurrentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, m_CrosshairPipeline);
-    vkCmdSetLineWidth(m_CommandBuffers[m_CurrentFrame], 1.5f);
+    vkCmdSetLineWidth(m_CommandBuffers[m_CurrentFrame], 5.0f);
     vkCmdSetViewport(m_CommandBuffers[m_CurrentFrame], 0, 1, &vp);
     vkCmdSetScissor(m_CommandBuffers[m_CurrentFrame], 0, 1, &sc);
 
@@ -1652,4 +1654,5 @@ void VulkanRenderer::recreateSwapChain()
     createImageViews();
     createDepthResources();
     createFramebuffers();
+    createCrosshairVertexBuffer();
 }
