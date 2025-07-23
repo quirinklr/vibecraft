@@ -31,7 +31,6 @@ public:
     void generateMesh(VulkanRenderer &renderer);
     void cleanup(VulkanRenderer &renderer);
     void markReady(VulkanRenderer &renderer);
-
     void buildMeshCpu();
     bool uploadMesh(VulkanRenderer &renderer);
 
@@ -56,7 +55,7 @@ private:
 
     VkBuffer m_IndexBuffer = VK_NULL_HANDLE;
     VmaAllocation m_IndexBufferAllocation = VK_NULL_HANDLE;
-
+    
     UploadJob m_Upload;
     std::atomic<State> m_State;
 

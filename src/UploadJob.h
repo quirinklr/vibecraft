@@ -1,17 +1,14 @@
 #pragma once
 
-#include <vulkan/vulkan.h>
-#include "vk_mem_alloc.h"
+#include "VulkanWrappers.h"
 
 struct UploadJob
 {
-    VkBuffer stagingVB;
+    VkBuffer stagingVB = VK_NULL_HANDLE;
+    VmaAllocation stagingVbAlloc = VK_NULL_HANDLE;
 
-    VmaAllocation stagingVbAlloc;
+    VkBuffer stagingIB = VK_NULL_HANDLE;
+    VmaAllocation stagingIbAlloc = VK_NULL_HANDLE;
 
-    VkBuffer stagingIB;
-
-    VmaAllocation stagingIbAlloc;
-
-    VkFence fence;
+    VkFence fence = VK_NULL_HANDLE;
 };
