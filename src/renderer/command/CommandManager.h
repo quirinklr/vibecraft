@@ -19,13 +19,10 @@ public:
     CommandManager(const DeviceContext &deviceContext, const SwapChainContext &swapChainContext, const PipelineCache &pipelineCache);
     ~CommandManager();
 
-    void recordCommandBuffer(uint32_t imageIndex,
-                             uint32_t currentFrame,
-                             const std::map<glm::ivec3,
-                                            std::unique_ptr<Chunk>,
-                                            ivec3_less> &chunks,
+    void recordCommandBuffer(uint32_t imageIndex, uint32_t currentFrame,
+                             const std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less> &chunks,
                              const std::vector<VkDescriptorSet> &descriptorSets,
-                             VkBuffer crosshairVertexBuffer);
+                             VkBuffer crosshairVertexBuffer, bool wireframe);
     VkCommandBuffer getCommandBuffer(uint32_t index) const { return m_CommandBuffers[index]; }
     VkCommandPool getCommandPool() const { return m_CommandPool.get(); }
 

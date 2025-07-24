@@ -67,7 +67,8 @@ void VulkanRenderer::drawFrame(Camera &camera, const std::map<glm::ivec3, std::u
 
     vkResetFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(m_CurrentFrame));
     vkResetCommandBuffer(m_CommandManager->getCommandBuffer(m_CurrentFrame), 0);
-    m_CommandManager->recordCommandBuffer(imageIndex, m_CurrentFrame, chunks, m_DescriptorSets, m_CrosshairVertexBuffer.get());
+    m_CommandManager->recordCommandBuffer(imageIndex, m_CurrentFrame, chunks,
+                                          m_DescriptorSets, m_CrosshairVertexBuffer.get(), m_Settings.wireframe);
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;

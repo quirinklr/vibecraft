@@ -30,7 +30,7 @@ private:
     VulkanRenderer m_Renderer{m_Window, m_Settings};
     Camera m_Camera{};
 
-    static constexpr int RENDER_DISTANCE = 6;
+    static constexpr int RENDER_DISTANCE = 12;
     std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less> m_Chunks;
     std::vector<std::unique_ptr<Chunk>> m_Garbage;
 

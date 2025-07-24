@@ -81,6 +81,12 @@ void Engine::run()
             glfwGetCursorPos(m_Window.getGLFWwindow(), &lastX, &lastY);
         }
 
+        static bool fLast = false;
+        bool fNow = glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_F) == GLFW_PRESS;
+        if (fNow && !fLast)
+            m_Settings.wireframe = !m_Settings.wireframe;
+        fLast = fNow;
+
         if (mouseCaptured)
         {
             double mx, my;
