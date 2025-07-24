@@ -1,4 +1,5 @@
 #include "Chunk.h"
+#include "VulkanRenderer.h"
 #include "FastNoiseLite.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <stdexcept>
@@ -94,6 +95,7 @@ void Chunk::buildMeshCpu()
             }
     m_State.store(State::CPU_MESH_READY, std::memory_order_release);
 }
+
 void Chunk::markReady(VulkanRenderer &renderer)
 {
 
@@ -120,8 +122,8 @@ void Chunk::markReady(VulkanRenderer &renderer)
 
         vkDestroyFence(renderer.getDevice(), m_Upload.fence, nullptr);
 
-        vmaDestroyBuffer(renderer.m_Allocator, m_Upload.stagingVB, m_Upload.stagingVbAlloc);
-        vmaDestroyBuffer(renderer.m_Allocator, m_Upload.stagingIB, m_Upload.stagingIbAlloc);
+        vmaDestroyBuffer(renderer.getAllocator(), m_Upload.stagingVB, m_Upload.stagingVbAlloc);
+        vmaDestroyBuffer(renderer.getAllocator(), m_Upload.stagingIB, m_Upload.stagingIbAlloc);
 
         m_Upload = {};
 

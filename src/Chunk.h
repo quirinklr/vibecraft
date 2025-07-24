@@ -3,12 +3,16 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <atomic>
-#include "VulkanRenderer.h"
+
 #include "UploadJob.h"
+
+class VulkanRenderer;
 
 class FastNoiseLite;
 
 using BlockID = uint8_t;
+
+#include "renderer/Vertex.h"
 
 class Chunk
 {
@@ -55,7 +59,7 @@ private:
 
     VkBuffer m_IndexBuffer = VK_NULL_HANDLE;
     VmaAllocation m_IndexBufferAllocation = VK_NULL_HANDLE;
-    
+
     UploadJob m_Upload;
     std::atomic<State> m_State;
 

@@ -26,6 +26,18 @@ add_executable(Minecraft
     src/VulkanRenderer.cpp
     src/Camera.cpp
     src/Chunk.cpp 
+    src/renderer/alloc/AllocImpl.cpp
+    src/renderer/alloc/StbImpl.cpp
+    src/renderer/command/CommandManager.cpp
+    src/renderer/command/SyncPrimitives.cpp
+    src/renderer/core/DeviceContext.cpp
+    src/renderer/core/InstanceContext.cpp
+    src/renderer/pipeline/DescriptorLayout.cpp
+    src/renderer/pipeline/PipelineCache.cpp
+    src/renderer/resources/TextureManager.cpp
+    src/renderer/resources/UploadHelpers.cpp
+    src/renderer/swapchain/SwapChainContext.cpp
+    src/renderer/Vertex.cpp 
 )
 
 # SCHRITT 3: Include-Verzeichnisse hinzufügen
@@ -33,6 +45,8 @@ target_include_directories(Minecraft PUBLIC # <-- PRIVATE zu PUBLIC ändern
     ${Vulkan_INCLUDE_DIRS}
     "${GLFW_ROOT_DIR}/include"
     "${CMAKE_SOURCE_DIR}/libs"
+    ${CMAKE_SOURCE_DIR}/src           # allgemeine includes
+    ${CMAKE_SOURCE_DIR}/src/renderer  # neuer Ordner mit UniformBufferObject.h
 )
 
 # SCHRITT 4: Bibliotheken linken
