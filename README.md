@@ -11,13 +11,6 @@ Dieses Projekt ist eine von Grund auf in C++ entwickelte Voxel-Engine, inspirier
 *   **Effizientes Rendering:** Jeder Chunk wird als einzelner Vertex/Index-Buffer gerendert, um die Anzahl der Draw-Calls zu minimieren.
 *   **First-Person-Kamera:** Eine frei bewegliche Kamera mit Maus-Steuerung ist implementiert.
 
-## 🖼️ Screenshots
-
-*(Hier wäre ein Platz für einen Screenshot des aktuellen Builds. Das Ziel ist es, die visuelle Qualität schrittweise an das folgende Inspirationsbild anzunähern.)*
-
-**Inspirations-Ziel:**
-![Das Zielbild einer hochqualitativen Voxel-Landschaft](https.://i.imgur.com/your-image-hash.jpg)
-
 ## 🛠️ Verwendete Technologien
 
 *   **Sprache:** C++17
