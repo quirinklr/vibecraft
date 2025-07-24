@@ -9,6 +9,6 @@ struct Settings
 
     bool vsync = true;
     int fpsCap = 960;
-    float fov = 100.0f;
+    float fov = 90.0f;
     bool fullscreen = false;
 };

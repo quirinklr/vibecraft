@@ -171,7 +171,7 @@ void Engine::generateChunk(const glm::ivec3 &pos)
                 {
         FastNoiseLite noise;
         noise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
-        noise.SetFrequency(0.01f);
+        noise.SetFrequency(0.05f);
 
         raw->generateTerrain(noise);
         raw->buildMeshCpu(); })
