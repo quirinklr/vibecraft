@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.10)
 project(VibecraftProject VERSION 1.1 LANGUAGES CXX)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Vulkan REQUIRED)
 set(GLFW_ROOT_DIR "${CMAKE_SOURCE_DIR}/libs/glfw-3.4.bin.WIN64")
 

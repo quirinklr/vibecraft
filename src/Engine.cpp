@@ -6,7 +6,7 @@
 #include <thread>
 #include <glm/gtc/constants.hpp>
 
-Engine::Engine() : m_Window(1920, 1080, "Vibecraft", m_Settings)
+Engine::Engine() : m_Window(WIDTH, HEIGHT, "Vibecraft", m_Settings)
 {
     glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     const int ws = 8;
@@ -14,6 +14,7 @@ Engine::Engine() : m_Window(1920, 1080, "Vibecraft", m_Settings)
         for (int z = -ws / 2; z < ws / 2; ++z)
             generateChunk({x, 0, z});
 }
+
 Engine::~Engine()
 {
     for (auto &[p, c] : m_Chunks)
@@ -21,6 +22,7 @@ Engine::~Engine()
     for (auto &c : m_Garbage)
         c->cleanup(m_Renderer);
 }
+
 void Engine::run()
 {
     glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
@@ -106,6 +108,7 @@ void Engine::run()
         last = now;
     }
 }
+
 void Engine::generateChunk(const glm::ivec3 &pos)
 {
     if (m_Chunks.find(pos) != m_Chunks.end())
@@ -113,11 +116,11 @@ void Engine::generateChunk(const glm::ivec3 &pos)
     auto ch = std::make_unique<Chunk>(pos);
     Chunk *raw = ch.get();
     m_Chunks[pos] = std::move(ch);
-    std::thread([this, raw]
-                {
+    m_Pool.submit([this, raw](std::stop_token st)
+                  {
         m_TerrainGen.populateChunk(*raw);
-        raw->buildMeshCpu(); })
-        .detach();
+        if (st.stop_requested()) return;
+        raw->buildMeshCpu(); });
 }
 
 void Engine::updateChunks(const glm::vec3 &cam)
@@ -137,6 +140,7 @@ void Engine::updateChunks(const glm::vec3 &cam)
     }
     int cleaned = 0;
     for (auto it = m_Garbage.begin(); it != m_Garbage.end() && cleaned < 1;)
+    {
         if ((*it)->isReady())
         {
             (*it)->cleanup(m_Renderer);
@@ -144,7 +148,10 @@ void Engine::updateChunks(const glm::vec3 &cam)
             ++cleaned;
         }
         else
+        {
             ++it;
+        }
+    }
     int uploaded = 0;
     for (auto &[p, c] : m_Chunks)
     {

@@ -9,6 +9,7 @@
 #include <glm/glm.hpp>
 #include "math/Ivec3Less.h"
 #include "generation/TerrainGenerator.h"
+#include "ThreadPool.h"
 
 class Engine
 {
@@ -30,6 +31,7 @@ private:
     static constexpr int RENDER_DISTANCE = 12;
     std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less> m_Chunks;
     std::vector<std::unique_ptr<Chunk>> m_Garbage;
+    ThreadPool m_Pool;
     void generateChunk(const glm::ivec3 &pos);
     void updateChunks(const glm::vec3 &cameraPos);
 };
