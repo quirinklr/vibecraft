@@ -37,6 +37,7 @@ public:
     void markReady(VulkanRenderer &renderer);
     void buildMeshCpu();
     bool uploadMesh(VulkanRenderer &renderer);
+    void buildMeshGreedy();
 
     State getState() const { return m_State.load(std::memory_order_acquire); }
     bool isReady() const { return m_State.load(std::memory_order_acquire) == State::GPU_READY; }

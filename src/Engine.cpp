@@ -10,7 +10,7 @@
 #include <iomanip>
 
 Engine::Engine()
-    : m_Window(1280, 720, "Vibecraft", m_Settings)
+    : m_Window(1920, 1080, "Vibecraft", m_Settings)
 {
     glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 

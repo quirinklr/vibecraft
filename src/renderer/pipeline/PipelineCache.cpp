@@ -13,8 +13,8 @@ PipelineCache::PipelineCache(const DeviceContext& deviceContext, const SwapChain
 PipelineCache::~PipelineCache() {}
 
 void PipelineCache::createGraphicsPipeline() {
-    auto vertShaderCode = createShaderModule(readFile("shaders/vert.spv"));
-    auto fragShaderCode = createShaderModule(readFile("shaders/frag.spv"));
+    auto vertShaderCode = createShaderModule(readFile("shaders/shader.vert.spv"));
+    auto fragShaderCode = createShaderModule(readFile("shaders/shader.frag.spv"));
     VkPipelineShaderStageCreateInfo vertStageInfo{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vertShaderCode.get(), "main"};
     VkPipelineShaderStageCreateInfo fragStageInfo{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, fragShaderCode.get(), "main"};
     VkPipelineShaderStageCreateInfo shaderStages[] = {vertStageInfo, fragStageInfo};

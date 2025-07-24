@@ -16,7 +16,7 @@ VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings)
     m_SyncPrimitives = std::make_unique<SyncPrimitives>(*m_DeviceContext, *m_SwapChainContext);
     m_TextureManager = std::make_unique<TextureManager>(*m_DeviceContext, m_CommandManager->getCommandPool());
 
-    m_TextureManager->createTextureImage("../../textures/blocks/diamond_block.png");
+    m_TextureManager->createTextureImage("../../textures/blocks_atlas.png");
     m_TextureManager->createTextureImageView();
     m_TextureManager->createTextureSampler();
 

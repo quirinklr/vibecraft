@@ -1,6 +1,7 @@
 #include "Chunk.h"
 #include "VulkanRenderer.h"
 #include "FastNoiseLite.h"
+#include "BlockAtlas.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <stdexcept>
 
@@ -35,66 +36,135 @@ void Chunk::generateTerrain(FastNoiseLite &noise)
     m_State.store(State::TERRAIN_READY, std::memory_order_release);
 }
 
-void Chunk::buildMeshCpu()
+void Chunk::buildMeshGreedy()
 {
     if (m_State.load() != State::TERRAIN_READY)
         return;
+
     m_Vertices.clear();
     m_Indices.clear();
-    m_Vertices.reserve(16384);
-    m_Indices.reserve(24576);
-    auto addQuad = [&](const glm::vec3 &v0, const glm::vec3 &v1, const glm::vec3 &v2, const glm::vec3 &v3)
+
+    const int dsz[3] = {WIDTH, HEIGHT, DEPTH};
+    std::vector<int8_t> mask(WIDTH * HEIGHT);
+
+    const float TILE = 1.0f / 16.0f;
+
+    auto push = [&](glm::vec3 p0, glm::vec3 du, glm::vec3 dv,
+                    int w, int h, bool back, int faceDir, BlockID id)
     {
-        uint32_t start = static_cast<uint32_t>(m_Vertices.size());
-        m_Vertices.push_back({v0, {1, 1, 1}, {0, 0}});
-        m_Vertices.push_back({v1, {1, 1, 1}, {1, 0}});
-        m_Vertices.push_back({v2, {1, 1, 1}, {1, 1}});
-        m_Vertices.push_back({v3, {1, 1, 1}, {0, 1}});
-        m_Indices.push_back(start + 0);
-        m_Indices.push_back(start + 1);
-        m_Indices.push_back(start + 2);
-        m_Indices.push_back(start + 0);
-        m_Indices.push_back(start + 2);
-        m_Indices.push_back(start + 3);
-    };
-    const glm::ivec3 dirs[6] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
-    for (int z = 0; z < DEPTH; ++z)
-        for (int y = 0; y < HEIGHT; ++y)
-            for (int x = 0; x < WIDTH; ++x)
+        uint32_t base = uint32_t(m_Vertices.size());
+
+        glm::vec3 p1 = p0 + du * float(w);
+        glm::vec3 p2 = p1 + dv * float(h);
+        glm::vec3 p3 = p0 + dv * float(h);
+        if (back)
+            std::swap(p1, p3);
+
+        auto blockUV = [&](glm::vec3 p) -> glm::vec2
+        {
+            switch (faceDir)
             {
-                if (getBlock(x, y, z) == 0)
-                    continue;
-                glm::vec3 p{x, y, z};
-                for (int d = 0; d < 6; ++d)
-                {
-                    glm::ivec3 n{x + dirs[d].x, y + dirs[d].y, z + dirs[d].z};
-                    if (getBlock(n.x, n.y, n.z) != 0)
-                        continue;
-                    switch (d)
-                    {
-                    case 0:
-                        addQuad(p + glm::vec3(1, 0, 0), p + glm::vec3(1, 0, 1), p + glm::vec3(1, 1, 1), p + glm::vec3(1, 1, 0));
-                        break;
-                    case 1:
-                        addQuad(p + glm::vec3(0, 0, 1), p + glm::vec3(0, 0, 0), p + glm::vec3(0, 1, 0), p + glm::vec3(0, 1, 1));
-                        break;
-                    case 2:
-                        addQuad(p + glm::vec3(0, 1, 1), p + glm::vec3(1, 1, 1), p + glm::vec3(1, 1, 0), p + glm::vec3(0, 1, 0));
-                        break;
-                    case 3:
-                        addQuad(p + glm::vec3(0, 0, 0), p + glm::vec3(1, 0, 0), p + glm::vec3(1, 0, 1), p + glm::vec3(0, 0, 1));
-                        break;
-                    case 4:
-                        addQuad(p + glm::vec3(0, 0, 1), p + glm::vec3(1, 0, 1), p + glm::vec3(1, 1, 1), p + glm::vec3(0, 1, 1));
-                        break;
-                    case 5:
-                        addQuad(p + glm::vec3(1, 0, 0), p + glm::vec3(0, 0, 0), p + glm::vec3(0, 1, 0), p + glm::vec3(1, 1, 0));
-                        break;
-                    }
-                }
+            case 0:
+                return glm::vec2(p.z, p.y);
+            case 1:
+                return glm::vec2(-p.z, p.y);
+            case 2:
+                return glm::vec2(p.x, p.z);
+            case 3:
+                return glm::vec2(p.x, -p.z);
+            case 4:
+                return glm::vec2(-p.x, p.y);
+            default:
+                return glm::vec2(p.x, p.y);
             }
+        };
+
+        glm::vec2 t0 = blockUV(p0) * TILE + glm::vec2(id % 16, id / 16) * TILE;
+        glm::vec2 t1 = blockUV(p1) * TILE + glm::vec2(id % 16, id / 16) * TILE;
+        glm::vec2 t2 = blockUV(p2) * TILE + glm::vec2(id % 16, id / 16) * TILE;
+        glm::vec2 t3 = blockUV(p3) * TILE + glm::vec2(id % 16, id / 16) * TILE;
+
+        m_Vertices.push_back({p0, {1, 1, 1}, t0});
+        m_Vertices.push_back({p1, {1, 1, 1}, t1});
+        m_Vertices.push_back({p2, {1, 1, 1}, t2});
+        m_Vertices.push_back({p3, {1, 1, 1}, t3});
+
+        m_Indices.insert(m_Indices.end(),
+                         {base, base + 1, base + 2, base, base + 2, base + 3});
+    };
+
+    for (int d = 0; d < 3; ++d)
+    {
+        int U = (d + 1) % 3, V = (d + 2) % 3;
+        glm::vec3 du(0), dv(0);
+        du[U] = 1;
+        dv[V] = 1;
+
+        mask.assign(dsz[U] * dsz[V], 0);
+
+        for (int slice = 0; slice <= dsz[d]; ++slice)
+        {
+            for (int v = 0; v < dsz[V]; ++v)
+                for (int u = 0; u < dsz[U]; ++u)
+                {
+                    glm::ivec3 a{0}, b{0};
+                    a[d] = slice;
+                    b[d] = slice - 1;
+                    a[U] = b[U] = u;
+                    a[V] = b[V] = v;
+                    BlockID idA = slice < dsz[d] ? getBlock(a.x, a.y, a.z) : 0;
+                    BlockID idB = slice > 0 ? getBlock(b.x, b.y, b.z) : 0;
+                    mask[v * dsz[U] + u] = idA && !idB   ? idA
+                                           : !idA && idB ? -idB
+                                                         : 0;
+                }
+
+            for (int v = 0; v < dsz[V]; ++v)
+                for (int u = 0; u < dsz[U];)
+                {
+                    int8_t m = mask[v * dsz[U] + u];
+                    if (!m)
+                    {
+                        ++u;
+                        continue;
+                    }
+                    bool back = m < 0;
+                    BlockID id = back ? -m : m;
+
+                    int w = 1;
+                    while (u + w < dsz[U] && mask[v * dsz[U] + u + w] == m)
+                        ++w;
+                    int h = 1;
+                    bool stop = false;
+                    while (v + h < dsz[V] && !stop)
+                    {
+                        for (int k = 0; k < w; ++k)
+                            if (mask[(v + h) * dsz[U] + u + k] != m)
+                            {
+                                stop = true;
+                                break;
+                            }
+                        if (!stop)
+                            ++h;
+                    }
+                    for (int y = 0; y < h; ++y)
+                        for (int x = 0; x < w; ++x)
+                            mask[(v + y) * dsz[U] + u + x] = 0;
+
+                    glm::vec3 p(0);
+                    p[d] = slice;
+                    p[U] = u;
+                    p[V] = v;
+                    int faceDir = d * 2 + (back ? 1 : 0);
+                    push(p, du, dv, w, h, back, faceDir, id);
+                    u += w;
+                }
+        }
+    }
     m_State.store(State::CPU_MESH_READY, std::memory_order_release);
 }
+
+void Chunk::buildMeshCpu() { buildMeshGreedy(); }
 
 void Chunk::markReady(VulkanRenderer &renderer)
 {
