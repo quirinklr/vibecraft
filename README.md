@@ -1,4 +1,4 @@
-# Minecraft Vibe Engine - Ein C++ Voxel-Projekt mit Vulkan
+# Vibecraft Engine - Ein C++ Voxel-Projekt mit Vulkan
 
 Dieses Projekt ist eine von Grund auf in C++ entwickelte Voxel-Engine, inspiriert von Minecraft, mit einem starken Fokus auf hochleistungsfähige, moderne Grafikprogrammierung mithilfe der Vulkan-API.
 
@@ -34,8 +34,8 @@ Dieses Projekt ist eine von Grund auf in C++ entwickelte Voxel-Engine, inspirier
 
 1.  **Klone das Repository:**
     ```bash
-    git clone <repository-url>
-    cd <projekt-ordner>
+    git clone https://github.com/quirinklr/minecraft-vibe.git
+    cd minecraft-vibe
     ```
 
 2.  **Konfiguriere das Projekt mit CMake:**
@@ -51,9 +51,9 @@ Dieses Projekt ist eine von Grund auf in C++ entwickelte Voxel-Engine, inspirier
 4.  **Führe die Anwendung aus:**
     Die ausführbare Datei, Shader und Texturen findest du im `build/Debug` (oder einem ähnlichen) Verzeichnis.
     ```bash
-    ./build/Debug/MinecraftProject
+    ./build/Debug
     ```
 
 ## 📄 Lizenz
 
-Dieses Projekt steht unter der MIT-Lizenz. Siehe die `LICENSE`-Datei für weitere Details. *(Du müsstest noch eine LICENSE-Datei hinzufügen)*
+Dieses Projekt steht unter der MIT-Lizenz. Siehe die `LICENSE`-Datei für weitere Details.

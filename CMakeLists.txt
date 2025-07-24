@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 # Projektname, Version und Sprache definieren
-project(MinecraftProject VERSION 1.0 LANGUAGES CXX)
+project(VibecraftProject VERSION 1.0 LANGUAGES CXX)
 
 # C++ Standard auf 17 (oder höher) setzen
 set(CMAKE_CXX_STANDARD 17)
@@ -19,7 +19,7 @@ set(GLFW_ROOT_DIR "${CMAKE_SOURCE_DIR}/libs/glfw-3.4.bin.WIN64")
 
 # --- NEUER EXECUTABLE BLOCK ---
 # Erstelle die ausführbare Datei aus ALLEN unseren Quellcodedateien
-add_executable(Minecraft
+add_executable(Vibecraft
     src/main.cpp
     src/Engine.cpp
     src/Window.cpp
@@ -41,7 +41,7 @@ add_executable(Minecraft
 )
 
 # SCHRITT 3: Include-Verzeichnisse hinzufügen
-target_include_directories(Minecraft PUBLIC # <-- PRIVATE zu PUBLIC ändern
+target_include_directories(Vibecraft PUBLIC # <-- PRIVATE zu PUBLIC ändern
     ${Vulkan_INCLUDE_DIRS}
     "${GLFW_ROOT_DIR}/include"
     "${CMAKE_SOURCE_DIR}/libs"
@@ -50,7 +50,7 @@ target_include_directories(Minecraft PUBLIC # <-- PRIVATE zu PUBLIC ändern
 )
 
 # SCHRITT 4: Bibliotheken linken
-target_link_libraries(Minecraft PRIVATE
+target_link_libraries(Vibecraft PRIVATE
     ${Vulkan_LIBRARIES}
     "${GLFW_ROOT_DIR}/lib-vc2022/glfw3.lib"
 )
@@ -58,16 +58,16 @@ target_link_libraries(Minecraft PRIVATE
 # =================================================================
 # KOPIERE SHADER AUTOMATISCH NACH DEM BUILD
 # =================================================================
-add_custom_command(TARGET Minecraft POST_BUILD
+add_custom_command(TARGET Vibecraft POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     "${CMAKE_SOURCE_DIR}/shaders"
-    "$<TARGET_FILE_DIR:Minecraft>/shaders"
+    "$<TARGET_FILE_DIR:Vibecraft>/shaders"
     COMMENT "Kopiere Shader in den Build-Ordner"
 )
 
-add_custom_command(TARGET Minecraft POST_BUILD
+add_custom_command(TARGET Vibecraft POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     "${CMAKE_SOURCE_DIR}/textures"
-    "$<TARGET_FILE_DIR:Minecraft>/textures"
+    "$<TARGET_FILE_DIR:Vibecraft>/textures"
     COMMENT "Kopiere Texturen in den Build-Ordner"
 )

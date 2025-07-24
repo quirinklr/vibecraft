@@ -26,7 +26,7 @@ public:
 
 private:
     Settings m_Settings{};
-    Window m_Window{WIDTH, HEIGHT, "Minecraft Vibe Engine", m_Settings};
+    Window m_Window{WIDTH, HEIGHT, "Vibecraft", m_Settings};
     VulkanRenderer m_Renderer{m_Window, m_Settings};
     Camera m_Camera{};
 
