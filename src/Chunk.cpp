@@ -14,6 +14,14 @@ Chunk::Chunk(glm::ivec3 pos) : m_Pos(pos)
 
 Chunk::~Chunk() {}
 
+void Chunk::setBlock(int x, int y, int z, BlockID id)
+{
+    if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT || z < 0 || z >= DEPTH)
+        return;
+
+    m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x] = id;
+}
+
 BlockID Chunk::getBlock(int x, int y, int z) const
 {
     if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT || z < 0 || z >= DEPTH)

@@ -1,216 +1,142 @@
 #include "Engine.h"
-#include "FastNoiseLite.h"
 #include <iostream>
-#include <glm/gtc/constants.hpp>
 #include <string>
 #include <sstream>
-#include <thread>
-#include <chrono>
-#include "math/Ivec3Less.h"
 #include <iomanip>
+#include <thread>
+#include <glm/gtc/constants.hpp>
 
-Engine::Engine()
-    : m_Window(1920, 1080, "Vibecraft", m_Settings)
+Engine::Engine() : m_Window(1920, 1080, "Vibecraft", m_Settings)
 {
     glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-
-    const int worldSize = 8;
-    for (int x = -worldSize / 2; x < worldSize / 2; ++x)
-    {
-        for (int z = -worldSize / 2; z < worldSize / 2; ++z)
-        {
-            glm::ivec3 pos = {x, 0, z};
-            generateChunk(pos);
-        }
-    }
+    const int ws = 8;
+    for (int x = -ws / 2; x < ws / 2; ++x)
+        for (int z = -ws / 2; z < ws / 2; ++z)
+            generateChunk({x, 0, z});
 }
-
 Engine::~Engine()
 {
-
-    for (auto &[pos, ch] : m_Chunks)
-        ch->cleanup(m_Renderer);
-
-    for (auto &ch : m_Garbage)
-        ch->cleanup(m_Renderer);
+    for (auto &[p, c] : m_Chunks)
+        c->cleanup(m_Renderer);
+    for (auto &c : m_Garbage)
+        c->cleanup(m_Renderer);
 }
-
 void Engine::run()
 {
-    std::cout << ">>> loop begin" << std::endl;
-
     glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-    bool mouseCaptured = true;
-
-    float lastFrameTime = static_cast<float>(glfwGetTime());
-
-    double lastX, lastY;
-    glfwGetCursorPos(m_Window.getGLFWwindow(), &lastX, &lastY);
-
+    bool mouse = true;
+    float last = static_cast<float>(glfwGetTime());
+    double lx, ly;
+    glfwGetCursorPos(m_Window.getGLFWwindow(), &lx, &ly);
     float yaw = -glm::half_pi<float>();
-    float pitch = 0.0f;
-
-    glm::vec3 cameraPos = {0.0f, 100.0f, 3.0f};
-
-    float baseSpeed = 10.0f;
-    const float boostMul = 4.0f;
-    const float speedStep = 2.0f;
-
-    float lastFPSTime = lastFrameTime;
-    int frameCount = 0;
-
-    constexpr float mouseScale = 0.0005f;
-
+    float pitch = 0.f;
+    glm::vec3 cam = {0.f, 100.f, 3.f};
+    float baseSpeed = 10.f;
+    const float boost = 4.f;
+    const float step = 2.f;
+    float fpsTime = last;
+    int frames = 0;
+    const float mScale = 0.0005f;
     while (!m_Window.shouldClose())
     {
-        float current = static_cast<float>(glfwGetTime());
-        float dt = current - lastFrameTime;
-
+        float now = static_cast<float>(glfwGetTime());
+        float dt = now - last;
         glfwPollEvents();
-
         if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_ESCAPE) == GLFW_PRESS)
         {
             glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-            mouseCaptured = false;
+            mouse = false;
         }
-        if (!mouseCaptured &&
-            glfwGetMouseButton(m_Window.getGLFWwindow(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
+        if (!mouse && glfwGetMouseButton(m_Window.getGLFWwindow(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
         {
             glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-            mouseCaptured = true;
-            glfwGetCursorPos(m_Window.getGLFWwindow(), &lastX, &lastY);
+            mouse = true;
+            glfwGetCursorPos(m_Window.getGLFWwindow(), &lx, &ly);
         }
-
         static bool fLast = false;
         bool fNow = glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_F) == GLFW_PRESS;
         if (fNow && !fLast)
             m_Settings.wireframe = !m_Settings.wireframe;
         fLast = fNow;
-
-        if (mouseCaptured)
+        if (mouse)
         {
             double mx, my;
             glfwGetCursorPos(m_Window.getGLFWwindow(), &mx, &my);
-
-            float dX = static_cast<float>(mx - lastX);
-            float dY = static_cast<float>(my - lastY);
-            lastX = mx;
-            lastY = my;
-
-            yaw -= dX * m_Settings.mouseSensitivityX * mouseScale;
-            pitch += (m_Settings.invertMouseY ? dY : -dY) * m_Settings.mouseSensitivityY * mouseScale;
-
-            pitch = glm::clamp(pitch,
-                               -glm::half_pi<float>() + 0.01f,
-                               glm::half_pi<float>() - 0.01f);
+            float dx = static_cast<float>(mx - lx);
+            float dy = static_cast<float>(my - ly);
+            lx = mx;
+            ly = my;
+            yaw -= dx * m_Settings.mouseSensitivityX * mScale;
+            pitch += (m_Settings.invertMouseY ? dy : -dy) * m_Settings.mouseSensitivityY * mScale;
+            pitch = glm::clamp(pitch, -glm::half_pi<float>() + 0.01f, glm::half_pi<float>() - 0.01f);
         }
-
-        glm::vec3 forward{
-            cos(yaw) * cos(pitch),
-            sin(pitch),
-            sin(yaw) * cos(pitch)};
-        forward = glm::normalize(forward);
-
-        glm::vec3 right = glm::normalize(glm::cross(forward, {0.f, 1.f, 0.f}));
-        glm::vec3 up = glm::normalize(glm::cross(right, forward));
-
+        glm::vec3 f{cos(yaw) * cos(pitch), sin(pitch), sin(yaw) * cos(pitch)};
+        f = glm::normalize(f);
+        glm::vec3 r = glm::normalize(glm::cross(f, {0.f, 1.f, 0.f}));
+        glm::vec3 u = glm::normalize(glm::cross(r, f));
         if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_E) == GLFW_PRESS)
-            baseSpeed += speedStep * dt * 10.f;
+            baseSpeed += step * dt * 10.f;
         if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_Q) == GLFW_PRESS)
-            baseSpeed = glm::max(1.f, baseSpeed - speedStep * dt * 10.f);
-
+            baseSpeed = glm::max(1.f, baseSpeed - step * dt * 10.f);
         float speed = baseSpeed;
         if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
-            speed *= boostMul;
-
+            speed *= boost;
         if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_W) == GLFW_PRESS)
-            cameraPos -= forward * speed * dt;
+            cam -= f * speed * dt;
         if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_S) == GLFW_PRESS)
-            cameraPos += forward * speed * dt;
+            cam += f * speed * dt;
         if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_A) == GLFW_PRESS)
-            cameraPos -= right * speed * dt;
+            cam -= r * speed * dt;
         if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_D) == GLFW_PRESS)
-            cameraPos += right * speed * dt;
-
-        m_Camera.setViewDirection(cameraPos, forward, up);
-
+            cam += r * speed * dt;
+        m_Camera.setViewDirection(cam, f, u);
         auto ext = m_Window.getExtent();
-        m_Camera.setPerspectiveProjection(glm::radians(m_Settings.fov),
-                                          static_cast<float>(ext.width) / ext.height,
-                                          0.1f, 1000.f);
-
-        updateChunks(cameraPos);
-
+        m_Camera.setPerspectiveProjection(glm::radians(m_Settings.fov), static_cast<float>(ext.width) / ext.height, 0.1f, 1000.f);
+        updateChunks(cam);
         m_Renderer.drawFrame(m_Camera, m_Chunks);
-
-        frameCount++;
-        if (current - lastFPSTime >= 1.0f)
+        frames++;
+        if (now - fpsTime >= 1.f)
         {
-            std::stringstream ss;
-            ss << std::fixed << std::setprecision(1)
-               << "Vibecraft | FPS: " << frameCount
-               << " | Yaw: " << glm::degrees(yaw)
-               << " | Pitch: " << glm::degrees(pitch)
-               << " | Speed: " << baseSpeed;
-            glfwSetWindowTitle(m_Window.getGLFWwindow(), ss.str().c_str());
-            frameCount = 0;
-            lastFPSTime = current;
+            std::stringstream s;
+            s << std::fixed << std::setprecision(1) << "Vibecraft | FPS: " << frames << " | Yaw: " << glm::degrees(yaw) << " | Pitch: " << glm::degrees(pitch) << " | Speed: " << baseSpeed;
+            glfwSetWindowTitle(m_Window.getGLFWwindow(), s.str().c_str());
+            frames = 0;
+            fpsTime = now;
         }
-
-        lastFrameTime = current;
+        last = now;
     }
-
-    std::cout << "<<< loop end" << std::endl;
 }
-
 void Engine::generateChunk(const glm::ivec3 &pos)
 {
-
     if (m_Chunks.find(pos) != m_Chunks.end())
         return;
-
-    auto chunk = std::make_unique<Chunk>(pos);
-    Chunk *raw = chunk.get();
-    m_Chunks[pos] = std::move(chunk);
-
-    std::thread([raw]
+    auto ch = std::make_unique<Chunk>(pos);
+    Chunk *raw = ch.get();
+    m_Chunks[pos] = std::move(ch);
+    std::thread([this, raw]
                 {
-        FastNoiseLite noise;
-        noise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
-        noise.SetFrequency(0.05f);
-
-        raw->generateTerrain(noise);
+        m_TerrainGen.populateChunk(*raw);
         raw->buildMeshCpu(); })
         .detach();
 }
 
-void Engine::updateChunks(const glm::vec3 &camPos)
+void Engine::updateChunks(const glm::vec3 &cam)
 {
-
-    glm::ivec3 camChunk{
-        static_cast<int>(std::floor(camPos.x / Chunk::WIDTH)), 0,
-        static_cast<int>(std::floor(camPos.z / Chunk::DEPTH))};
-
+    glm::ivec3 cc{static_cast<int>(std::floor(cam.x / Chunk::WIDTH)), 0, static_cast<int>(std::floor(cam.z / Chunk::DEPTH))};
     for (int dz = -RENDER_DISTANCE; dz <= RENDER_DISTANCE; ++dz)
         for (int dx = -RENDER_DISTANCE; dx <= RENDER_DISTANCE; ++dx)
-            generateChunk(camChunk + glm::ivec3{dx, 0, dz});
-
+            generateChunk(cc + glm::ivec3{dx, 0, dz});
     std::vector<glm::ivec3> out;
-    for (auto &[pos, chunk] : m_Chunks)
+    for (auto &[p, c] : m_Chunks)
+        if (std::max(std::abs(p.x - cc.x), std::abs(p.z - cc.z)) > RENDER_DISTANCE)
+            out.push_back(p);
+    for (auto &p : out)
     {
-        if (std::max(std::abs(pos.x - camChunk.x),
-                     std::abs(pos.z - camChunk.z)) > RENDER_DISTANCE)
-            out.push_back(pos);
+        m_Garbage.push_back(std::move(m_Chunks[p]));
+        m_Chunks.erase(p);
     }
-    for (auto &pos : out)
-    {
-        m_Garbage.push_back(std::move(m_Chunks[pos]));
-        m_Chunks.erase(pos);
-    }
-
     int cleaned = 0;
     for (auto it = m_Garbage.begin(); it != m_Garbage.end() && cleaned < 1;)
-    {
         if ((*it)->isReady())
         {
             (*it)->cleanup(m_Renderer);
@@ -218,17 +144,13 @@ void Engine::updateChunks(const glm::vec3 &camPos)
             ++cleaned;
         }
         else
-        {
             ++it;
-        }
-    }
-
     int uploaded = 0;
-    for (auto &[pos, ch] : m_Chunks)
+    for (auto &[p, c] : m_Chunks)
     {
         if (uploaded >= 2)
             break;
-        if (ch->uploadMesh(m_Renderer))
+        if (c->uploadMesh(m_Renderer))
             ++uploaded;
     }
 }
