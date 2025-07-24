@@ -13,6 +13,8 @@ cmake-build-*/
 *.user.*
 *.opensdf
 *.sln.docstates
+tree-skel.bat
+tree-skel-output.txt
 
 # IDE-specific settings folder
 .vs/
