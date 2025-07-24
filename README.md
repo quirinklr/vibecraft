@@ -1,29 +1,40 @@
-# Minecraft Clone in C++ mit Vulkan
+# Minecraft Vibe Engine - Ein C++ Voxel-Projekt mit Vulkan
 
-Dieses Projekt ist ein Versuch, das beliebte Spiel Minecraft von Grund auf in C++ mit der Vulkan-Grafik-API neu zu erstellen.
+Dieses Projekt ist eine von Grund auf in C++ entwickelte Voxel-Engine, inspiriert von Minecraft, mit einem starken Fokus auf hochleistungsfähige, moderne Grafikprogrammierung mithilfe der Vulkan-API.
 
-## 🚀 Features
+## 🚀 Aktuelle Features
 
-*   **Moderne Grafik-API:** Nutzt Vulkan für hochleistungsfähige, plattformübergreifende Grafik.
-*   **Grundlegende Spiel-Engine:** Beinhaltet eine einfache Engine-Architektur mit einer Game-Loop, Fensterverwaltung und Kamera-Steuerung.
-*   **Block-Rendering:** Kann Minecraft-Blocktexturen laden und in einer 3D-Welt darstellen.
+*   **Moderne Vulkan-Engine:** Nutzt Vulkan für plattformübergreifende, High-Performance-Grafik. Die Architektur ist sauber in logische Komponenten wie Device-, SwapChain- und Command-Management getrennt.
+*   **Dynamisches Chunk-System:** Die Welt ist in Chunks unterteilt, die dynamisch geladen und entladen werden, basierend auf der Entfernung des Spielers.
+*   **Multithreaded World Generation:** Die Generierung des Terrains und die Erstellung der Chunk-Meshes werden in separaten Threads ausgeführt, um die Haupt-Anwendung flüssig zu halten.
+*   **Prozedurale Terrain-Generierung:** Eine grundlegende Landschaft wird mithilfe von `FastNoiseLite` (Simplex-Noise) erstellt.
+*   **Effizientes Rendering:** Jeder Chunk wird als einzelner Vertex/Index-Buffer gerendert, um die Anzahl der Draw-Calls zu minimieren.
+*   **First-Person-Kamera:** Eine frei bewegliche Kamera mit Maus-Steuerung ist implementiert.
 
-*(Hier könntest du später weitere implementierte Features wie Spieler-Bewegung, Block-Platzierung, Welt-Generierung usw. hinzufügen.)*
+## 🖼️ Screenshots
+
+*(Hier wäre ein Platz für einen Screenshot des aktuellen Builds. Das Ziel ist es, die visuelle Qualität schrittweise an das folgende Inspirationsbild anzunähern.)*
+
+**Inspirations-Ziel:**
+![Das Zielbild einer hochqualitativen Voxel-Landschaft](https.://i.imgur.com/your-image-hash.jpg)
 
 ## 🛠️ Verwendete Technologien
 
-*   **Sprache:** C++
+*   **Sprache:** C++17
 *   **Build-System:** CMake
-*   **Grafik-API:** [Vulkan](https.://www.vulkan.org/)
+*   **Grafik-API:** [Vulkan](https://www.vulkan.org/)
+*   **Speicherverwaltung:** [Vulkan Memory Allocator (VMA)](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
 *   **Fensterverwaltung:** [GLFW](https://www.glfw.org/)
+*   **Mathematik:** [GLM](https://github.com/g-truc/glm)
+*   **Noise-Generierung:** [FastNoiseLite](https://github.com/Auburn/FastNoiseLite)
 *   **Bild-Laden:** [stb_image](https://github.com/nothings/stb)
 
 ## ⚙️ Bauen und Ausführen
 
 ### Voraussetzungen
 
-*   Ein C++ Compiler, der C++17 unterstützt
-*   [CMake](https://cmake.org/download/)
+*   Ein C++ Compiler, der C++17 unterstützt (z.B. MSVC, GCC, Clang)
+*   [CMake](https://cmake.org/download/) (Version 3.10+)
 *   [Vulkan SDK](https://vulkan.lunarg.com/sdk/home)
 
 ### Schritte
@@ -31,7 +42,7 @@ Dieses Projekt ist ein Versuch, das beliebte Spiel Minecraft von Grund auf in C+
 1.  **Klone das Repository:**
     ```bash
     git clone <repository-url>
-    cd Minecraft
+    cd <projekt-ordner>
     ```
 
 2.  **Konfiguriere das Projekt mit CMake:**
@@ -45,14 +56,10 @@ Dieses Projekt ist ein Versuch, das beliebte Spiel Minecraft von Grund auf in C+
     ```
 
 4.  **Führe die Anwendung aus:**
-    Die ausführbare Datei findest du im `build/Debug` (oder einem ähnlichen) Verzeichnis.
+    Die ausführbare Datei, Shader und Texturen findest du im `build/Debug` (oder einem ähnlichen) Verzeichnis.
     ```bash
-    ./build/Debug/Minecraft
+    ./build/Debug/MinecraftProject
     ```
-
-## 🖼️ Screenshots
-
-*(Hier wäre ein guter Platz, um Screenshots oder GIFs deines Projekts hinzuzufügen!)*
 
 ## 📄 Lizenz
 
