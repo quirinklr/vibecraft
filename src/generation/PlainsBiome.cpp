@@ -1,3 +1,13 @@
 #include "PlainsBiome.h"
-uint8_t PlainsBiome::surface(uint8_t beneath, int y) const { return y < 2 ? 1 : 2; }
+#include "../BlockIds.h"
+
+uint8_t PlainsBiome::surface(uint8_t, int y) const
+{
+    if (y == 0)
+        return DIRT;
+    else if (y <= 3)
+        return DIRT;
+    else
+        return STONE;
+}
 void PlainsBiome::decorate(Chunk &, FastNoiseLite &) const {}

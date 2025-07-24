@@ -4,11 +4,14 @@
 #include "BlockAtlas.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <stdexcept>
+#include "BlockIds.h"
 
 Chunk::Chunk(glm::ivec3 pos) : m_Pos(pos)
 {
-    m_Blocks.resize(WIDTH * HEIGHT * DEPTH, 0);
-    m_ModelMatrix = glm::translate(glm::mat4(1.f), glm::vec3(pos.x * WIDTH, pos.y * HEIGHT, pos.z * DEPTH));
+
+    m_Blocks.resize(WIDTH * HEIGHT * DEPTH, BlockID::AIR);
+    m_ModelMatrix = glm::translate(glm::mat4(1.f),
+                                   glm::vec3(pos.x * WIDTH, pos.y * HEIGHT, pos.z * DEPTH));
     m_State.store(State::INITIAL, std::memory_order_release);
 }
 
@@ -25,7 +28,7 @@ void Chunk::setBlock(int x, int y, int z, BlockID id)
 BlockID Chunk::getBlock(int x, int y, int z) const
 {
     if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT || z < 0 || z >= DEPTH)
-        return 0;
+        return BlockID::AIR;
     return m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x];
 }
 
@@ -39,7 +42,7 @@ void Chunk::generateTerrain(FastNoiseLite &noise)
             float h = noise.GetNoise(gx, gz);
             int ground = 64 + int(h * 30.f);
             for (int y = 0; y < ground && y < HEIGHT; ++y)
-                m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x] = 1;
+                m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x] = BlockID::STONE;
         }
     m_State.store(State::TERRAIN_READY, std::memory_order_release);
 }
@@ -55,7 +58,7 @@ void Chunk::buildMeshGreedy()
     const int dsz[3] = {WIDTH, HEIGHT, DEPTH};
     std::vector<int8_t> mask(WIDTH * HEIGHT);
 
-    const float TILE = 1.0f / 16.0f;
+    constexpr float TILE = 1.0f / 16.0f;
 
     auto push = [&](glm::vec3 p0, glm::vec3 du, glm::vec3 dv,
                     int w, int h, bool back, int faceDir, BlockID id)
@@ -73,32 +76,40 @@ void Chunk::buildMeshGreedy()
             switch (faceDir)
             {
             case 0:
-                return glm::vec2(p.z, p.y);
+                return {p.z, p.y};
             case 1:
-                return glm::vec2(-p.z, p.y);
+                return {-p.z, p.y};
             case 2:
-                return glm::vec2(p.x, p.z);
+                return {p.x, p.z};
             case 3:
-                return glm::vec2(p.x, -p.z);
+                return {p.x, -p.z};
             case 4:
-                return glm::vec2(-p.x, p.y);
+                return {-p.x, p.y};
             default:
-                return glm::vec2(p.x, p.y);
+                return {p.x, p.y};
             }
         };
 
-        glm::vec2 t0 = blockUV(p0) * TILE + glm::vec2(id % 16, id / 16) * TILE;
-        glm::vec2 t1 = blockUV(p1) * TILE + glm::vec2(id % 16, id / 16) * TILE;
-        glm::vec2 t2 = blockUV(p2) * TILE + glm::vec2(id % 16, id / 16) * TILE;
-        glm::vec2 t3 = blockUV(p3) * TILE + glm::vec2(id % 16, id / 16) * TILE;
+        const uint32_t idVal = static_cast<uint32_t>(id);
+        glm::vec2 tileOrigin{(idVal % 16) * TILE,
+                             (idVal / 16) * TILE};
 
-        m_Vertices.push_back({p0, {1, 1, 1}, t0});
-        m_Vertices.push_back({p1, {1, 1, 1}, t1});
-        m_Vertices.push_back({p2, {1, 1, 1}, t2});
-        m_Vertices.push_back({p3, {1, 1, 1}, t3});
+        auto makeV = [&](glm::vec3 pos) -> Vertex
+        {
+            glm::vec2 uv = blockUV(pos);
+            return {pos,
+                    {tileOrigin.x, tileOrigin.y, 0.0f},
+                    uv};
+        };
+
+        m_Vertices.push_back(makeV(p0));
+        m_Vertices.push_back(makeV(p1));
+        m_Vertices.push_back(makeV(p2));
+        m_Vertices.push_back(makeV(p3));
 
         m_Indices.insert(m_Indices.end(),
-                         {base, base + 1, base + 2, base, base + 2, base + 3});
+                         {base, base + 1, base + 2,
+                          base, base + 2, base + 3});
     };
 
     for (int d = 0; d < 3; ++d)
@@ -112,6 +123,7 @@ void Chunk::buildMeshGreedy()
 
         for (int slice = 0; slice <= dsz[d]; ++slice)
         {
+
             for (int v = 0; v < dsz[V]; ++v)
                 for (int u = 0; u < dsz[U]; ++u)
                 {
@@ -120,11 +132,19 @@ void Chunk::buildMeshGreedy()
                     b[d] = slice - 1;
                     a[U] = b[U] = u;
                     a[V] = b[V] = v;
-                    BlockID idA = slice < dsz[d] ? getBlock(a.x, a.y, a.z) : 0;
-                    BlockID idB = slice > 0 ? getBlock(b.x, b.y, b.z) : 0;
-                    mask[v * dsz[U] + u] = idA && !idB   ? idA
-                                           : !idA && idB ? -idB
-                                                         : 0;
+
+                    BlockID idA = (slice < dsz[d]) ? getBlock(a.x, a.y, a.z)
+                                                   : BlockID::AIR;
+                    BlockID idB = (slice > 0) ? getBlock(b.x, b.y, b.z)
+                                              : BlockID::AIR;
+
+                    int8_t entry = 0;
+                    if (idA != BlockID::AIR && idB == BlockID::AIR)
+                        entry = static_cast<int8_t>(idA);
+                    else if (idA == BlockID::AIR && idB != BlockID::AIR)
+                        entry = -static_cast<int8_t>(idB);
+
+                    mask[v * dsz[U] + u] = entry;
                 }
 
             for (int v = 0; v < dsz[V]; ++v)
@@ -136,12 +156,15 @@ void Chunk::buildMeshGreedy()
                         ++u;
                         continue;
                     }
+
                     bool back = m < 0;
-                    BlockID id = back ? -m : m;
+                    BlockID id = static_cast<BlockID>(back ? -m : m);
 
                     int w = 1;
-                    while (u + w < dsz[U] && mask[v * dsz[U] + u + w] == m)
+                    while (u + w < dsz[U] &&
+                           mask[v * dsz[U] + u + w] == m)
                         ++w;
+
                     int h = 1;
                     bool stop = false;
                     while (v + h < dsz[V] && !stop)
@@ -155,6 +178,7 @@ void Chunk::buildMeshGreedy()
                         if (!stop)
                             ++h;
                     }
+
                     for (int y = 0; y < h; ++y)
                         for (int x = 0; x < w; ++x)
                             mask[(v + y) * dsz[U] + u + x] = 0;
@@ -164,11 +188,13 @@ void Chunk::buildMeshGreedy()
                     p[U] = u;
                     p[V] = v;
                     int faceDir = d * 2 + (back ? 1 : 0);
+
                     push(p, du, dv, w, h, back, faceDir, id);
                     u += w;
                 }
         }
     }
+
     m_State.store(State::CPU_MESH_READY, std::memory_order_release);
 }
 

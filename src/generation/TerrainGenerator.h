@@ -20,6 +20,8 @@ private:
     FastNoiseLite m_temperature;
     FastNoiseLite m_humidity;
     FastNoiseLite m_caves;
+    FastNoiseLite m_caveShape;
+    
     std::unordered_map<BiomeType, std::unique_ptr<Biome>> m_biomes;
     float heightAt(int gx, int gz) const;
     BiomeType biomeAt(int gx, int gz) const;

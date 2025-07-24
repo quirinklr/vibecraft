@@ -1,8 +1,7 @@
 #pragma once
 #include <glm/glm.hpp>
 #include <cstdint>
-
-using BlockID = uint8_t;
+#include "BlockIds.h"
 
 static constexpr float ATLAS_INV_SIZE = 1.0f / 16.0f;
 

@@ -1,12 +1,16 @@
 #pragma once
+
+#include "BlockIds.h"
 #include <glm/glm.hpp>
 #include <vector>
 #include <atomic>
 #include "UploadJob.h"
+
 class VulkanRenderer;
 class FastNoiseLite;
-using BlockID = uint8_t;
+
 #include "renderer/Vertex.h"
+
 class Chunk
 {
 public:

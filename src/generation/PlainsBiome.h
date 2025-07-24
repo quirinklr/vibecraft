@@ -1,5 +1,6 @@
 #pragma once
 #include "Biome.h"
+
 class PlainsBiome : public Biome
 {
 public:

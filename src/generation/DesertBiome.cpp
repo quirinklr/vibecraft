@@ -1,3 +1,9 @@
-#include "OceanBiome.h"
-uint8_t OceanBiome::surface(uint8_t beneath, int y) const { return 1; }
-void OceanBiome::decorate(Chunk &c, FastNoiseLite &n) const {}
+#include "DesertBiome.h"
+#include "../BlockIds.h"
+
+uint8_t DesertBiome::surface(uint8_t, int) const
+{
+    return SAND;
+}
+
+void DesertBiome::decorate(Chunk &, FastNoiseLite &) const {}
