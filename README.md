@@ -34,8 +34,8 @@ Dieses Projekt ist eine von Grund auf in C++ entwickelte Voxel-Engine, inspirier
 
 1.  **Klone das Repository:**
     ```bash
-    git clone <repository-url>
-    cd <projekt-ordner>
+    git clone https://github.com/quirinklr/minecraft-vibe.git
+    cd minecraft-vibe
     ```
 
 2.  **Konfiguriere das Projekt mit CMake:**
