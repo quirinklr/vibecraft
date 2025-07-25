@@ -19,10 +19,9 @@ if(NOT GLFW_LIBRARY_FILE)
     message(FATAL_ERROR "CMake konnte die GLFW-Bibliotheksdatei (glfw3.lib) nicht im Verzeichnis ${GLFW_ROOT_DIR} finden. Bitte stellen Sie sicher, dass die Bibliothek vorhanden ist.")
 endif()
 
-file(GLOB_RECURSE VIBECRAFT_SRC
-     ${CMAKE_SOURCE_DIR}/src/*.cpp
-     ${CMAKE_SOURCE_DIR}/src/generation/*.cpp
-     ${CMAKE_SOURCE_DIR}/src/math/*.cpp)
+file(GLOB_RECURSE VIBECRAFT_SRC CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/src/*.cpp"
+)
 
 add_executable(Vibecraft ${VIBECRAFT_SRC})
 
