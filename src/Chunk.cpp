@@ -37,20 +37,7 @@ BlockID Chunk::getBlock(int x, int y, int z) const
     return m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x];
 }
 
-void Chunk::generateTerrain(FastNoiseLite &noise)
-{
-    for (int x = 0; x < WIDTH; ++x)
-        for (int z = 0; z < DEPTH; ++z)
-        {
-            float gx = float(m_Pos.x * WIDTH + x);
-            float gz = float(m_Pos.z * DEPTH + z);
-            float h = noise.GetNoise(gx, gz);
-            int ground = 64 + int(h * 30.f);
-            for (int y = 0; y < ground && y < HEIGHT; ++y)
-                m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x] = BlockID::STONE;
-        }
-    m_State.store(State::TERRAIN_READY, std::memory_order_release);
-}
+#include <array>
 
 std::vector<BlockID> downsample(const std::vector<BlockID> &original, int factor)
 {
@@ -66,16 +53,63 @@ std::vector<BlockID> downsample(const std::vector<BlockID> &original, int factor
             for (int x = 0; x < newWidth; ++x)
             {
 
-                int ox = x * factor;
-                int oy = y * factor;
-                int oz = z * factor;
-                downsampled[y * newDepth * newWidth + z * newWidth + x] =
-                    original[oy * Chunk::WIDTH * Chunk::DEPTH + oz * Chunk::WIDTH + ox];
+                std::array<int, 256> counts{};
+
+                for (int oy = 0; oy < factor; ++oy)
+                {
+                    for (int oz = 0; oz < factor; ++oz)
+                    {
+                        for (int ox = 0; ox < factor; ++ox)
+                        {
+                            int originalX = x * factor + ox;
+                            int originalY = y * factor + oy;
+                            int originalZ = z * factor + oz;
+
+                            BlockID currentBlock = original[originalY * Chunk::WIDTH * Chunk::DEPTH + originalZ * Chunk::WIDTH + originalX];
+
+                            if (currentBlock != BlockID::AIR)
+                            {
+
+                                counts[static_cast<uint8_t>(currentBlock)]++;
+                            }
+                        }
+                    }
+                }
+
+                BlockID mostCommonBlock = BlockID::AIR;
+                int maxCount = 0;
+
+                for (int i = 1; i < 256; ++i)
+                {
+                    if (counts[i] > maxCount)
+                    {
+                        maxCount = counts[i];
+                        mostCommonBlock = static_cast<BlockID>(i);
+                    }
+                }
+
+                downsampled[(y * newDepth + z) * newWidth + x] = mostCommonBlock;
             }
         }
     }
     return downsampled;
 }
+
+void Chunk::generateTerrain(FastNoiseLite &noise)
+{
+    for (int x = 0; x < WIDTH; ++x)
+        for (int z = 0; z < DEPTH; ++z)
+        {
+            float gx = float(m_Pos.x * WIDTH + x);
+            float gz = float(m_Pos.z * DEPTH + z);
+            float h = noise.GetNoise(gx, gz);
+            int ground = 64 + int(h * 30.f);
+            for (int y = 0; y < ground && y < HEIGHT; ++y)
+                m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x] = BlockID::STONE;
+        }
+    m_State.store(State::TERRAIN_READY, std::memory_order_release);
+}
+
 void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std::vector<uint32_t> &outIndices)
 {
     const int factor = 1 << lodLevel;
