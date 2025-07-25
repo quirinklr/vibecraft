@@ -20,6 +20,7 @@ TODO.md
 # IDE-specific settings folder
 .vs/
 .vscode/
+textures/singles
 
 # Build results
 [Dd]ebug/
