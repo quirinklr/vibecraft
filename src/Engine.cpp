@@ -43,6 +43,10 @@ void Engine::run()
     const float mScale = 0.0005f;
     while (!m_Window.shouldClose())
     {
+        glm::ivec3 playerChunkPos{
+            static_cast<int>(std::floor(cam.x / Chunk::WIDTH)), 0,
+            static_cast<int>(std::floor(cam.z / Chunk::DEPTH))};
+
         float now = static_cast<float>(glfwGetTime());
         float dt = now - last;
         glfwPollEvents();
@@ -99,7 +103,8 @@ void Engine::run()
 
         updateChunks(cam);
 
-        m_Renderer.drawFrame(m_Camera, m_Chunks);
+        m_Renderer.drawFrame(m_Camera, m_Chunks, playerChunkPos, LOD0_DISTANCE);
+
         frames++;
         if (now - fpsTime >= 1.f)
         {
@@ -113,7 +118,7 @@ void Engine::run()
     }
 }
 
-void Engine::generateChunk(const glm::ivec3 &pos)
+void Engine::createChunkContainer(const glm::ivec3 &pos)
 {
     if (m_Chunks.count(pos))
         return;
@@ -124,46 +129,36 @@ void Engine::generateChunk(const glm::ivec3 &pos)
 
     m_Pool.submit([this, raw](std::stop_token st)
                   {
-        m_TerrainGen.populateChunk(*raw);
         if (st.stop_requested()) return;
-        
-        
-        raw->buildAndStageMesh(m_Renderer.getAllocator()); });
+        m_TerrainGen.populateChunk(*raw); });
 }
 
 void Engine::updateChunks(const glm::vec3 &cam)
 {
-    glm::ivec3 cc{static_cast<int>(std::floor(cam.x / Chunk::WIDTH)), 0, static_cast<int>(std::floor(cam.z / Chunk::DEPTH))};
+    glm::ivec3 playerChunkPos{
+        static_cast<int>(std::floor(cam.x / Chunk::WIDTH)), 0,
+        static_cast<int>(std::floor(cam.z / Chunk::DEPTH))};
 
-    for (int dz = -RENDER_DISTANCE; dz <= RENDER_DISTANCE; ++dz)
+    std::vector<glm::ivec3> chunksToUnload;
+    for (auto &[pos, chunk] : m_Chunks)
     {
-        for (int dx = -RENDER_DISTANCE; dx <= RENDER_DISTANCE; ++dx)
+        if (std::max(std::abs(pos.x - playerChunkPos.x), std::abs(pos.z - playerChunkPos.z)) > RENDER_DISTANCE)
         {
-            glm::ivec3 chunkPos = cc + glm::ivec3{dx, 0, dz};
-
-            if (m_Chunks.find(chunkPos) == m_Chunks.end())
-            {
-                std::scoped_lock lock(m_ChunkGenerationQueueMtx);
-                m_ChunksToGenerate.insert(chunkPos);
-            }
+            chunksToUnload.push_back(pos);
         }
     }
 
-    std::vector<glm::ivec3> out;
-    for (auto &[p, c] : m_Chunks)
-        if (std::max(std::abs(p.x - cc.x), std::abs(p.z - cc.z)) > RENDER_DISTANCE)
-            out.push_back(p);
-
-    for (auto &p : out)
+    for (auto &pos : chunksToUnload)
     {
-        m_Garbage.push_back(std::move(m_Chunks[p]));
-        m_Chunks.erase(p);
+        m_Garbage.push_back(std::move(m_Chunks.at(pos)));
+        m_Chunks.erase(pos);
     }
 
     int cleaned = 0;
-    for (auto it = m_Garbage.begin(); it != m_Garbage.end() && cleaned < 1;)
+    for (auto it = m_Garbage.begin(); it != m_Garbage.end() && cleaned < 2;)
     {
-        if ((*it)->isReady())
+
+        if ((*it)->getState() == Chunk::State::GPU_READY || (*it)->getState() == Chunk::State::TERRAIN_READY)
         {
             (*it)->cleanup(m_Renderer);
             it = m_Garbage.erase(it);
@@ -175,26 +170,82 @@ void Engine::updateChunks(const glm::vec3 &cam)
         }
     }
 
-    int createdThisFrame = 0;
-    while (createdThisFrame < CHUNKS_TO_CREATE_PER_FRAME && !m_ChunksToGenerate.empty())
+    for (int z = -RENDER_DISTANCE; z <= RENDER_DISTANCE; ++z)
     {
-        glm::ivec3 posToGen;
+        for (int x = -RENDER_DISTANCE; x <= RENDER_DISTANCE; ++x)
         {
-            std::scoped_lock lock(m_ChunkGenerationQueueMtx);
-            posToGen = *m_ChunksToGenerate.begin();
-            m_ChunksToGenerate.erase(m_ChunksToGenerate.begin());
+            glm::ivec3 chunkPos = playerChunkPos + glm::ivec3(x, 0, z);
+
+            if (!m_Chunks.count(chunkPos))
+            {
+                createChunkContainer(chunkPos);
+            }
+
+            Chunk *chunk = m_Chunks.at(chunkPos).get();
+
+            if (chunk->getState() == Chunk::State::INITIAL)
+                continue;
+
+            float dist = glm::distance(glm::vec2(x, z), glm::vec2(0.f));
+            int requiredLod = (dist <= LOD0_DISTANCE) ? 0 : 1;
+
+            if (!chunk->hasLOD(requiredLod))
+            {
+                std::scoped_lock lock(m_MeshJobMutex);
+                auto job = std::make_pair(chunkPos, requiredLod);
+
+                if (m_MeshJobsInProgress.find(job) == m_MeshJobsInProgress.end() &&
+                    m_MeshJobsToCreate.find(job) == m_MeshJobsToCreate.end())
+                {
+                    m_MeshJobsToCreate.insert(job);
+                }
+            }
+        }
+    }
+
+    int jobsCreated = 0;
+    while (jobsCreated < CHUNKS_TO_CREATE_PER_FRAME && !m_MeshJobsToCreate.empty())
+    {
+        std::pair<glm::ivec3, int> job;
+        {
+            std::scoped_lock lock(m_MeshJobMutex);
+            job = *m_MeshJobsToCreate.begin();
+            m_MeshJobsToCreate.erase(m_MeshJobsToCreate.begin());
         }
 
-        generateChunk(posToGen);
-        createdThisFrame++;
+        if (!m_Chunks.count(job.first))
+        {
+            continue;
+        }
+
+        m_MeshJobsInProgress.insert(job);
+        Chunk *chunk = m_Chunks.at(job.first).get();
+
+        m_Pool.submit([this, chunk, job](std::stop_token st)
+                      {
+            if (st.stop_requested()) {
+                std::scoped_lock lock(m_MeshJobMutex);
+                m_MeshJobsInProgress.erase(job);
+                return;
+            }
+            chunk->buildAndStageMesh(m_Renderer.getAllocator(), job.second);
+            std::scoped_lock lock(m_MeshJobMutex);
+            m_MeshJobsInProgress.erase(job); });
+        jobsCreated++;
     }
 
     int uploaded = 0;
-    for (auto &[p, c] : m_Chunks)
+    for (auto &[pos, chunk] : m_Chunks)
     {
-        if (uploaded >= 2)
+        if (uploaded >= CHUNKS_TO_UPLOAD_PER_FRAME)
             break;
-        if (c->uploadMesh(m_Renderer))
-            ++uploaded;
+        if (chunk->getState() == Chunk::State::STAGING_READY)
+        {
+
+            if (chunk->uploadMesh(m_Renderer, 0) || chunk->uploadMesh(m_Renderer, 1))
+            {
+                uploaded++;
+            }
+        }
     }
 }

@@ -31,7 +31,8 @@ VulkanRenderer::~VulkanRenderer()
     vkDeviceWaitIdle(m_DeviceContext->getDevice());
 }
 
-void VulkanRenderer::drawFrame(Camera &camera, const std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less> &chunks)
+void VulkanRenderer::drawFrame(Camera &camera, const std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less> &chunks, const glm::ivec3 &playerChunkPos, int lod0Distance)
+
 {
 
     for (auto &[pos, chunk] : chunks)
@@ -65,23 +66,31 @@ void VulkanRenderer::drawFrame(Camera &camera, const std::map<glm::ivec3, std::u
 
     updateUniformBuffer(m_CurrentFrame, camera);
 
-    std::vector<Chunk *> visibleChunks;
-    visibleChunks.reserve(chunks.size());
+    std::vector<std::pair<const Chunk *, int>> chunksToRender;
+    chunksToRender.reserve(chunks.size());
     const Frustum &frustum = camera.getFrustum();
 
     for (auto const &[pos, chunkPtr] : chunks)
     {
-
-        if (chunkPtr->isReady() && chunkPtr->getIndexCount() > 0 && frustum.intersects(chunkPtr->getAABB()))
+        if (!frustum.intersects(chunkPtr->getAABB()))
         {
-            visibleChunks.push_back(chunkPtr.get());
+            continue;
+        }
+
+        float dist = glm::distance(glm::vec2(pos.x, pos.z), glm::vec2(playerChunkPos.x, playerChunkPos.z));
+        int requiredLod = (dist <= lod0Distance) ? 0 : 1;
+
+        int bestLod = chunkPtr->getBestAvailableLOD(requiredLod);
+        if (bestLod != -1)
+        {
+            chunksToRender.push_back({chunkPtr.get(), bestLod});
         }
     }
 
     vkResetFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(m_CurrentFrame));
     vkResetCommandBuffer(m_CommandManager->getCommandBuffer(m_CurrentFrame), 0);
 
-    m_CommandManager->recordCommandBuffer(imageIndex, m_CurrentFrame, visibleChunks,
+    m_CommandManager->recordCommandBuffer(imageIndex, m_CurrentFrame, chunksToRender,
                                           m_DescriptorSets, m_CrosshairVertexBuffer.get(), m_Settings.wireframe);
 
     VkSubmitInfo submitInfo{};

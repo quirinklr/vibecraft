@@ -9,10 +9,8 @@
 
 Chunk::Chunk(glm::ivec3 pos) : m_Pos(pos)
 {
-
     m_Blocks.resize(WIDTH * HEIGHT * DEPTH, BlockID::AIR);
-    m_ModelMatrix = glm::translate(glm::mat4(1.f),
-                                   glm::vec3(pos.x * WIDTH, pos.y * HEIGHT, pos.z * DEPTH));
+    m_ModelMatrix = glm::translate(glm::mat4(1.f), glm::vec3(pos.x * WIDTH, pos.y * HEIGHT, pos.z * DEPTH));
     m_State.store(State::INITIAL, std::memory_order_release);
 }
 
@@ -29,7 +27,6 @@ void Chunk::setBlock(int x, int y, int z, BlockID id)
 {
     if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT || z < 0 || z >= DEPTH)
         return;
-
     m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x] = id;
 }
 
@@ -55,266 +52,315 @@ void Chunk::generateTerrain(FastNoiseLite &noise)
     m_State.store(State::TERRAIN_READY, std::memory_order_release);
 }
 
-void Chunk::buildMeshGreedy()
+std::vector<BlockID> downsample(const std::vector<BlockID> &original, int factor)
 {
-    if (m_State.load() != State::TERRAIN_READY)
-        return;
+    const int newWidth = Chunk::WIDTH / factor;
+    const int newHeight = Chunk::HEIGHT / factor;
+    const int newDepth = Chunk::DEPTH / factor;
+    std::vector<BlockID> downsampled(newWidth * newHeight * newDepth, BlockID::AIR);
 
-    m_Vertices.clear();
-    m_Indices.clear();
-
-    const int dsz[3] = {WIDTH, HEIGHT, DEPTH};
-    std::vector<int8_t> mask(WIDTH * HEIGHT);
-
-    constexpr float TILE = 1.0f / 16.0f;
-
-    auto push = [&](glm::vec3 p0, glm::vec3 du, glm::vec3 dv,
-                    int w, int h, bool back, int faceDir, BlockID id)
+    for (int y = 0; y < newHeight; ++y)
     {
-        uint32_t base = uint32_t(m_Vertices.size());
-
-        glm::vec3 p1 = p0 + du * float(w);
-        glm::vec3 p2 = p1 + dv * float(h);
-        glm::vec3 p3 = p0 + dv * float(h);
-        if (back)
-            std::swap(p1, p3);
-
-        auto blockUV = [&](glm::vec3 p) -> glm::vec2
+        for (int z = 0; z < newDepth; ++z)
         {
-            switch (faceDir)
+            for (int x = 0; x < newWidth; ++x)
             {
-            case 0:
-                return {p.z, p.y};
-            case 1:
-                return {-p.z, p.y};
-            case 2:
-                return {p.x, p.z};
-            case 3:
-                return {p.x, -p.z};
-            case 4:
-                return {-p.x, p.y};
-            default:
-                return {p.x, p.y};
+
+                int ox = x * factor;
+                int oy = y * factor;
+                int oz = z * factor;
+                downsampled[y * newDepth * newWidth + z * newWidth + x] =
+                    original[oy * Chunk::WIDTH * Chunk::DEPTH + oz * Chunk::WIDTH + ox];
             }
-        };
+        }
+    }
+    return downsampled;
+}
+void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std::vector<uint32_t> &outIndices)
+{
+    const int factor = 1 << lodLevel;
+    const int w = WIDTH / factor;
+    const int h = HEIGHT / factor;
+    const int d = DEPTH / factor;
 
-        const uint32_t idVal = static_cast<uint32_t>(id);
-        glm::vec2 tileOrigin{(idVal % 16) * TILE,
-                             (idVal / 16) * TILE};
+    std::vector<BlockID> voxels;
+    if (lodLevel == 0)
+    {
+        voxels = m_Blocks;
+    }
+    else
+    {
+        voxels = downsample(m_Blocks, factor);
+    }
 
-        auto makeV = [&](glm::vec3 pos) -> Vertex
-        {
-            glm::vec2 uv = blockUV(pos);
-            return {pos,
-                    {tileOrigin.x, tileOrigin.y, 0.0f},
-                    uv};
-        };
-
-        m_Vertices.push_back(makeV(p0));
-        m_Vertices.push_back(makeV(p1));
-        m_Vertices.push_back(makeV(p2));
-        m_Vertices.push_back(makeV(p3));
-
-        m_Indices.insert(m_Indices.end(),
-                         {base, base + 1, base + 2,
-                          base, base + 2, base + 3});
+    auto getVoxel = [&](int x, int y, int z) -> BlockID
+    {
+        if (x < 0 || x >= w || y < 0 || y >= h || z < 0 || z >= d)
+            return BlockID::AIR;
+        return voxels[y * d * w + z * w + x];
     };
 
-    for (int d = 0; d < 3; ++d)
+    outVertices.clear();
+    outIndices.clear();
+
+    std::vector<int8_t> mask(w * h);
+
+    for (int dim = 0; dim < 3; ++dim)
     {
-        int U = (d + 1) % 3, V = (d + 2) % 3;
-        glm::vec3 du(0), dv(0);
-        du[U] = 1;
-        dv[V] = 1;
+        int u = (dim + 1) % 3, v = (dim + 2) % 3;
+        int dsz[] = {w, h, d};
 
-        mask.assign(dsz[U] * dsz[V], 0);
-
-        for (int slice = 0; slice <= dsz[d]; ++slice)
+        for (int slice = 0; slice <= dsz[dim]; ++slice)
         {
+            mask.assign(dsz[u] * dsz[v], 0);
 
-            for (int v = 0; v < dsz[V]; ++v)
-                for (int u = 0; u < dsz[U]; ++u)
+            for (int j = 0; j < dsz[v]; ++j)
+            {
+                for (int i = 0; i < dsz[u]; ++i)
                 {
                     glm::ivec3 a{0}, b{0};
-                    a[d] = slice;
-                    b[d] = slice - 1;
-                    a[U] = b[U] = u;
-                    a[V] = b[V] = v;
+                    a[dim] = slice;
+                    b[dim] = slice - 1;
+                    a[u] = i;
+                    b[u] = i;
+                    a[v] = j;
+                    b[v] = j;
 
-                    BlockID idA = (slice < dsz[d]) ? getBlock(a.x, a.y, a.z)
-                                                   : BlockID::AIR;
-                    BlockID idB = (slice > 0) ? getBlock(b.x, b.y, b.z)
-                                              : BlockID::AIR;
+                    BlockID idA = (slice < dsz[dim]) ? getVoxel(a.x, a.y, a.z) : BlockID::AIR;
+                    BlockID idB = (slice > 0) ? getVoxel(b.x, b.y, b.z) : BlockID::AIR;
 
                     int8_t entry = 0;
-                    if (idA != BlockID::AIR && idB == BlockID::AIR)
-                        entry = static_cast<int8_t>(idA);
-                    else if (idA == BlockID::AIR && idB != BlockID::AIR)
-                        entry = -static_cast<int8_t>(idB);
-
-                    mask[v * dsz[U] + u] = entry;
+                    if ((idA != BlockID::AIR) != (idB != BlockID::AIR))
+                    {
+                        entry = (idA != BlockID::AIR) ? static_cast<int8_t>(idA) : -static_cast<int8_t>(idB);
+                    }
+                    mask[j * dsz[u] + i] = entry;
                 }
+            }
 
-            for (int v = 0; v < dsz[V]; ++v)
-                for (int u = 0; u < dsz[U];)
+            for (int j = 0; j < dsz[v]; ++j)
+            {
+                for (int i = 0; i < dsz[u];)
                 {
-                    int8_t m = mask[v * dsz[U] + u];
+                    int8_t m = mask[j * dsz[u] + i];
                     if (!m)
                     {
-                        ++u;
+                        ++i;
                         continue;
                     }
 
                     bool back = m < 0;
                     BlockID id = static_cast<BlockID>(back ? -m : m);
 
-                    int w = 1;
-                    while (u + w < dsz[U] &&
-                           mask[v * dsz[U] + u + w] == m)
-                        ++w;
+                    int quadWidth = 1;
+                    while (i + quadWidth < dsz[u] && mask[j * dsz[u] + i + quadWidth] == m)
+                        ++quadWidth;
 
-                    int h = 1;
+                    int quadHeight = 1;
                     bool stop = false;
-                    while (v + h < dsz[V] && !stop)
+                    while (j + quadHeight < dsz[v] && !stop)
                     {
-                        for (int k = 0; k < w; ++k)
-                            if (mask[(v + h) * dsz[U] + u + k] != m)
+                        for (int k = 0; k < quadWidth; ++k)
+                        {
+                            if (mask[(j + quadHeight) * dsz[u] + i + k] != m)
                             {
                                 stop = true;
                                 break;
                             }
+                        }
                         if (!stop)
-                            ++h;
+                            ++quadHeight;
                     }
 
-                    for (int y = 0; y < h; ++y)
-                        for (int x = 0; x < w; ++x)
-                            mask[(v + y) * dsz[U] + u + x] = 0;
+                    glm::vec3 p0(0);
+                    p0[dim] = slice;
+                    p0[u] = i;
+                    p0[v] = j;
 
-                    glm::vec3 p(0);
-                    p[d] = slice;
-                    p[U] = u;
-                    p[V] = v;
-                    int faceDir = d * 2 + (back ? 1 : 0);
+                    glm::vec3 du(0), dv(0);
+                    du[u] = quadWidth;
+                    dv[v] = quadHeight;
 
-                    push(p, du, dv, w, h, back, faceDir, id);
-                    u += w;
+                    uint32_t base = outVertices.size();
+                    const uint32_t idVal = static_cast<uint32_t>(id);
+                    glm::vec3 tileOrigin{(idVal % 16) * ATLAS_INV_SIZE, (idVal / 16) * ATLAS_INV_SIZE, 0.f};
+
+                    glm::vec3 v0 = p0 * (float)factor;
+                    glm::vec3 v1 = (p0 + du) * (float)factor;
+                    glm::vec3 v2 = (p0 + du + dv) * (float)factor;
+                    glm::vec3 v3 = (p0 + dv) * (float)factor;
+
+                    auto getUV = [&](const glm::vec3 &pos) -> glm::vec2
+                    {
+                        switch (dim)
+                        {
+                        case 0:
+                            return {pos.z, pos.y};
+                        case 1:
+                            return {pos.x, pos.z};
+                        case 2:
+                            return {pos.x, pos.y};
+                        default:
+                            return {0, 0};
+                        }
+                    };
+
+                    if (back)
+                    {
+                        outIndices.insert(outIndices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
+                    }
+                    else
+                    {
+                        outIndices.insert(outIndices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
+                    }
+
+                    outVertices.push_back({v0, tileOrigin, getUV(v0)});
+                    outVertices.push_back({v1, tileOrigin, getUV(v1)});
+                    outVertices.push_back({v2, tileOrigin, getUV(v2)});
+                    outVertices.push_back({v3, tileOrigin, getUV(v3)});
+
+                    for (int y = 0; y < quadHeight; ++y)
+                    {
+                        for (int x = 0; x < quadWidth; ++x)
+                        {
+                            mask[(j + y) * dsz[u] + i + x] = 0;
+                        }
+                    }
+
+                    i += quadWidth;
                 }
+            }
         }
     }
-
-    m_State.store(State::CPU_MESH_READY, std::memory_order_release);
 }
 
 void Chunk::markReady(VulkanRenderer &renderer)
 {
 
-    if (m_State.load(std::memory_order_acquire) != State::GPU_PENDING)
+    for (auto it = m_PendingUploads.begin(); it != m_PendingUploads.end();)
     {
-        return;
+        if (it->second.fence == VK_NULL_HANDLE)
+        {
+            it = m_PendingUploads.erase(it);
+            continue;
+        }
+
+        VkResult st = vkGetFenceStatus(renderer.getDevice(), it->second.fence);
+        if (st == VK_SUCCESS)
+        {
+            vkDestroyFence(renderer.getDevice(), it->second.fence, nullptr);
+            vmaDestroyBuffer(renderer.getAllocator(), it->second.stagingVB, it->second.stagingVbAlloc);
+            vmaDestroyBuffer(renderer.getAllocator(), it->second.stagingIB, it->second.stagingIbAlloc);
+            it = m_PendingUploads.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
     }
-
-    if (m_Upload.fence == VK_NULL_HANDLE)
-    {
-        m_State.store(State::GPU_READY, std::memory_order_release);
-        return;
-    }
-
-    VkResult st = vkGetFenceStatus(renderer.getDevice(), m_Upload.fence);
-
-    if (st == VK_NOT_READY)
-    {
-        return;
-    }
-
-    if (st == VK_SUCCESS)
-    {
-
-        vkDestroyFence(renderer.getDevice(), m_Upload.fence, nullptr);
-
-        vmaDestroyBuffer(renderer.getAllocator(), m_Upload.stagingVB, m_Upload.stagingVbAlloc);
-        vmaDestroyBuffer(renderer.getAllocator(), m_Upload.stagingIB, m_Upload.stagingIbAlloc);
-
-        m_Upload = {};
-
-        m_State.store(State::GPU_READY, std::memory_order_release);
-        return;
-    }
-
-    throw std::runtime_error("vkGetFenceStatus hat einen Fehler zurückgegeben, GPU-Upload fehlgeschlagen!");
 }
 
-bool Chunk::uploadMesh(VulkanRenderer &renderer)
+bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
 {
-
-    if (m_State.load(std::memory_order_acquire) != State::STAGING_READY)
+    if (!m_PendingUploads.count(lodLevel))
         return false;
 
-    if (m_VertexBuffer != VK_NULL_HANDLE)
-    {
-        cleanup(renderer);
-    }
+    UploadJob job = std::move(m_PendingUploads.at(lodLevel));
+    m_PendingUploads.erase(lodLevel);
 
-    if (m_Upload.stagingVB == VK_NULL_HANDLE)
+    if (job.stagingVB == VK_NULL_HANDLE)
     {
-        m_IndexCount = 0;
-        m_State.store(State::GPU_READY, std::memory_order_release);
+        m_Meshes[lodLevel] = {};
+        m_State.store(State::GPU_READY);
         return true;
     }
 
+    m_State.store(State::UPLOADING);
+
+    ChunkMesh mesh;
     UploadHelpers::submitChunkMeshUpload(
         *renderer.getDeviceContext(),
         renderer.getCommandManager()->getCommandPool(),
-        m_Upload,
-        m_VertexBuffer, m_VertexBufferAllocation,
-        m_IndexBuffer, m_IndexBufferAllocation);
+        job,
+        mesh.vertexBuffer, mesh.vertexBufferAllocation,
+        mesh.indexBuffer, mesh.indexBufferAllocation);
 
     VmaAllocationInfo ibInfo;
-    vmaGetAllocationInfo(renderer.getAllocator(), m_IndexBufferAllocation, &ibInfo);
-    m_IndexCount = static_cast<uint32_t>(ibInfo.size / sizeof(uint32_t));
+    vmaGetAllocationInfo(renderer.getAllocator(), mesh.indexBufferAllocation, &ibInfo);
+    mesh.indexCount = static_cast<uint32_t>(ibInfo.size / sizeof(uint32_t));
 
-    m_State.store(State::GPU_PENDING, std::memory_order_release);
+    m_Meshes[lodLevel] = std::move(mesh);
+
+    m_PendingUploads[lodLevel] = std::move(job);
+
+    m_State.store(State::GPU_READY);
     return true;
 }
 
-void Chunk::buildAndStageMesh(VmaAllocator allocator)
+void Chunk::buildAndStageMesh(VmaAllocator allocator, int lodLevel)
 {
-    if (m_State.load() != State::TERRAIN_READY)
+    if (m_State.load() == State::INITIAL)
         return;
 
-    buildMeshGreedy();
+    m_State.store(State::MESHING);
 
-    UploadHelpers::stageChunkMesh(allocator, m_Vertices, m_Indices, m_Upload);
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+    buildMeshGreedy(lodLevel, vertices, indices);
 
-    m_Vertices.clear();
-    m_Vertices.shrink_to_fit();
-    m_Indices.clear();
-    m_Indices.shrink_to_fit();
+    UploadJob job;
+    UploadHelpers::stageChunkMesh(allocator, vertices, indices, job);
 
-    m_State.store(State::STAGING_READY, std::memory_order_release);
+    m_PendingUploads[lodLevel] = std::move(job);
+    m_State.store(State::STAGING_READY);
 }
 
 void Chunk::cleanup(VulkanRenderer &renderer)
 {
-    if (m_State.load() == State::GPU_PENDING && m_Upload.fence != VK_NULL_HANDLE)
-    {
-        vkWaitForFences(renderer.getDevice(), 1, &m_Upload.fence, VK_TRUE, UINT64_MAX);
-        markReady(renderer);
-    }
+    markReady(renderer);
 
-    if (m_VertexBuffer != VK_NULL_HANDLE)
+    for (auto &[lod, mesh] : m_Meshes)
     {
-        renderer.enqueueDestroy(m_VertexBuffer, m_VertexBufferAllocation);
+        if (mesh.vertexBuffer != VK_NULL_HANDLE)
+        {
+            renderer.enqueueDestroy(mesh.vertexBuffer, mesh.vertexBufferAllocation);
+        }
+        if (mesh.indexBuffer != VK_NULL_HANDLE)
+        {
+            renderer.enqueueDestroy(mesh.indexBuffer, mesh.indexBufferAllocation);
+        }
     }
-    if (m_IndexBuffer != VK_NULL_HANDLE)
-    {
-        renderer.enqueueDestroy(m_IndexBuffer, m_IndexBufferAllocation);
-    }
-
-    m_VertexBuffer = VK_NULL_HANDLE;
-    m_IndexBuffer = VK_NULL_HANDLE;
-    m_VertexBufferAllocation = VK_NULL_HANDLE;
-    m_IndexBufferAllocation = VK_NULL_HANDLE;
-    m_IndexCount = 0;
+    m_Meshes.clear();
     m_State.store(State::INITIAL);
+}
+
+bool Chunk::hasLOD(int lodLevel) const
+{
+    return m_Meshes.count(lodLevel);
+}
+
+const ChunkMesh *Chunk::getMesh(int lodLevel) const
+{
+    auto it = m_Meshes.find(lodLevel);
+    if (it != m_Meshes.end())
+    {
+        return &it->second;
+    }
+    return nullptr;
+}
+
+int Chunk::getBestAvailableLOD(int requiredLod) const
+{
+
+    for (int lod = requiredLod; lod >= 0; --lod)
+    {
+        if (hasLOD(lod))
+            return lod;
+    }
+
+    if (!m_Meshes.empty())
+    {
+        return m_Meshes.rbegin()->first;
+    }
+    return -1;
 }

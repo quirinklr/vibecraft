@@ -31,7 +31,7 @@ public:
     VulkanRenderer(const VulkanRenderer &) = delete;
     VulkanRenderer &operator=(const VulkanRenderer &) = delete;
 
-    void drawFrame(Camera &camera, const std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less> &chunks);
+    void drawFrame(Camera &camera, const std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less> &chunks, const glm::ivec3& playerChunkPos, int lod0Distance);
     void enqueueDestroy(VmaBuffer &&buffer);
     void enqueueDestroy(VmaImage &&image);
     void enqueueDestroy(VkBuffer buffer, VmaAllocation allocation);

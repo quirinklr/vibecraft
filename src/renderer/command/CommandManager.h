@@ -20,7 +20,7 @@ public:
     ~CommandManager();
 
     void recordCommandBuffer(uint32_t imageIndex, uint32_t currentFrame,
-                             const std::vector<Chunk *> &visibleChunks,
+                             const std::vector<std::pair<const Chunk *, int>> &chunksToRender,
                              const std::vector<VkDescriptorSet> &descriptorSets,
                              VkBuffer crosshairVertexBuffer, bool wireframe);
     VkCommandBuffer getCommandBuffer(uint32_t index) const { return m_CommandBuffers[index]; }

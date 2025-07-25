@@ -12,6 +12,21 @@
 #include "ThreadPool.h"
 #include <set>
 #include <mutex>
+#include <utility>
+
+struct ChunkLodRequestLess
+{
+    bool operator()(const std::pair<glm::ivec3, int> &a, const std::pair<glm::ivec3, int> &b) const
+    {
+        if (a.second != b.second)
+            return a.second < b.second;
+        if (a.first.x != b.first.x)
+            return a.first.x < b.first.x;
+        if (a.first.y != b.first.y)
+            return a.first.y < b.first.y;
+        return a.first.z < b.first.z;
+    }
+};
 
 class Engine
 {
@@ -30,9 +45,19 @@ private:
     VulkanRenderer m_Renderer{m_Window, m_Settings};
     Camera m_Camera{};
     TerrainGenerator m_TerrainGen;
-    static constexpr int RENDER_DISTANCE = 12;
+
+    static constexpr int RENDER_DISTANCE = 16;
+    static constexpr int LOD0_DISTANCE = 8;
+    static constexpr int LOD1_DISTANCE = 16;
 
     static constexpr int CHUNKS_TO_CREATE_PER_FRAME = 4;
+    static constexpr int CHUNKS_TO_UPLOAD_PER_FRAME = 2;
+
+    void createChunkContainer(const glm::ivec3 &pos);
+
+    std::set<std::pair<glm::ivec3, int>, ChunkLodRequestLess> m_MeshJobsToCreate;
+    std::set<std::pair<glm::ivec3, int>, ChunkLodRequestLess> m_MeshJobsInProgress;
+    std::mutex m_MeshJobMutex;
 
     std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less> m_Chunks;
     std::vector<std::unique_ptr<Chunk>> m_Garbage;
@@ -41,6 +66,5 @@ private:
     std::set<glm::ivec3, ivec3_less> m_ChunksToGenerate;
     std::mutex m_ChunkGenerationQueueMtx;
 
-    void generateChunk(const glm::ivec3 &pos);
     void updateChunks(const glm::vec3 &cameraPos);
 };

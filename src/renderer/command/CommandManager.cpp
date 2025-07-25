@@ -43,7 +43,7 @@ void CommandManager::createCommandBuffers()
 }
 
 void CommandManager::recordCommandBuffer(uint32_t imageIndex, uint32_t currentFrame,
-                                         const std::vector<Chunk *> &visibleChunks,
+                                         const std::vector<std::pair<const Chunk *, int>> &chunksToRender,
                                          const std::vector<VkDescriptorSet> &descriptorSets,
                                          VkBuffer crosshairVertexBuffer, bool wireframe)
 {
@@ -84,22 +84,23 @@ void CommandManager::recordCommandBuffer(uint32_t imageIndex, uint32_t currentFr
                             m_PipelineCache.getGraphicsPipelineLayout(),
                             0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
-    for (Chunk *c : visibleChunks)
+    for (const auto &[chunk, lod] : chunksToRender)
     {
+        const ChunkMesh *mesh = chunk->getMesh(lod);
 
-        if (!c->isReady() || c->getIndexCount() == 0)
+        if (!mesh || mesh->indexCount == 0)
             continue;
 
-        VkBuffer vb[] = {c->getVertexBuffer()};
-        VkDeviceSize off[] = {0};
-        vkCmdBindVertexBuffers(cb, 0, 1, vb, off);
-        vkCmdBindIndexBuffer(cb, c->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+        VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
+        VkDeviceSize offsets[] = {0};
+        vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, offsets);
+        vkCmdBindIndexBuffer(cb, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
         vkCmdPushConstants(cb, m_PipelineCache.getGraphicsPipelineLayout(),
                            VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4),
-                           &c->getModelMatrix());
+                           &chunk->getModelMatrix());
 
-        vkCmdDrawIndexed(cb, c->getIndexCount(), 1, 0, 0, 0);
+        vkCmdDrawIndexed(cb, mesh->indexCount, 1, 0, 0, 0);
     }
 
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
