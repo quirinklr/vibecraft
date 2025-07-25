@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector>
+
 struct Settings
 {
 
@@ -13,7 +15,9 @@ struct Settings
     bool fullscreen = false;
     bool wireframe = false;
 
-    int renderDistance = 12;
+    int renderDistance = 24;
+    std::vector<int> lodDistances = { 8, 16, 24 };
+
     int lod0Distance = 8;
     int chunksToCreatePerFrame = 8;
     int chunksToUploadPerFrame = 4;

@@ -223,15 +223,30 @@ void Engine::createMeshJobs(const glm::ivec3 &playerChunkPos)
         for (int x = -m_Settings.renderDistance; x <= m_Settings.renderDistance; ++x)
         {
             glm::ivec3 chunkPos = playerChunkPos + glm::ivec3(x, 0, z);
-            
-            if (!m_Chunks.count(chunkPos)) continue;
+
+            if (!m_Chunks.count(chunkPos))
+                continue;
 
             Chunk *chunk = m_Chunks.at(chunkPos).get();
             if (chunk->getState() == Chunk::State::INITIAL)
                 continue;
 
             float dist = glm::distance(glm::vec2(x, z), glm::vec2(0.f));
-            int requiredLod = (dist <= m_Settings.lod0Distance) ? 0 : 1;
+
+            int requiredLod = -1;
+            for (size_t i = 0; i < m_Settings.lodDistances.size(); ++i)
+            {
+                if (dist <= m_Settings.lodDistances[i])
+                {
+                    requiredLod = static_cast<int>(i);
+                    break;
+                }
+            }
+
+            if (requiredLod == -1)
+            {
+                requiredLod = static_cast<int>(m_Settings.lodDistances.size());
+            }
 
             if (!chunk->hasLOD(requiredLod))
             {
