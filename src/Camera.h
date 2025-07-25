@@ -3,6 +3,7 @@
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
+#include "math/Frustum.h"
 
 class Camera
 {
@@ -12,8 +13,12 @@ public:
 
     const glm::mat4 &getProjectionMatrix() const { return m_ProjectionMatrix; }
     const glm::mat4 &getViewMatrix() const { return m_ViewMatrix; }
+    const Frustum &getFrustum() const { return m_Frustum; }
 
 private:
+    void updateFrustum();
+
     glm::mat4 m_ProjectionMatrix{1.f};
     glm::mat4 m_ViewMatrix{1.f};
+    Frustum m_Frustum;
 };

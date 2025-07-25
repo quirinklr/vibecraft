@@ -5,6 +5,7 @@
 #include <vector>
 #include <atomic>
 #include "UploadJob.h"
+#include "math/AABB.h"
 
 class VulkanRenderer;
 class FastNoiseLite;
@@ -14,6 +15,7 @@ class FastNoiseLite;
 class Chunk
 {
 public:
+    AABB getAABB() const;
     static constexpr int WIDTH = 16, HEIGHT = 256, DEPTH = 16;
     enum class State
     {

@@ -43,7 +43,7 @@ void CommandManager::createCommandBuffers()
 }
 
 void CommandManager::recordCommandBuffer(uint32_t imageIndex, uint32_t currentFrame,
-                                         const std::vector<Chunk *> &chunks,
+                                         const std::vector<Chunk *> &visibleChunks,
                                          const std::vector<VkDescriptorSet> &descriptorSets,
                                          VkBuffer crosshairVertexBuffer, bool wireframe)
 {
@@ -84,8 +84,9 @@ void CommandManager::recordCommandBuffer(uint32_t imageIndex, uint32_t currentFr
                             m_PipelineCache.getGraphicsPipelineLayout(),
                             0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
-    for (Chunk *c : chunks)
+    for (Chunk *c : visibleChunks)
     {
+
         if (!c->isReady() || c->getIndexCount() == 0)
             continue;
 

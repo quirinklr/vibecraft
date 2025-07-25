@@ -8,7 +8,8 @@ set(GLFW_ROOT_DIR "${CMAKE_SOURCE_DIR}/libs/glfw-3.4.bin.WIN64")
 
 file(GLOB_RECURSE VIBECRAFT_SRC
      ${CMAKE_SOURCE_DIR}/src/*.cpp
-     ${CMAKE_SOURCE_DIR}/src/generation/*.cpp)
+     ${CMAKE_SOURCE_DIR}/src/generation/*.cpp
+     ${CMAKE_SOURCE_DIR}/src/math/*.cpp)
 
 add_executable(Vibecraft ${VIBECRAFT_SRC})
 

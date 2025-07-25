@@ -17,6 +17,13 @@ Chunk::Chunk(glm::ivec3 pos) : m_Pos(pos)
 
 Chunk::~Chunk() {}
 
+AABB Chunk::getAABB() const
+{
+    glm::vec3 min = glm::vec3(m_Pos.x * WIDTH, m_Pos.y * HEIGHT, m_Pos.z * DEPTH);
+    glm::vec3 max = min + glm::vec3(WIDTH, HEIGHT, DEPTH);
+    return {min, max};
+}
+
 void Chunk::setBlock(int x, int y, int z, BlockID id)
 {
     if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT || z < 0 || z >= DEPTH)
