@@ -3,11 +3,17 @@
 
 uint8_t PlainsBiome::surface(uint8_t, int y) const
 {
-    if (y == 0)
+    if(y == 0) {
+        return DIRT; // GRASS LATER ON
+    }
+    else if (y <= 3) 
+    {
         return DIRT;
-    else if (y <= 3)
-        return DIRT;
-    else
+    }
+    else 
+    {
         return STONE;
+    }
 }
+
 void PlainsBiome::decorate(Chunk &, FastNoiseLite &) const {}

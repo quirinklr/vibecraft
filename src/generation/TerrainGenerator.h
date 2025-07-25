@@ -2,7 +2,7 @@
 #include <unordered_map>
 #include <memory>
 #include "../Chunk.h"
-#include "FastNoiseLite.h"
+#include <FastNoiseLite.h>
 
 #include "Biome.h"
 #include "PlainsBiome.h"

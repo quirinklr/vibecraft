@@ -16,7 +16,7 @@ VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings)
     m_SyncPrimitives = std::make_unique<SyncPrimitives>(*m_DeviceContext, *m_SwapChainContext);
     m_TextureManager = std::make_unique<TextureManager>(*m_DeviceContext, m_CommandManager->getCommandPool());
 
-    m_TextureManager->createTextureImage("../../textures/blocks_atlas.png");
+    m_TextureManager->createTextureImage("textures/blocks_atlas.png");
     m_TextureManager->createTextureImageView();
     m_TextureManager->createTextureSampler();
 
@@ -32,14 +32,7 @@ VulkanRenderer::~VulkanRenderer()
 }
 
 void VulkanRenderer::drawFrame(Camera &camera, const std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less> &chunks, const glm::ivec3 &playerChunkPos, int lod0Distance)
-
 {
-
-    for (auto &[pos, chunk] : chunks)
-    {
-        chunk->markReady(*this);
-    }
-
     vkWaitForFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(m_CurrentFrame), VK_TRUE, UINT64_MAX);
 
     m_BufferDestroyQueue[m_CurrentFrame].clear();
@@ -72,6 +65,9 @@ void VulkanRenderer::drawFrame(Camera &camera, const std::map<glm::ivec3, std::u
 
     for (auto const &[pos, chunkPtr] : chunks)
     {
+
+        chunkPtr->markReady(*this);
+
         if (!frustum.intersects(chunkPtr->getAABB()))
         {
             continue;

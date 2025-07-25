@@ -1,6 +1,6 @@
 #include "Chunk.h"
 #include "VulkanRenderer.h"
-#include "FastNoiseLite.h"
+#include <FastNoiseLite.h>
 #include "BlockAtlas.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <stdexcept>

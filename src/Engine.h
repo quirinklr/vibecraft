@@ -40,13 +40,20 @@ public:
     void run();
 
 private:
+    void updateChunks(const glm::vec3 &cameraPos);
+    void unloadDistantChunks(const glm::ivec3 &playerChunkPos);
+    void processGarbage();
+    void loadVisibleChunks(const glm::ivec3 &playerChunkPos);
+    void createMeshJobs(const glm::ivec3 &playerChunkPos);
+    void submitMeshJobs();
+    void uploadReadyMeshes();
+    void createChunkContainer(const glm::ivec3 &pos);
+
     Settings m_Settings{};
     Window m_Window{WIDTH, HEIGHT, "Vibecraft", m_Settings};
     VulkanRenderer m_Renderer{m_Window, m_Settings};
     Camera m_Camera{};
     TerrainGenerator m_TerrainGen;
-
-    void createChunkContainer(const glm::ivec3 &pos);
 
     std::set<std::pair<glm::ivec3, int>, ChunkLodRequestLess> m_MeshJobsToCreate;
     std::set<std::pair<glm::ivec3, int>, ChunkLodRequestLess> m_MeshJobsInProgress;
@@ -58,6 +65,4 @@ private:
 
     std::set<glm::ivec3, ivec3_less> m_ChunksToGenerate;
     std::mutex m_ChunkGenerationQueueMtx;
-
-    void updateChunks(const glm::vec3 &cameraPos);
 };

@@ -139,6 +139,16 @@ void Engine::updateChunks(const glm::vec3 &cam)
         static_cast<int>(std::floor(cam.x / Chunk::WIDTH)), 0,
         static_cast<int>(std::floor(cam.z / Chunk::DEPTH))};
 
+    unloadDistantChunks(playerChunkPos);
+    processGarbage();
+    loadVisibleChunks(playerChunkPos);
+    createMeshJobs(playerChunkPos);
+    submitMeshJobs();
+    uploadReadyMeshes();
+}
+
+void Engine::unloadDistantChunks(const glm::ivec3 &playerChunkPos)
+{
     std::vector<glm::ivec3> chunksToUnload;
     for (auto &[pos, chunk] : m_Chunks)
     {
@@ -153,7 +163,10 @@ void Engine::updateChunks(const glm::vec3 &cam)
         m_Garbage.push_back(std::move(m_Chunks.at(pos)));
         m_Chunks.erase(pos);
     }
+}
 
+void Engine::processGarbage()
+{
     m_Garbage.erase(
         std::remove_if(m_Garbage.begin(), m_Garbage.end(),
                        [this](const std::unique_ptr<Chunk> &chunk)
@@ -167,7 +180,6 @@ void Engine::updateChunks(const glm::vec3 &cam)
                            bool isJobInProgress = false;
                            {
                                std::scoped_lock lock(m_MeshJobMutex);
-
                                for (int lod = 0; lod <= 1; ++lod)
                                {
                                    if (m_MeshJobsInProgress.count({chunk->getPos(), lod}))
@@ -187,20 +199,34 @@ void Engine::updateChunks(const glm::vec3 &cam)
                            return false;
                        }),
         m_Garbage.end());
+}
 
+void Engine::loadVisibleChunks(const glm::ivec3 &playerChunkPos)
+{
     for (int z = -m_Settings.renderDistance; z <= m_Settings.renderDistance; ++z)
     {
         for (int x = -m_Settings.renderDistance; x <= m_Settings.renderDistance; ++x)
         {
             glm::ivec3 chunkPos = playerChunkPos + glm::ivec3(x, 0, z);
-
             if (!m_Chunks.count(chunkPos))
             {
                 createChunkContainer(chunkPos);
             }
+        }
+    }
+}
+
+void Engine::createMeshJobs(const glm::ivec3 &playerChunkPos)
+{
+    for (int z = -m_Settings.renderDistance; z <= m_Settings.renderDistance; ++z)
+    {
+        for (int x = -m_Settings.renderDistance; x <= m_Settings.renderDistance; ++x)
+        {
+            glm::ivec3 chunkPos = playerChunkPos + glm::ivec3(x, 0, z);
+            
+            if (!m_Chunks.count(chunkPos)) continue;
 
             Chunk *chunk = m_Chunks.at(chunkPos).get();
-
             if (chunk->getState() == Chunk::State::INITIAL)
                 continue;
 
@@ -220,7 +246,10 @@ void Engine::updateChunks(const glm::vec3 &cam)
             }
         }
     }
+}
 
+void Engine::submitMeshJobs()
+{
     int jobsCreated = 0;
     while (jobsCreated < m_Settings.chunksToCreatePerFrame && !m_MeshJobsToCreate.empty())
     {
@@ -251,7 +280,10 @@ void Engine::updateChunks(const glm::vec3 &cam)
             m_MeshJobsInProgress.erase(job); });
         jobsCreated++;
     }
+}
 
+void Engine::uploadReadyMeshes()
+{
     int uploaded = 0;
     for (auto &[pos, chunk] : m_Chunks)
     {
@@ -259,7 +291,6 @@ void Engine::updateChunks(const glm::vec3 &cam)
             break;
         if (chunk->getState() == Chunk::State::STAGING_READY)
         {
-
             if (chunk->uploadMesh(m_Renderer, 0) || chunk->uploadMesh(m_Renderer, 1))
             {
                 uploaded++;
