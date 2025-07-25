@@ -127,11 +127,6 @@ void VulkanRenderer::drawFrame(Camera &camera, const std::map<glm::ivec3, std::u
     m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
-void VulkanRenderer::createChunkMeshBuffers(const std::vector<Vertex> &v, const std::vector<uint32_t> &i, UploadJob &up, VkBuffer &vb, VmaAllocation &va, VkBuffer &ib, VmaAllocation &ia)
-{
-    UploadHelpers::createChunkMeshBuffers(*m_DeviceContext, m_CommandManager->getCommandPool(), v, i, up, vb, va, ib, ia);
-}
-
 void VulkanRenderer::enqueueDestroy(VmaBuffer &&buffer)
 {
     if (buffer.get() != VK_NULL_HANDLE)

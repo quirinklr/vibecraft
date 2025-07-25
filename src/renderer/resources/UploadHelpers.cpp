@@ -1,7 +1,8 @@
 #include "UploadHelpers.h"
 #include <stdexcept>
 
-void UploadHelpers::copyBuffer(const DeviceContext& deviceContext, VkCommandPool commandPool, VkBuffer src, VkBuffer dst, VkDeviceSize size, VkFence* outFence) {
+void UploadHelpers::copyBuffer(const DeviceContext &deviceContext, VkCommandPool commandPool, VkBuffer src, VkBuffer dst, VkDeviceSize size, VkFence *outFence)
+{
     VkCommandBufferAllocateInfo a{};
     a.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     a.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -25,19 +26,24 @@ void UploadHelpers::copyBuffer(const DeviceContext& deviceContext, VkCommandPool
     s.commandBufferCount = 1;
     s.pCommandBuffers = &cmd;
 
-    if (outFence) {
-        if (*outFence == VK_NULL_HANDLE) {
+    if (outFence)
+    {
+        if (*outFence == VK_NULL_HANDLE)
+        {
             VkFenceCreateInfo f{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
             vkCreateFence(deviceContext.getDevice(), &f, nullptr, outFence);
         }
         vkQueueSubmit(deviceContext.getGraphicsQueue(), 1, &s, *outFence);
-    } else {
+    }
+    else
+    {
         vkQueueSubmit(deviceContext.getGraphicsQueue(), 1, &s, VK_NULL_HANDLE);
         vkQueueWaitIdle(deviceContext.getGraphicsQueue());
     }
 }
 
-void UploadHelpers::transitionImageLayout(const DeviceContext& deviceContext, VkCommandPool commandPool, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
+void UploadHelpers::transitionImageLayout(const DeviceContext &deviceContext, VkCommandPool commandPool, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout)
+{
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -69,19 +75,24 @@ void UploadHelpers::transitionImageLayout(const DeviceContext& deviceContext, Vk
     VkPipelineStageFlags sourceStage;
     VkPipelineStageFlags destinationStage;
 
-    if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+    if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+    {
         barrier.srcAccessMask = 0;
         barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 
         sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
         destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+    }
+    else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+    {
         barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
         sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    } else {
+    }
+    else
+    {
         throw std::invalid_argument("unsupported layout transition!");
     }
 
@@ -106,7 +117,8 @@ void UploadHelpers::transitionImageLayout(const DeviceContext& deviceContext, Vk
     vkFreeCommandBuffers(deviceContext.getDevice(), commandPool, 1, &commandBuffer);
 }
 
-void UploadHelpers::copyBufferToImage(const DeviceContext& deviceContext, VkCommandPool commandPool, VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) {
+void UploadHelpers::copyBufferToImage(const DeviceContext &deviceContext, VkCommandPool commandPool, VkBuffer buffer, VkImage image, uint32_t width, uint32_t height)
+{
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -148,34 +160,45 @@ void UploadHelpers::copyBufferToImage(const DeviceContext& deviceContext, VkComm
     vkFreeCommandBuffers(deviceContext.getDevice(), commandPool, 1, &commandBuffer);
 }
 
-void UploadHelpers::createChunkMeshBuffers(const DeviceContext& deviceContext, VkCommandPool commandPool, const std::vector<Vertex>& v, const std::vector<uint32_t>& i, UploadJob& up, VkBuffer& vb, VmaAllocation& va, VkBuffer& ib, VmaAllocation& ia) {
-    if (v.empty() || i.empty()) {
-        vb = ib = VK_NULL_HANDLE;
-        va = ia = VK_NULL_HANDLE;
-        up.fence = VK_NULL_HANDLE;
+void UploadHelpers::stageChunkMesh(VmaAllocator allocator, const std::vector<Vertex> &v, const std::vector<uint32_t> &i, UploadJob &up)
+{
+    if (v.empty() || i.empty())
+    {
+        up.stagingVB = VK_NULL_HANDLE;
+        up.stagingIB = VK_NULL_HANDLE;
         return;
     }
+
     VkDeviceSize vs = sizeof(Vertex) * v.size();
     VkDeviceSize is = sizeof(uint32_t) * i.size();
 
     {
         VkBufferCreateInfo bInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, vs, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
         VmaAllocationCreateInfo aInfo{VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VMA_MEMORY_USAGE_CPU_ONLY};
-        vmaCreateBuffer(deviceContext.getAllocator(), &bInfo, &aInfo, &up.stagingVB, &up.stagingVbAlloc, nullptr);
-        void* data;
-        vmaMapMemory(deviceContext.getAllocator(), up.stagingVbAlloc, &data);
+        vmaCreateBuffer(allocator, &bInfo, &aInfo, &up.stagingVB, &up.stagingVbAlloc, nullptr);
+        void *data;
+        vmaMapMemory(allocator, up.stagingVbAlloc, &data);
         memcpy(data, v.data(), vs);
-        vmaUnmapMemory(deviceContext.getAllocator(), up.stagingVbAlloc);
+        vmaUnmapMemory(allocator, up.stagingVbAlloc);
     }
     {
         VkBufferCreateInfo bInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, is, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
         VmaAllocationCreateInfo aInfo{VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VMA_MEMORY_USAGE_CPU_ONLY};
-        vmaCreateBuffer(deviceContext.getAllocator(), &bInfo, &aInfo, &up.stagingIB, &up.stagingIbAlloc, nullptr);
-        void* data;
-        vmaMapMemory(deviceContext.getAllocator(), up.stagingIbAlloc, &data);
+        vmaCreateBuffer(allocator, &bInfo, &aInfo, &up.stagingIB, &up.stagingIbAlloc, nullptr);
+        void *data;
+        vmaMapMemory(allocator, up.stagingIbAlloc, &data);
         memcpy(data, i.data(), is);
-        vmaUnmapMemory(deviceContext.getAllocator(), up.stagingIbAlloc);
+        vmaUnmapMemory(allocator, up.stagingIbAlloc);
     }
+}
+
+void UploadHelpers::submitChunkMeshUpload(const DeviceContext &deviceContext, VkCommandPool commandPool, UploadJob &up, VkBuffer &vb, VmaAllocation &va, VkBuffer &ib, VmaAllocation &ia)
+{
+    VmaAllocationInfo allocInfoVb, allocInfoIb;
+    vmaGetAllocationInfo(deviceContext.getAllocator(), up.stagingVbAlloc, &allocInfoVb);
+    vmaGetAllocationInfo(deviceContext.getAllocator(), up.stagingIbAlloc, &allocInfoIb);
+    VkDeviceSize vs = allocInfoVb.size;
+    VkDeviceSize is = allocInfoIb.size;
 
     {
         VkBufferCreateInfo bInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, vs, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT};
@@ -205,9 +228,14 @@ void UploadHelpers::createChunkMeshBuffers(const DeviceContext& deviceContext, V
 
     vkEndCommandBuffer(cmd);
 
-    VkSubmitInfo s{VK_STRUCTURE_TYPE_SUBMIT_INFO, nullptr, 0, nullptr, nullptr, 1, &cmd};
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
 
-    VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    vkCreateFence(deviceContext.getDevice(), &fi, nullptr, &up.fence);
-    vkQueueSubmit(deviceContext.getGraphicsQueue(), 1, &s, up.fence);
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    vkCreateFence(deviceContext.getDevice(), &fenceInfo, nullptr, &up.fence);
+
+    vkQueueSubmit(deviceContext.getGraphicsQueue(), 1, &submitInfo, up.fence);
 }

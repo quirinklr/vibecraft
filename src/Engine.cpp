@@ -121,11 +121,14 @@ void Engine::generateChunk(const glm::ivec3 &pos)
     auto ch = std::make_unique<Chunk>(pos);
     Chunk *raw = ch.get();
     m_Chunks[pos] = std::move(ch);
+
     m_Pool.submit([this, raw](std::stop_token st)
                   {
         m_TerrainGen.populateChunk(*raw);
         if (st.stop_requested()) return;
-        raw->buildMeshCpu(); });
+        
+        
+        raw->buildAndStageMesh(m_Renderer.getAllocator()); });
 }
 
 void Engine::updateChunks(const glm::vec3 &cam)

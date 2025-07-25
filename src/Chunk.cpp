@@ -5,6 +5,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <stdexcept>
 #include "BlockIds.h"
+#include "renderer/resources/UploadHelpers.h"
 
 Chunk::Chunk(glm::ivec3 pos) : m_Pos(pos)
 {
@@ -205,8 +206,6 @@ void Chunk::buildMeshGreedy()
     m_State.store(State::CPU_MESH_READY, std::memory_order_release);
 }
 
-void Chunk::buildMeshCpu() { buildMeshGreedy(); }
-
 void Chunk::markReady(VulkanRenderer &renderer)
 {
 
@@ -247,35 +246,52 @@ void Chunk::markReady(VulkanRenderer &renderer)
 
 bool Chunk::uploadMesh(VulkanRenderer &renderer)
 {
-    if (m_State.load(std::memory_order_acquire) != State::CPU_MESH_READY)
+
+    if (m_State.load(std::memory_order_acquire) != State::STAGING_READY)
         return false;
+
     if (m_VertexBuffer != VK_NULL_HANDLE)
     {
         cleanup(renderer);
     }
-    if (m_Vertices.empty() || m_Indices.empty())
+
+    if (m_Upload.stagingVB == VK_NULL_HANDLE)
     {
         m_IndexCount = 0;
         m_State.store(State::GPU_READY, std::memory_order_release);
         return true;
     }
-    renderer.createChunkMeshBuffers(m_Vertices, m_Indices, m_Upload, m_VertexBuffer, m_VertexBufferAllocation, m_IndexBuffer, m_IndexBufferAllocation);
-    m_IndexCount = static_cast<uint32_t>(m_Indices.size());
+
+    UploadHelpers::submitChunkMeshUpload(
+        *renderer.getDeviceContext(),
+        renderer.getCommandManager()->getCommandPool(),
+        m_Upload,
+        m_VertexBuffer, m_VertexBufferAllocation,
+        m_IndexBuffer, m_IndexBufferAllocation);
+
+    VmaAllocationInfo ibInfo;
+    vmaGetAllocationInfo(renderer.getAllocator(), m_IndexBufferAllocation, &ibInfo);
+    m_IndexCount = static_cast<uint32_t>(ibInfo.size / sizeof(uint32_t));
+
+    m_State.store(State::GPU_PENDING, std::memory_order_release);
+    return true;
+}
+
+void Chunk::buildAndStageMesh(VmaAllocator allocator)
+{
+    if (m_State.load() != State::TERRAIN_READY)
+        return;
+
+    buildMeshGreedy();
+
+    UploadHelpers::stageChunkMesh(allocator, m_Vertices, m_Indices, m_Upload);
+
     m_Vertices.clear();
     m_Vertices.shrink_to_fit();
     m_Indices.clear();
     m_Indices.shrink_to_fit();
-    if (m_Upload.fence == VK_NULL_HANDLE)
-        m_State.store(State::GPU_READY, std::memory_order_release);
-    else
-        m_State.store(State::GPU_PENDING, std::memory_order_release);
-    return true;
-}
 
-void Chunk::generateMesh(VulkanRenderer &renderer)
-{
-    buildMeshCpu();
-    uploadMesh(renderer);
+    m_State.store(State::STAGING_READY, std::memory_order_release);
 }
 
 void Chunk::cleanup(VulkanRenderer &renderer)

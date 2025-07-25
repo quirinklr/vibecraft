@@ -21,33 +21,35 @@
 #include <map>
 #include <memory>
 
-class VulkanRenderer {
+class VulkanRenderer
+{
     friend class Chunk;
 
 public:
-    VulkanRenderer(Window& window, const Settings& settings);
+    VulkanRenderer(Window &window, const Settings &settings);
     ~VulkanRenderer();
-    VulkanRenderer(const VulkanRenderer&) = delete;
-    VulkanRenderer& operator=(const VulkanRenderer&) = delete;
+    VulkanRenderer(const VulkanRenderer &) = delete;
+    VulkanRenderer &operator=(const VulkanRenderer &) = delete;
 
-    void drawFrame(Camera& camera, const std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less>& chunks);
-    void createChunkMeshBuffers(const std::vector<Vertex>& v, const std::vector<uint32_t>& i, UploadJob& up, VkBuffer& vb, VmaAllocation& va, VkBuffer& ib, VmaAllocation& ia);
-    void enqueueDestroy(VmaBuffer&& buffer);
-    void enqueueDestroy(VmaImage&& image);
+    void drawFrame(Camera &camera, const std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less> &chunks);
+    void enqueueDestroy(VmaBuffer &&buffer);
+    void enqueueDestroy(VmaImage &&image);
     void enqueueDestroy(VkBuffer buffer, VmaAllocation allocation);
 
     VkDevice getDevice() const { return m_DeviceContext->getDevice(); }
     VmaAllocator getAllocator() const { return m_DeviceContext->getAllocator(); }
+    DeviceContext *getDeviceContext() const { return m_DeviceContext.get(); }
+    CommandManager *getCommandManager() const { return m_CommandManager.get(); }
 
 private:
-    void updateUniformBuffer(uint32_t currentImage, Camera& camera);
+    void updateUniformBuffer(uint32_t currentImage, Camera &camera);
     void createUniformBuffers();
     void createDescriptorPool();
     void createDescriptorSets();
     void createCrosshairVertexBuffer();
 
-    Window& m_Window;
-    const Settings& m_Settings;
+    Window &m_Window;
+    const Settings &m_Settings;
 
     std::unique_ptr<InstanceContext> m_InstanceContext;
     std::unique_ptr<DeviceContext> m_DeviceContext;
@@ -59,7 +61,7 @@ private:
     std::unique_ptr<TextureManager> m_TextureManager;
 
     std::vector<VmaBuffer> m_UniformBuffers;
-    std::vector<void*> m_UniformBuffersMapped;
+    std::vector<void *> m_UniformBuffersMapped;
     VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter> m_DescriptorPool;
     std::vector<VkDescriptorSet> m_DescriptorSets;
     VmaBuffer m_CrosshairVertexBuffer;

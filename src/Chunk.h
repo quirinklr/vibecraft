@@ -22,17 +22,17 @@ public:
         INITIAL,
         TERRAIN_READY,
         CPU_MESH_READY,
+        STAGING_READY,
         GPU_PENDING,
         GPU_READY
     };
     Chunk(glm::ivec3 pos);
     ~Chunk();
     void generateTerrain(FastNoiseLite &noise);
-    void generateMesh(VulkanRenderer &renderer);
     void cleanup(VulkanRenderer &renderer);
     void markReady(VulkanRenderer &renderer);
-    void buildMeshCpu();
     bool uploadMesh(VulkanRenderer &renderer);
+    void buildAndStageMesh(VmaAllocator allocator); 
     void buildMeshGreedy();
     State getState() const { return m_State.load(std::memory_order_acquire); }
     bool isReady() const { return m_State.load(std::memory_order_acquire) == State::GPU_READY; }
