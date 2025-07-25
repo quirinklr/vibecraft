@@ -1,19 +1,30 @@
 # Vibecraft Engine - Ein C++ Voxel-Projekt mit Vulkan
 
-Dieses Projekt ist eine von Grund auf in C++ entwickelte Voxel-Engine, inspiriert von Minecraft, mit einem starken Fokus auf hochleistungsfähige, moderne Grafikprogrammierung mithilfe der Vulkan-API.
+Dieses Projekt ist eine von Grund auf in C++20 entwickelte Voxel-Engine, inspiriert von Minecraft. Der Fokus liegt auf einer hochperformanten, modernen und sauberen Architektur, die die Fähigkeiten der Vulkan-API voll ausnutzt.
 
-## 🚀 Aktuelle Features
+## 🚀 Key Features
 
-*   **Moderne Vulkan-Engine:** Nutzt Vulkan für plattformübergreifende, High-Performance-Grafik. Die Architektur ist sauber in logische Komponenten wie Device-, SwapChain- und Command-Management getrennt.
-*   **Dynamisches Chunk-System:** Die Welt ist in Chunks unterteilt, die dynamisch geladen und entladen werden, basierend auf der Entfernung des Spielers.
-*   **Multithreaded World Generation:** Die Generierung des Terrains und die Erstellung der Chunk-Meshes werden in separaten Threads ausgeführt, um die Haupt-Anwendung flüssig zu halten.
-*   **Prozedurale Terrain-Generierung:** Eine grundlegende Landschaft wird mithilfe von `FastNoiseLite` (Simplex-Noise) erstellt.
-*   **Effizientes Rendering:** Jeder Chunk wird als einzelner Vertex/Index-Buffer gerendert, um die Anzahl der Draw-Calls zu minimieren.
-*   **First-Person-Kamera:** Eine frei bewegliche Kamera mit Maus-Steuerung ist implementiert.
+*   **Hocheffiziente Rendering-Pipeline mit Vulkan:** Nutzt moderne Vulkan-Konzepte für plattformübergreifende, leistungsstarke Grafik. Die Architektur ist sauber in logische Komponenten wie Device-, SwapChain- und Command-Management getrennt.
+
+*   **Vollständig asynchrones Chunk-System:**
+    *   **Ruckelfreies Laden:** Die Welt ist in Chunks unterteilt, die dynamisch geladen werden. Ein `std::jthread`-basierter Thread-Pool übernimmt die rechenintensive Terrain-Generierung, das Meshing und die Vorbereitung der GPU-Daten im Hintergrund.
+    *   **Asynchrones GPU-Staging:** Die Vertex-Daten werden in Worker-Threads in Staging-Buffer kopiert, wodurch der Haupt-Thread von `memcpy`-Operationen entlastet und eine maximal flüssige Framerate gewährleistet wird.
+
+*   **Optimierte Voxel-Darstellung:**
+    *   **Greedy Meshing:** Reduziert die Vertex-Anzahl von Chunks drastisch, indem benachbarte, identische Blockflächen zu großen Polygonen zusammengefasst werden.
+    *   **Frustum Culling:** Entlastet die GPU signifikant, indem nur die Chunks gerendert werden, die sich tatsächlich im Sichtfeld der Kamera befinden.
+
+*   **Modulare, erweiterbare Welt-Generierung:**
+    *   **Layered Noise:** Nutzt `FastNoiseLite` (OpenSimplex2/Perlin), um mittels mehrerer überlagerter Noise-Maps (für Kontinente, Erosion, Höhlen) abwechslungsreiches Terrain zu erzeugen.
+    *   **Biom-System:** Ein sauberes, erweiterbares System basierend auf Temperatur-Maps, das verschiedene Biome wie Ebenen, Wüsten und Ozeane mit jeweils eigenen Oberflächenregeln erzeugt.
+
+*   **Moderne C++-Architektur:**
+    *   Entwickelt in **C++20** mit modernen Features.
+    *   Sicheres Ressourcen-Management durch RAII-Wrapper für alle Vulkan-Handles.
 
 ## 🛠️ Verwendete Technologien
 
-*   **Sprache:** C++17
+*   **Sprache:** C++20
 *   **Build-System:** CMake
 *   **Grafik-API:** [Vulkan](https://www.vulkan.org/)
 *   **Speicherverwaltung:** [Vulkan Memory Allocator (VMA)](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
@@ -26,7 +37,7 @@ Dieses Projekt ist eine von Grund auf in C++ entwickelte Voxel-Engine, inspirier
 
 ### Voraussetzungen
 
-*   Ein C++ Compiler, der C++17 unterstützt (z.B. MSVC, GCC, Clang)
+*   Ein C++ Compiler, der C++20 unterstützt (z.B. MSVC, GCC, Clang)
 *   [CMake](https://cmake.org/download/) (Version 3.10+)
 *   [Vulkan SDK](https://vulkan.lunarg.com/sdk/home)
 
