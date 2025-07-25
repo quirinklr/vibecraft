@@ -270,7 +270,7 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
 
 void Chunk::markReady(VulkanRenderer &renderer)
 {
-
+    std::scoped_lock lock(m_PendingMutex);
     for (auto it = m_PendingUploads.begin(); it != m_PendingUploads.end();)
     {
         if (it->second.fence == VK_NULL_HANDLE)
@@ -278,9 +278,7 @@ void Chunk::markReady(VulkanRenderer &renderer)
             it = m_PendingUploads.erase(it);
             continue;
         }
-
-        VkResult st = vkGetFenceStatus(renderer.getDevice(), it->second.fence);
-        if (st == VK_SUCCESS)
+        if (vkGetFenceStatus(renderer.getDevice(), it->second.fence) == VK_SUCCESS)
         {
             vkDestroyFence(renderer.getDevice(), it->second.fence, nullptr);
             vmaDestroyBuffer(renderer.getAllocator(), it->second.stagingVB, it->second.stagingVbAlloc);
@@ -296,21 +294,22 @@ void Chunk::markReady(VulkanRenderer &renderer)
 
 bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
 {
-    if (!m_PendingUploads.count(lodLevel))
-        return false;
-
-    UploadJob job = std::move(m_PendingUploads.at(lodLevel));
-    m_PendingUploads.erase(lodLevel);
-
+    UploadJob job;
+    {
+        std::scoped_lock lock(m_PendingMutex);
+        if (!m_PendingUploads.count(lodLevel))
+            return false;
+        job = std::move(m_PendingUploads.at(lodLevel));
+        m_PendingUploads.erase(lodLevel);
+    }
     if (job.stagingVB == VK_NULL_HANDLE)
     {
+        std::scoped_lock lock(m_MeshesMutex);
         m_Meshes[lodLevel] = {};
         m_State.store(State::GPU_READY);
         return true;
     }
-
     m_State.store(State::UPLOADING);
-
     ChunkMesh mesh;
     UploadHelpers::submitChunkMeshUpload(
         *renderer.getDeviceContext(),
@@ -318,15 +317,17 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
         job,
         mesh.vertexBuffer, mesh.vertexBufferAllocation,
         mesh.indexBuffer, mesh.indexBufferAllocation);
-
     VmaAllocationInfo ibInfo;
     vmaGetAllocationInfo(renderer.getAllocator(), mesh.indexBufferAllocation, &ibInfo);
     mesh.indexCount = static_cast<uint32_t>(ibInfo.size / sizeof(uint32_t));
-
-    m_Meshes[lodLevel] = std::move(mesh);
-
-    m_PendingUploads[lodLevel] = std::move(job);
-
+    {
+        std::scoped_lock lock(m_MeshesMutex);
+        m_Meshes[lodLevel] = std::move(mesh);
+    }
+    {
+        std::scoped_lock lock(m_PendingMutex);
+        m_PendingUploads[lodLevel] = std::move(job);
+    }
     m_State.store(State::GPU_READY);
     return true;
 }
@@ -335,17 +336,16 @@ void Chunk::buildAndStageMesh(VmaAllocator allocator, int lodLevel)
 {
     if (m_State.load() == State::INITIAL)
         return;
-
     m_State.store(State::MESHING);
-
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
     buildMeshGreedy(lodLevel, vertices, indices);
-
     UploadJob job;
     UploadHelpers::stageChunkMesh(allocator, vertices, indices, job);
-
-    m_PendingUploads[lodLevel] = std::move(job);
+    {
+        std::scoped_lock lock(m_PendingMutex);
+        m_PendingUploads[lodLevel] = std::move(job);
+    }
     m_State.store(State::STAGING_READY);
 }
 
@@ -370,31 +370,22 @@ void Chunk::cleanup(VulkanRenderer &renderer)
 
 bool Chunk::hasLOD(int lodLevel) const
 {
+    std::scoped_lock lock(m_MeshesMutex);
     return m_Meshes.count(lodLevel);
 }
 
 const ChunkMesh *Chunk::getMesh(int lodLevel) const
 {
+    std::scoped_lock lock(m_MeshesMutex);
     auto it = m_Meshes.find(lodLevel);
-    if (it != m_Meshes.end())
-    {
-        return &it->second;
-    }
-    return nullptr;
+    return it == m_Meshes.end() ? nullptr : &it->second;
 }
 
 int Chunk::getBestAvailableLOD(int requiredLod) const
 {
-
+    std::scoped_lock lock(m_MeshesMutex);
     for (int lod = requiredLod; lod >= 0; --lod)
-    {
-        if (hasLOD(lod))
+        if (m_Meshes.count(lod))
             return lod;
-    }
-
-    if (!m_Meshes.empty())
-    {
-        return m_Meshes.rbegin()->first;
-    }
-    return -1;
+    return m_Meshes.empty() ? -1 : m_Meshes.rbegin()->first;
 }

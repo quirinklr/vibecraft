@@ -7,6 +7,7 @@
 #include <map>
 #include "UploadJob.h"
 #include "math/AABB.h"
+#include <mutex>
 
 class VulkanRenderer;
 class FastNoiseLite;
@@ -60,6 +61,9 @@ public:
 
     std::atomic<State> m_State;
     std::atomic<int> m_Flags{0};
+
+    mutable std::mutex m_PendingMutex;
+    mutable std::mutex m_MeshesMutex;
 
 private:
     void buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std::vector<uint32_t> &outIndices);
