@@ -47,7 +47,7 @@ private:
     TerrainGenerator m_TerrainGen;
 
     static constexpr int RENDER_DISTANCE = 12;
-    static constexpr int LOD0_DISTANCE = 6;
+    static constexpr int LOD0_DISTANCE = 8;
     static constexpr int LOD1_DISTANCE = RENDER_DISTANCE;
     static constexpr int MAX_LOD = 1;
 
