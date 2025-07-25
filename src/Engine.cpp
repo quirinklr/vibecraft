@@ -5,14 +5,16 @@
 #include <iomanip>
 #include <thread>
 #include <glm/gtc/constants.hpp>
+#include <algorithm>
 
 Engine::Engine() : m_Window(WIDTH, HEIGHT, "Vibecraft", m_Settings)
 {
     glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
     const int ws = 8;
     for (int x = -ws / 2; x < ws / 2; ++x)
         for (int z = -ws / 2; z < ws / 2; ++z)
-            generateChunk({x, 0, z});
+            m_ChunksToGenerate.insert({x, 0, z});
 }
 
 Engine::~Engine()
@@ -94,7 +96,9 @@ void Engine::run()
         m_Camera.setViewDirection(cam, f, u);
         auto ext = m_Window.getExtent();
         m_Camera.setPerspectiveProjection(glm::radians(m_Settings.fov), static_cast<float>(ext.width) / ext.height, 0.1f, 1000.f);
+
         updateChunks(cam);
+
         m_Renderer.drawFrame(m_Camera, m_Chunks);
         frames++;
         if (now - fpsTime >= 1.f)
@@ -111,8 +115,9 @@ void Engine::run()
 
 void Engine::generateChunk(const glm::ivec3 &pos)
 {
-    if (m_Chunks.find(pos) != m_Chunks.end())
+    if (m_Chunks.count(pos))
         return;
+
     auto ch = std::make_unique<Chunk>(pos);
     Chunk *raw = ch.get();
     m_Chunks[pos] = std::move(ch);
@@ -126,18 +131,32 @@ void Engine::generateChunk(const glm::ivec3 &pos)
 void Engine::updateChunks(const glm::vec3 &cam)
 {
     glm::ivec3 cc{static_cast<int>(std::floor(cam.x / Chunk::WIDTH)), 0, static_cast<int>(std::floor(cam.z / Chunk::DEPTH))};
+
     for (int dz = -RENDER_DISTANCE; dz <= RENDER_DISTANCE; ++dz)
+    {
         for (int dx = -RENDER_DISTANCE; dx <= RENDER_DISTANCE; ++dx)
-            generateChunk(cc + glm::ivec3{dx, 0, dz});
+        {
+            glm::ivec3 chunkPos = cc + glm::ivec3{dx, 0, dz};
+
+            if (m_Chunks.find(chunkPos) == m_Chunks.end())
+            {
+                std::scoped_lock lock(m_ChunkGenerationQueueMtx);
+                m_ChunksToGenerate.insert(chunkPos);
+            }
+        }
+    }
+
     std::vector<glm::ivec3> out;
     for (auto &[p, c] : m_Chunks)
         if (std::max(std::abs(p.x - cc.x), std::abs(p.z - cc.z)) > RENDER_DISTANCE)
             out.push_back(p);
+
     for (auto &p : out)
     {
         m_Garbage.push_back(std::move(m_Chunks[p]));
         m_Chunks.erase(p);
     }
+
     int cleaned = 0;
     for (auto it = m_Garbage.begin(); it != m_Garbage.end() && cleaned < 1;)
     {
@@ -152,6 +171,21 @@ void Engine::updateChunks(const glm::vec3 &cam)
             ++it;
         }
     }
+
+    int createdThisFrame = 0;
+    while (createdThisFrame < CHUNKS_TO_CREATE_PER_FRAME && !m_ChunksToGenerate.empty())
+    {
+        glm::ivec3 posToGen;
+        {
+            std::scoped_lock lock(m_ChunkGenerationQueueMtx);
+            posToGen = *m_ChunksToGenerate.begin();
+            m_ChunksToGenerate.erase(m_ChunksToGenerate.begin());
+        }
+
+        generateChunk(posToGen);
+        createdThisFrame++;
+    }
+
     int uploaded = 0;
     for (auto &[p, c] : m_Chunks)
     {
