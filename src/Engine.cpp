@@ -142,7 +142,7 @@ void Engine::updateChunks(const glm::vec3 &cam)
     std::vector<glm::ivec3> chunksToUnload;
     for (auto &[pos, chunk] : m_Chunks)
     {
-        if (std::max(std::abs(pos.x - playerChunkPos.x), std::abs(pos.z - playerChunkPos.z)) > RENDER_DISTANCE)
+        if (std::max(std::abs(pos.x - playerChunkPos.x), std::abs(pos.z - playerChunkPos.z)) > m_Settings.renderDistance)
         {
             chunksToUnload.push_back(pos);
         }
@@ -154,25 +154,43 @@ void Engine::updateChunks(const glm::vec3 &cam)
         m_Chunks.erase(pos);
     }
 
-    int cleaned = 0;
-    for (auto it = m_Garbage.begin(); it != m_Garbage.end() && cleaned < 2;)
-    {
+    m_Garbage.erase(
+        std::remove_if(m_Garbage.begin(), m_Garbage.end(),
+                       [this](const std::unique_ptr<Chunk> &chunk)
+                       {
+                           bool isReadyForCleanup = (chunk->getState() == Chunk::State::GPU_READY || chunk->getState() == Chunk::State::TERRAIN_READY);
+                           if (!isReadyForCleanup)
+                           {
+                               return false;
+                           }
 
-        if ((*it)->getState() == Chunk::State::GPU_READY || (*it)->getState() == Chunk::State::TERRAIN_READY)
-        {
-            (*it)->cleanup(m_Renderer);
-            it = m_Garbage.erase(it);
-            ++cleaned;
-        }
-        else
-        {
-            ++it;
-        }
-    }
+                           bool isJobInProgress = false;
+                           {
+                               std::scoped_lock lock(m_MeshJobMutex);
 
-    for (int z = -RENDER_DISTANCE; z <= RENDER_DISTANCE; ++z)
+                               for (int lod = 0; lod <= 1; ++lod)
+                               {
+                                   if (m_MeshJobsInProgress.count({chunk->getPos(), lod}))
+                                   {
+                                       isJobInProgress = true;
+                                       break;
+                                   }
+                               }
+                           }
+
+                           if (!isJobInProgress)
+                           {
+                               chunk->cleanup(m_Renderer);
+                               return true;
+                           }
+
+                           return false;
+                       }),
+        m_Garbage.end());
+
+    for (int z = -m_Settings.renderDistance; z <= m_Settings.renderDistance; ++z)
     {
-        for (int x = -RENDER_DISTANCE; x <= RENDER_DISTANCE; ++x)
+        for (int x = -m_Settings.renderDistance; x <= m_Settings.renderDistance; ++x)
         {
             glm::ivec3 chunkPos = playerChunkPos + glm::ivec3(x, 0, z);
 
@@ -187,7 +205,7 @@ void Engine::updateChunks(const glm::vec3 &cam)
                 continue;
 
             float dist = glm::distance(glm::vec2(x, z), glm::vec2(0.f));
-            int requiredLod = (dist <= LOD0_DISTANCE) ? 0 : 1;
+            int requiredLod = (dist <= m_Settings.lod0Distance) ? 0 : 1;
 
             if (!chunk->hasLOD(requiredLod))
             {
@@ -204,7 +222,7 @@ void Engine::updateChunks(const glm::vec3 &cam)
     }
 
     int jobsCreated = 0;
-    while (jobsCreated < CHUNKS_TO_CREATE_PER_FRAME && !m_MeshJobsToCreate.empty())
+    while (jobsCreated < m_Settings.chunksToCreatePerFrame && !m_MeshJobsToCreate.empty())
     {
         std::pair<glm::ivec3, int> job;
         {
@@ -237,7 +255,7 @@ void Engine::updateChunks(const glm::vec3 &cam)
     int uploaded = 0;
     for (auto &[pos, chunk] : m_Chunks)
     {
-        if (uploaded >= CHUNKS_TO_UPLOAD_PER_FRAME)
+        if (uploaded >= m_Settings.chunksToUploadPerFrame)
             break;
         if (chunk->getState() == Chunk::State::STAGING_READY)
         {
