@@ -43,7 +43,7 @@ void CommandManager::createCommandBuffers()
 }
 
 void CommandManager::recordCommandBuffer(uint32_t imageIndex, uint32_t currentFrame,
-                                         const std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less> &chunks,
+                                         const std::vector<Chunk *> &chunks,
                                          const std::vector<VkDescriptorSet> &descriptorSets,
                                          VkBuffer crosshairVertexBuffer, bool wireframe)
 {
@@ -76,7 +76,7 @@ void CommandManager::recordCommandBuffer(uint32_t imageIndex, uint32_t currentFr
     VkPipeline mainPipe = wireframe
                               ? m_PipelineCache.getWireframePipeline()
                               : m_PipelineCache.getGraphicsPipeline();
-                              
+
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, mainPipe);
 
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, mainPipe);
@@ -84,9 +84,8 @@ void CommandManager::recordCommandBuffer(uint32_t imageIndex, uint32_t currentFr
                             m_PipelineCache.getGraphicsPipelineLayout(),
                             0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
-    for (auto const &[pos, chPtr] : chunks)
+    for (Chunk *c : chunks)
     {
-        Chunk *c = chPtr.get();
         if (!c->isReady() || c->getIndexCount() == 0)
             continue;
 
