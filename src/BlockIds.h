@@ -7,5 +7,6 @@ enum BlockID : uint8_t {
     STONE = 1,   
     DIRT  = 2,   
     WATER = 3,
-    SAND = 4
+    SAND = 4,
+    GRASS = 5
 };

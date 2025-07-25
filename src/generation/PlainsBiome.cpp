@@ -4,7 +4,7 @@
 uint8_t PlainsBiome::surface(uint8_t, int y) const
 {
     if(y == 0) {
-        return DIRT; // GRASS LATER ON
+        return GRASS;
     }
     else if (y <= 3) 
     {
