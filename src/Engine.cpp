@@ -103,7 +103,7 @@ void Engine::run()
 
         updateChunks(cam);
 
-        m_Renderer.drawFrame(m_Camera, m_Chunks, playerChunkPos, LOD0_DISTANCE);
+        m_Renderer.drawFrame(m_Camera, m_Chunks, playerChunkPos, m_Settings.lod0Distance);
 
         frames++;
         if (now - fpsTime >= 1.f)

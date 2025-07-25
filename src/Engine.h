@@ -46,14 +46,6 @@ private:
     Camera m_Camera{};
     TerrainGenerator m_TerrainGen;
 
-    static constexpr int RENDER_DISTANCE = 12;
-    static constexpr int LOD0_DISTANCE = 8;
-    static constexpr int LOD1_DISTANCE = RENDER_DISTANCE;
-    static constexpr int MAX_LOD = 1;
-
-    static constexpr int CHUNKS_TO_CREATE_PER_FRAME = 8;
-    static constexpr int CHUNKS_TO_UPLOAD_PER_FRAME = 4;
-
     void createChunkContainer(const glm::ivec3 &pos);
 
     std::set<std::pair<glm::ivec3, int>, ChunkLodRequestLess> m_MeshJobsToCreate;
