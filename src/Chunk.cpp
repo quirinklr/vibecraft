@@ -112,183 +112,23 @@ void Chunk::generateTerrain(FastNoiseLite &noise)
 
 #include <cstdio>
 
-void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std::vector<uint32_t> &outIndices)
+float calculateAO(bool side1, bool side2, bool corner)
 {
-    printf("Chunk::buildMeshGreedy called for LOD %d\n", lodLevel);
-    const int factor = 1 << lodLevel;
-
-    const int w = WIDTH / factor;
-    const int h = HEIGHT / factor;
-    const int d = DEPTH / factor;
-
-    std::vector<Block> voxels;
-    if (lodLevel == 0)
+    if (side1 && side2)
     {
-        voxels = m_Blocks;
+        return 0.5f;
     }
-    else
+    int obstructions = (side1 ? 1 : 0) + (side2 ? 1 : 0) + (corner ? 1 : 0);
+    switch (obstructions)
     {
-        voxels = downsample(m_Blocks, factor);
-    }
-
-    auto getVoxel = [&](int x, int y, int z) -> Block
-    {
-        if (x < 0 || x >= w || y < 0 || y >= h || z < 0 || z >= d)
-            return {BlockId::AIR};
-        return voxels[y * d * w + z * w + x];
-    };
-
-    outVertices.clear();
-    outIndices.clear();
-
-    auto &db = BlockDatabase::get();
-
-    for (int dim = 0; dim < 3; ++dim)
-    {
-        int u = (dim + 1) % 3, v = (dim + 2) % 3;
-        int dsz[] = {w, h, d};
-
-        for (int slice = 0; slice <= dsz[dim]; ++slice)
-        {
-            std::vector<int8_t> mask(dsz[u] * dsz[v], 0);
-
-            for (int j = 0; j < dsz[v]; ++j)
-            {
-                for (int i = 0; i < dsz[u]; ++i)
-                {
-                    glm::ivec3 a{0}, b{0};
-                    a[dim] = slice;
-                    b[dim] = slice - 1;
-                    a[u] = i;
-                    b[u] = i;
-                    a[v] = j;
-                    b[v] = j;
-
-                    Block blockA = (slice < dsz[dim]) ? getVoxel(a.x, a.y, a.z) : Block{BlockId::AIR};
-                    Block blockB = (slice > 0) ? getVoxel(b.x, b.y, b.z) : Block{BlockId::AIR};
-
-                    const auto &dataA = db.get_block_data(blockA.id);
-                    const auto &dataB = db.get_block_data(blockB.id);
-
-                    if (dataA.is_solid != dataB.is_solid)
-                    {
-                        if (dataA.is_solid)
-                            mask[j * dsz[u] + i] = static_cast<int8_t>(blockA.id);
-                        else
-                            mask[j * dsz[u] + i] = -static_cast<int8_t>(blockB.id);
-                    }
-                }
-            }
-
-            for (int j = 0; j < dsz[v]; ++j)
-            {
-                for (int i = 0; i < dsz[u];)
-                {
-                    int8_t m = mask[j * dsz[u] + i];
-                    if (!m)
-                    {
-                        ++i;
-                        continue;
-                    }
-
-                    bool back_face = m < 0;
-                    BlockId id = static_cast<BlockId>(back_face ? -m : m);
-
-                    int quadWidth = 1;
-                    while (i + quadWidth < dsz[u] && mask[j * dsz[u] + i + quadWidth] == m)
-                        ++quadWidth;
-
-                    int quadHeight = 1;
-                    bool stop = false;
-                    while (j + quadHeight < dsz[v] && !stop)
-                    {
-                        for (int k = 0; k < quadWidth; ++k)
-                        {
-                            if (mask[(j + quadHeight) * dsz[u] + i + k] != m)
-                            {
-                                stop = true;
-                                break;
-                            }
-                        }
-                        if (!stop)
-                            ++quadHeight;
-                    }
-
-                    glm::vec3 p0(0);
-                    p0[dim] = slice;
-                    p0[u] = i;
-                    p0[v] = j;
-
-                    glm::vec3 du(0), dv(0);
-                    du[u] = quadWidth;
-                    dv[v] = quadHeight;
-
-                    uint32_t base = outVertices.size();
-                    const auto &data = db.get_block_data(id);
-
-                    int texture_index;
-                    if (dim == 0)
-                    {
-                        texture_index = back_face ? data.texture_indices[4] : data.texture_indices[5];
-                    }
-                    else if (dim == 1)
-                    {
-                        texture_index = back_face ? data.texture_indices[0] : data.texture_indices[1];
-                    }
-                    else
-                    {
-                        texture_index = back_face ? data.texture_indices[3] : data.texture_indices[2];
-                    }
-
-                    uint32_t idVal = texture_index;
-                    glm::vec3 tileOrigin{(idVal % 16) * ATLAS_INV_SIZE, (idVal / 16) * ATLAS_INV_SIZE, 0.f};
-
-                    glm::vec3 v0 = p0 * (float)factor;
-                    glm::vec3 v1 = (p0 + du) * (float)factor;
-                    glm::vec3 v2 = (p0 + du + dv) * (float)factor;
-                    glm::vec3 v3 = (p0 + dv) * (float)factor;
-
-                    auto getUV = [&](const glm::vec3 &pos) -> glm::vec2
-                    {
-                        switch (dim)
-                        {
-                        case 0:
-                            return {pos.z, pos.y};
-                        case 1:
-                            return {pos.x, pos.z};
-                        case 2:
-                            return {pos.x, pos.y};
-                        default:
-                            return {0, 0};
-                        }
-                    };
-
-                    if (back_face)
-                    {
-                        outIndices.insert(outIndices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
-                    }
-                    else
-                    {
-                        outIndices.insert(outIndices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
-                    }
-
-                    outVertices.push_back({v0, tileOrigin, getUV(v0)});
-                    outVertices.push_back({v1, tileOrigin, getUV(v1)});
-                    outVertices.push_back({v2, tileOrigin, getUV(v2)});
-                    outVertices.push_back({v3, tileOrigin, getUV(v3)});
-
-                    for (int y = 0; y < quadHeight; ++y)
-                    {
-                        for (int x = 0; x < quadWidth; ++x)
-                        {
-                            mask[(j + y) * dsz[u] + i + x] = 0;
-                        }
-                    }
-
-                    i += quadWidth;
-                }
-            }
-        }
+    case 0:
+        return 1.0f;
+    case 1:
+        return 0.7f;
+    case 2:
+        return 0.6f;
+    default:
+        return 0.5f;
     }
 }
 
@@ -356,14 +196,254 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
     return true;
 }
 
-void Chunk::buildAndStageMesh(VmaAllocator allocator, int lodLevel)
+void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std::vector<uint32_t> &outIndices, ChunkMeshInput &meshInput)
+{
+
+    auto getBlockFromSource = [&](int relX, int relY, int relZ) -> Block
+    {
+        if (relY < 0 || relY >= HEIGHT)
+            return {BlockId::AIR};
+
+        int chunkX = (relX < 0) ? -1 : (relX >= WIDTH ? 1 : 0);
+        int chunkZ = (relZ < 0) ? -1 : (relZ >= DEPTH ? 1 : 0);
+        int localX = relX - chunkX * WIDTH;
+        int localZ = relZ - chunkZ * DEPTH;
+
+        if (chunkX == 0 && chunkZ == 0)
+        {
+            return meshInput.selfChunk->getBlock(localX, relY, localZ);
+        }
+
+        int neighborIndex = -1;
+        if (chunkX == -1 && chunkZ == 0)
+            neighborIndex = 0;
+        if (chunkX == 1 && chunkZ == 0)
+            neighborIndex = 1;
+        if (chunkX == 0 && chunkZ == -1)
+            neighborIndex = 2;
+        if (chunkX == 0 && chunkZ == 1)
+            neighborIndex = 3;
+        if (chunkX == -1 && chunkZ == -1)
+            neighborIndex = 4;
+        if (chunkX == 1 && chunkZ == -1)
+            neighborIndex = 5;
+        if (chunkX == -1 && chunkZ == 1)
+            neighborIndex = 6;
+        if (chunkX == 1 && chunkZ == 1)
+            neighborIndex = 7;
+
+        if (neighborIndex != -1 && meshInput.neighborChunks[neighborIndex])
+        {
+            return meshInput.neighborChunks[neighborIndex]->getBlock(localX, relY, localZ);
+        }
+
+        return {BlockId::AIR};
+    };
+
+    for (int y = 0; y < HEIGHT; ++y)
+    {
+        for (int z = 0; z < DEPTH + 2; ++z)
+        {
+            for (int x = 0; x < WIDTH + 2; ++x)
+            {
+                meshInput.cachedBlocks[y * (DEPTH + 2) * (WIDTH + 2) + z * (WIDTH + 2) + x] = getBlockFromSource(x - 1, y, z - 1);
+            }
+        }
+    }
+
+    const int w = WIDTH, h = HEIGHT, d = DEPTH;
+
+    auto isSolid = [&](int x, int y, int z) -> bool
+    {
+        Block block = meshInput.getBlock(x + 1, y, z + 1);
+        return BlockDatabase::get().get_block_data(block.id).is_solid;
+    };
+
+    auto getBlockFromCache = [&](int x, int y, int z) -> Block
+    {
+        return meshInput.getBlock(x + 1, y, z + 1);
+    };
+
+    outVertices.clear();
+    outIndices.clear();
+    auto &db = BlockDatabase::get();
+
+    for (int dim = 0; dim < 3; ++dim)
+    {
+        int u = (dim + 1) % 3;
+        int v = (dim + 2) % 3;
+        int dsz[] = {w, h, d};
+
+        glm::ivec3 du_i(0), dv_i(0), dn_i(0);
+        du_i[u] = 1;
+        dv_i[v] = 1;
+        dn_i[dim] = 1;
+
+        for (int slice = 0; slice <= dsz[dim]; ++slice)
+        {
+            std::vector<int8_t> mask(dsz[u] * dsz[v], 0);
+
+            for (int j = 0; j < dsz[v]; ++j)
+            {
+                for (int i = 0; i < dsz[u]; ++i)
+                {
+                    glm::ivec3 a_local{0}, b_local{0};
+                    a_local[dim] = slice;
+                    b_local[dim] = slice - 1;
+                    a_local[u] = i;
+                    b_local[u] = i;
+                    a_local[v] = j;
+                    b_local[v] = j;
+
+                    bool solidA = isSolid(a_local.x, a_local.y, a_local.z);
+                    bool solidB = isSolid(b_local.x, b_local.y, b_local.z);
+
+                    if (solidA != solidB)
+                    {
+                        if (solidA)
+                        {
+                            mask[j * dsz[u] + i] = static_cast<int8_t>(getBlockFromCache(a_local.x, a_local.y, a_local.z).id);
+                        }
+                        else
+                        {
+                            mask[j * dsz[u] + i] = -static_cast<int8_t>(getBlockFromCache(b_local.x, b_local.y, b_local.z).id);
+                        }
+                    }
+                }
+            }
+
+            for (int j = 0; j < dsz[v]; ++j)
+            {
+                for (int i = 0; i < dsz[u];)
+                {
+                    if (mask[j * dsz[u] + i] == 0)
+                    {
+                        i++;
+                        continue;
+                    }
+
+                    bool back_face = mask[j * dsz[u] + i] < 0;
+                    BlockId id = static_cast<BlockId>(back_face ? -mask[j * dsz[u] + i] : mask[j * dsz[u] + i]);
+
+                    int quadWidth = 1;
+                    while (i + quadWidth < dsz[u] && mask[j * dsz[u] + i + quadWidth] == mask[j * dsz[u] + i])
+                        quadWidth++;
+
+                    int quadHeight = 1;
+                    bool stop = false;
+                    while (j + quadHeight < dsz[v] && !stop)
+                    {
+                        for (int k = 0; k < quadWidth; ++k)
+                        {
+                            if (mask[(j + quadHeight) * dsz[u] + i + k] != mask[j * dsz[u] + i])
+                            {
+                                stop = true;
+                                break;
+                            }
+                        }
+                        if (!stop)
+                            quadHeight++;
+                    }
+
+                    glm::vec3 p0(0);
+                    p0[dim] = slice;
+                    p0[u] = i;
+                    p0[v] = j;
+
+                    const auto &data = db.get_block_data(id);
+                    glm::vec3 du_vec(0), dv_vec(0);
+                    du_vec[u] = quadWidth;
+                    dv_vec[v] = quadHeight;
+
+                    uint32_t base = outVertices.size();
+                    int texture_index;
+                    if (dim == 0)
+                        texture_index = back_face ? data.texture_indices[4] : data.texture_indices[5];
+                    else if (dim == 1)
+                        texture_index = back_face ? data.texture_indices[0] : data.texture_indices[1];
+                    else
+                        texture_index = back_face ? data.texture_indices[3] : data.texture_indices[2];
+
+                    uint32_t idVal = texture_index;
+                    glm::vec3 tileOrigin{(idVal % 16) * ATLAS_INV_SIZE, (idVal / 16) * ATLAS_INV_SIZE, 0.f};
+
+                    float ao[4];
+                    glm::ivec3 normal = back_face ? -dn_i : dn_i;
+                    glm::ivec3 p_local((int)p0.x, (int)p0.y, (int)p0.z);
+
+                    glm::ivec3 quad_corners[] = {
+                        p_local,
+                        p_local + du_i * quadWidth,
+                        p_local + du_i * quadWidth + dv_i * quadHeight,
+                        p_local + dv_i * quadHeight};
+
+                    glm::ivec3 side1_offsets[] = {-du_i, du_i, du_i, -du_i};
+                    glm::ivec3 side2_offsets[] = {-dv_i, -dv_i, dv_i, dv_i};
+
+                    for (int k = 0; k < 4; ++k)
+                    {
+                        glm::ivec3 corner_pos = quad_corners[k];
+                        bool s1 = isSolid(corner_pos.x + side1_offsets[k].x, corner_pos.y + side1_offsets[k].y, corner_pos.z + side1_offsets[k].z);
+                        bool s2 = isSolid(corner_pos.x + side2_offsets[k].x, corner_pos.y + side2_offsets[k].y, corner_pos.z + side2_offsets[k].z);
+                        bool corner = isSolid(corner_pos.x + side1_offsets[k].x + side2_offsets[k].x, corner_pos.y + side1_offsets[k].y + side2_offsets[k].y, corner_pos.z + side1_offsets[k].z + side2_offsets[k].z);
+                        ao[k] = calculateAO(s1, s2, corner);
+                    }
+
+                    glm::vec3 v0 = p0, v1 = p0 + du_vec, v2 = p0 + du_vec + dv_vec, v3 = p0 + dv_vec;
+
+                    auto getUV = [&](const glm::vec3 &pos) -> glm::vec2
+                    {
+                        switch (dim)
+                        {
+                        case 0:
+                            return {pos.z, pos.y};
+                        case 1:
+                            return {pos.x, pos.z};
+                        default:
+                            return {pos.x, pos.y};
+                        }
+                    };
+
+                    outVertices.push_back({v0, tileOrigin, getUV(v0), ao[0]});
+                    outVertices.push_back({v1, tileOrigin, getUV(v1), ao[1]});
+                    outVertices.push_back({v2, tileOrigin, getUV(v2), ao[2]});
+                    outVertices.push_back({v3, tileOrigin, getUV(v3), ao[3]});
+
+                    if (ao[0] + ao[2] > ao[1] + ao[3])
+                    {
+                        if (back_face)
+                            outIndices.insert(outIndices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
+                        else
+                            outIndices.insert(outIndices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
+                    }
+                    else
+                    {
+                        if (back_face)
+                            outIndices.insert(outIndices.end(), {base + 1, base + 3, base, base + 1, base + 2, base + 3});
+                        else
+                            outIndices.insert(outIndices.end(), {base, base + 1, base + 3, base + 1, base + 2, base + 3});
+                    }
+
+                    for (int y_ = 0; y_ < quadHeight; ++y_)
+                        for (int x_ = 0; x_ < quadWidth; ++x_)
+                            mask[(j + y_) * dsz[u] + i + x_] = 0;
+
+                    i += quadWidth;
+                }
+            }
+        }
+    }
+}
+
+void Chunk::buildAndStageMesh(VmaAllocator allocator, int lodLevel, ChunkMeshInput &meshInput)
 {
     if (m_State.load() == State::INITIAL)
         return;
     m_State.store(State::MESHING);
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
-    buildMeshGreedy(lodLevel, vertices, indices);
+
+    buildMeshGreedy(lodLevel, vertices, indices, meshInput);
     UploadJob job;
     UploadHelpers::stageChunkMesh(allocator, vertices, indices, job);
     {

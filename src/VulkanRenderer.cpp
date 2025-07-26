@@ -31,7 +31,7 @@ VulkanRenderer::~VulkanRenderer()
     vkDeviceWaitIdle(m_DeviceContext->getDevice());
 }
 
-void VulkanRenderer::drawFrame(Camera &camera, const std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less> &chunks, const glm::ivec3 &playerChunkPos, int lod0Distance)
+void VulkanRenderer::drawFrame(Camera &camera, const std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks, const glm::ivec3 &playerChunkPos, int lod0Distance)
 {
     vkWaitForFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(m_CurrentFrame), VK_TRUE, UINT64_MAX);
 

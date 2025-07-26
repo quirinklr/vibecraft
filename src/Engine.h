@@ -59,8 +59,8 @@ private:
     std::set<std::pair<glm::ivec3, int>, ChunkLodRequestLess> m_MeshJobsInProgress;
     std::mutex m_MeshJobMutex;
 
-    std::map<glm::ivec3, std::unique_ptr<Chunk>, ivec3_less> m_Chunks;
-    std::vector<std::unique_ptr<Chunk>> m_Garbage;
+    std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> m_Chunks;
+    std::vector<std::shared_ptr<Chunk>> m_Garbage;
     ThreadPool m_Pool;
 
     std::set<glm::ivec3, ivec3_less> m_ChunksToGenerate;

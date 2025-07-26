@@ -123,7 +123,7 @@ void Engine::createChunkContainer(const glm::ivec3 &pos)
     if (m_Chunks.count(pos))
         return;
 
-    auto ch = std::make_unique<Chunk>(pos);
+    auto ch = std::make_shared<Chunk>(pos);
     Chunk *raw = ch.get();
     m_Chunks[pos] = std::move(ch);
 
@@ -160,6 +160,7 @@ void Engine::unloadDistantChunks(const glm::ivec3 &playerChunkPos)
 
     for (auto &pos : chunksToUnload)
     {
+
         m_Garbage.push_back(std::move(m_Chunks.at(pos)));
         m_Chunks.erase(pos);
     }
@@ -169,8 +170,13 @@ void Engine::processGarbage()
 {
     m_Garbage.erase(
         std::remove_if(m_Garbage.begin(), m_Garbage.end(),
-                       [this](const std::unique_ptr<Chunk> &chunk)
+                       [this](const std::shared_ptr<Chunk> &chunk)
                        {
+                           if (chunk.use_count() > 1)
+                           {
+                               return false;
+                           }
+
                            bool isReadyForCleanup = (chunk->getState() == Chunk::State::GPU_READY || chunk->getState() == Chunk::State::TERRAIN_READY);
                            if (!isReadyForCleanup)
                            {
@@ -275,22 +281,42 @@ void Engine::submitMeshJobs()
             m_MeshJobsToCreate.erase(m_MeshJobsToCreate.begin());
         }
 
-        if (!m_Chunks.count(job.first))
+        auto it = m_Chunks.find(job.first);
+        if (it == m_Chunks.end())
         {
             continue;
         }
 
         m_MeshJobsInProgress.insert(job);
-        Chunk *chunk = m_Chunks.at(job.first).get();
 
-        m_Pool.submit([this, chunk, job](std::stop_token st)
+        ChunkMeshInput meshInput;
+
+        meshInput.selfChunk = it->second;
+
+        glm::ivec3 p = it->second->getPos();
+        glm::ivec3 offsets[] = {
+            {p.x - 1, 0, p.z}, {p.x + 1, 0, p.z}, {p.x, 0, p.z - 1}, {p.x, 0, p.z + 1}, {p.x - 1, 0, p.z - 1}, {p.x + 1, 0, p.z - 1}, {p.x - 1, 0, p.z + 1}, {p.x + 1, 0, p.z + 1}};
+        for (int i = 0; i < 8; ++i)
+        {
+            auto neighborIt = m_Chunks.find(offsets[i]);
+            if (neighborIt != m_Chunks.end() && neighborIt->second->getState() >= Chunk::State::TERRAIN_READY)
+            {
+                meshInput.neighborChunks[i] = neighborIt->second;
+            }
+        }
+
+        m_Pool.submit([this, job, meshInput = std::move(meshInput)](std::stop_token st) mutable
                       {
             if (st.stop_requested()) {
                 std::scoped_lock lock(m_MeshJobMutex);
                 m_MeshJobsInProgress.erase(job);
                 return;
             }
-            chunk->buildAndStageMesh(m_Renderer.getAllocator(), job.second);
+            
+            
+            Chunk* chunk = meshInput.selfChunk.get();
+            chunk->buildAndStageMesh(m_Renderer.getAllocator(), job.second, meshInput);
+
             std::scoped_lock lock(m_MeshJobMutex);
             m_MeshJobsInProgress.erase(job); });
         jobsCreated++;
