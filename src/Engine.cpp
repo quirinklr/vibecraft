@@ -36,11 +36,11 @@ void Engine::run()
     float pitch = 0.f;
     glm::vec3 cam = {0.f, 100.f, 3.f};
     float baseSpeed = 10.f;
-    const float boost = 4.f;
-    const float step = 2.f;
     float fpsTime = last;
     int frames = 0;
-    const float mScale = 0.0005f;
+
+    glfwGetCursorPos(m_Window.getGLFWwindow(), &lx, &ly);
+
     while (!m_Window.shouldClose())
     {
         glm::ivec3 playerChunkPos{
@@ -49,72 +49,104 @@ void Engine::run()
 
         float now = static_cast<float>(glfwGetTime());
         float dt = now - last;
+        last = now;
+
         glfwPollEvents();
-        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_ESCAPE) == GLFW_PRESS)
-        {
-            glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-            mouse = false;
-        }
-        if (!mouse && glfwGetMouseButton(m_Window.getGLFWwindow(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
-        {
-            glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-            mouse = true;
-            glfwGetCursorPos(m_Window.getGLFWwindow(), &lx, &ly);
-        }
-        static bool fLast = false;
-        bool fNow = glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_F) == GLFW_PRESS;
-        if (fNow && !fLast)
-            m_Settings.wireframe = !m_Settings.wireframe;
-        fLast = fNow;
-        if (mouse)
-        {
-            double mx, my;
-            glfwGetCursorPos(m_Window.getGLFWwindow(), &mx, &my);
-            float dx = static_cast<float>(mx - lx);
-            float dy = static_cast<float>(my - ly);
-            lx = mx;
-            ly = my;
-            yaw -= dx * m_Settings.mouseSensitivityX * mScale;
-            pitch += (m_Settings.invertMouseY ? dy : -dy) * m_Settings.mouseSensitivityY * mScale;
-            pitch = glm::clamp(pitch, -glm::half_pi<float>() + 0.01f, glm::half_pi<float>() - 0.01f);
-        }
-        glm::vec3 f{cos(yaw) * cos(pitch), sin(pitch), sin(yaw) * cos(pitch)};
-        f = glm::normalize(f);
-        glm::vec3 r = glm::normalize(glm::cross(f, {0.f, 1.f, 0.f}));
-        glm::vec3 u = glm::normalize(glm::cross(r, f));
-        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_E) == GLFW_PRESS)
-            baseSpeed += step * dt * 10.f;
-        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_Q) == GLFW_PRESS)
-            baseSpeed = glm::max(1.f, baseSpeed - step * dt * 10.f);
-        float speed = baseSpeed;
-        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
-            speed *= boost;
-        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_W) == GLFW_PRESS)
-            cam -= f * speed * dt;
-        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_S) == GLFW_PRESS)
-            cam += f * speed * dt;
-        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_A) == GLFW_PRESS)
-            cam -= r * speed * dt;
-        if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_D) == GLFW_PRESS)
-            cam += r * speed * dt;
-        m_Camera.setViewDirection(cam, f, u);
-        auto ext = m_Window.getExtent();
-        m_Camera.setPerspectiveProjection(glm::radians(m_Settings.fov), static_cast<float>(ext.width) / ext.height, 0.1f, 1000.f);
+
+        processInput(dt, mouse, lx, ly, yaw, pitch, cam, baseSpeed);
+        updateCamera(cam, yaw, pitch);
 
         updateChunks(cam);
 
         m_Renderer.drawFrame(m_Camera, m_Chunks, playerChunkPos, m_Settings.lod0Distance);
 
-        frames++;
-        if (now - fpsTime >= 1.f)
-        {
-            std::stringstream s;
-            s << std::fixed << std::setprecision(1) << "Vibecraft | FPS: " << frames << " | Yaw: " << glm::degrees(yaw) << " | Pitch: " << glm::degrees(pitch) << " | Speed: " << baseSpeed;
-            glfwSetWindowTitle(m_Window.getGLFWwindow(), s.str().c_str());
-            frames = 0;
-            fpsTime = now;
-        }
-        last = now;
+        updateWindowTitle(now, fpsTime, frames, yaw, pitch, baseSpeed);
+    }
+}
+
+void Engine::processInput(float dt, bool &mouse, double &lx, double &ly, float &yaw, float &pitch, glm::vec3 &cam, float &baseSpeed)
+{
+
+    if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_ESCAPE) == GLFW_PRESS)
+    {
+        glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        mouse = false;
+    }
+    if (!mouse && glfwGetMouseButton(m_Window.getGLFWwindow(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
+    {
+        glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        mouse = true;
+        glfwGetCursorPos(m_Window.getGLFWwindow(), &lx, &ly);
+    }
+
+    static bool fLast = false;
+    bool fNow = glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_F) == GLFW_PRESS;
+    if (fNow && !fLast)
+        m_Settings.wireframe = !m_Settings.wireframe;
+    fLast = fNow;
+
+    if (mouse)
+    {
+        double mx, my;
+        glfwGetCursorPos(m_Window.getGLFWwindow(), &mx, &my);
+        float dx = static_cast<float>(mx - lx);
+        float dy = static_cast<float>(my - ly);
+        lx = mx;
+        ly = my;
+        const float mScale = 0.0005f;
+        yaw -= dx * m_Settings.mouseSensitivityX * mScale;
+        pitch += (m_Settings.invertMouseY ? dy : -dy) * m_Settings.mouseSensitivityY * mScale;
+        pitch = glm::clamp(pitch, -glm::half_pi<float>() + 0.01f, glm::half_pi<float>() - 0.01f);
+    }
+
+    glm::vec3 f{cos(yaw) * cos(pitch), sin(pitch), sin(yaw) * cos(pitch)};
+    f = glm::normalize(f);
+    glm::vec3 r = glm::normalize(glm::cross(f, {0.f, 1.f, 0.f}));
+
+    const float boost = 4.f;
+    const float step = 2.f;
+
+    if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_E) == GLFW_PRESS)
+        baseSpeed += step * dt * 10.f;
+    if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_Q) == GLFW_PRESS)
+        baseSpeed = glm::max(1.f, baseSpeed - step * dt * 10.f);
+
+    float speed = baseSpeed;
+    if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
+        speed *= boost;
+
+    if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_W) == GLFW_PRESS)
+        cam -= f * speed * dt;
+    if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_S) == GLFW_PRESS)
+        cam += f * speed * dt;
+    if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_A) == GLFW_PRESS)
+        cam -= r * speed * dt;
+    if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_D) == GLFW_PRESS)
+        cam += r * speed * dt;
+}
+
+void Engine::updateCamera(const glm::vec3 &cam, float yaw, float pitch)
+{
+    glm::vec3 f{cos(yaw) * cos(pitch), sin(pitch), sin(yaw) * cos(pitch)};
+    f = glm::normalize(f);
+    glm::vec3 r = glm::normalize(glm::cross(f, {0.f, 1.f, 0.f}));
+    glm::vec3 u = glm::normalize(glm::cross(r, f));
+
+    m_Camera.setViewDirection(cam, f, u);
+    auto ext = m_Window.getExtent();
+    m_Camera.setPerspectiveProjection(glm::radians(m_Settings.fov), static_cast<float>(ext.width) / ext.height, 0.1f, 1000.f);
+}
+
+void Engine::updateWindowTitle(float now, float &fpsTime, int &frames, float yaw, float pitch, float baseSpeed)
+{
+    frames++;
+    if (now - fpsTime >= 1.f)
+    {
+        std::stringstream s;
+        s << std::fixed << std::setprecision(1) << "Vibecraft | FPS: " << frames << " | Yaw: " << glm::degrees(yaw) << " | Pitch: " << glm::degrees(pitch) << " | Speed: " << baseSpeed;
+        glfwSetWindowTitle(m_Window.getGLFWwindow(), s.str().c_str());
+        frames = 0;
+        fpsTime = now;
     }
 }
 

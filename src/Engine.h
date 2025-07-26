@@ -40,6 +40,10 @@ public:
     void run();
 
 private:
+    void processInput(float dt, bool &mouse, double &lx, double &ly, float &yaw, float &pitch, glm::vec3 &cam, float &baseSpeed);
+    void updateCamera(const glm::vec3 &cam, float yaw, float pitch);
+    void updateWindowTitle(float now, float &fpsTime, int &frames, float yaw, float pitch, float baseSpeed);
+
     void updateChunks(const glm::vec3 &cameraPos);
     void unloadDistantChunks(const glm::ivec3 &playerChunkPos);
     void processGarbage();
