@@ -199,6 +199,30 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
 void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std::vector<uint32_t> &outIndices, ChunkMeshInput &meshInput)
 {
 
+    struct MaskCell
+    {
+        int8_t block_id = 0;
+        float ao[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+
+        bool operator==(const MaskCell &other) const
+        {
+            if (block_id != other.block_id)
+                return false;
+            for (int i = 0; i < 4; ++i)
+            {
+
+                if (std::abs(ao[i] - other.ao[i]) > 0.001f)
+                    return false;
+            }
+            return true;
+        }
+
+        bool operator!=(const MaskCell &other) const
+        {
+            return !(*this == other);
+        }
+    };
+
     auto getBlockFromSource = [&](int relX, int relY, int relZ) -> Block
     {
         if (relY < 0 || relY >= HEIGHT)
@@ -281,7 +305,8 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
 
         for (int slice = 0; slice <= dsz[dim]; ++slice)
         {
-            std::vector<int8_t> mask(dsz[u] * dsz[v], 0);
+
+            std::vector<MaskCell> mask(dsz[u] * dsz[v]);
 
             for (int j = 0; j < dsz[v]; ++j)
             {
@@ -300,14 +325,37 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
 
                     if (solidA != solidB)
                     {
-                        if (solidA)
+                        MaskCell cell;
+                        bool back_face = !solidA;
+                        BlockId id = solidA ? getBlockFromCache(a_local.x, a_local.y, a_local.z).id
+                                            : getBlockFromCache(b_local.x, b_local.y, b_local.z).id;
+
+                        cell.block_id = static_cast<int8_t>(id) * (back_face ? -1 : 1);
+
+                        glm::ivec3 p_local = a_local;
+
+                        glm::ivec3 quad_corners_1x1[] = {
+                            p_local,
+                            p_local + du_i,
+                            p_local + du_i + dv_i,
+                            p_local + dv_i};
+
+                        glm::ivec3 side1_offsets[] = {-du_i, du_i, du_i, -du_i};
+                        glm::ivec3 side2_offsets[] = {-dv_i, -dv_i, dv_i, dv_i};
+
+                        for (int k = 0; k < 4; ++k)
                         {
-                            mask[j * dsz[u] + i] = static_cast<int8_t>(getBlockFromCache(a_local.x, a_local.y, a_local.z).id);
+                            glm::ivec3 corner_pos = quad_corners_1x1[k];
+
+                            bool s1 = isSolid(corner_pos.x + side1_offsets[k].x, corner_pos.y + side1_offsets[k].y, corner_pos.z + side1_offsets[k].z);
+                            bool s2 = isSolid(corner_pos.x + side2_offsets[k].x, corner_pos.y + side2_offsets[k].y, corner_pos.z + side2_offsets[k].z);
+                            bool corner = isSolid(corner_pos.x + side1_offsets[k].x + side2_offsets[k].x,
+                                                  corner_pos.y + side1_offsets[k].y + side2_offsets[k].y,
+                                                  corner_pos.z + side1_offsets[k].z + side2_offsets[k].z);
+                            cell.ao[k] = calculateAO(s1, s2, corner);
                         }
-                        else
-                        {
-                            mask[j * dsz[u] + i] = -static_cast<int8_t>(getBlockFromCache(b_local.x, b_local.y, b_local.z).id);
-                        }
+
+                        mask[j * dsz[u] + i] = cell;
                     }
                 }
             }
@@ -316,14 +364,12 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
             {
                 for (int i = 0; i < dsz[u];)
                 {
-                    if (mask[j * dsz[u] + i] == 0)
+
+                    if (mask[j * dsz[u] + i].block_id == 0)
                     {
                         i++;
                         continue;
                     }
-
-                    bool back_face = mask[j * dsz[u] + i] < 0;
-                    BlockId id = static_cast<BlockId>(back_face ? -mask[j * dsz[u] + i] : mask[j * dsz[u] + i]);
 
                     int quadWidth = 1;
                     while (i + quadWidth < dsz[u] && mask[j * dsz[u] + i + quadWidth] == mask[j * dsz[u] + i])
@@ -344,6 +390,10 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
                         if (!stop)
                             quadHeight++;
                     }
+
+                    MaskCell start_cell = mask[j * dsz[u] + i];
+                    bool back_face = start_cell.block_id < 0;
+                    BlockId id = static_cast<BlockId>(back_face ? -start_cell.block_id : start_cell.block_id);
 
                     glm::vec3 p0(0);
                     p0[dim] = slice;
@@ -368,26 +418,15 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
                     glm::vec3 tileOrigin{(idVal % 16) * ATLAS_INV_SIZE, (idVal / 16) * ATLAS_INV_SIZE, 0.f};
 
                     float ao[4];
-                    glm::ivec3 normal = back_face ? -dn_i : dn_i;
-                    glm::ivec3 p_local((int)p0.x, (int)p0.y, (int)p0.z);
+                    MaskCell c00 = mask[j * dsz[u] + i];
+                    MaskCell c10 = mask[j * dsz[u] + i + quadWidth - 1];
+                    MaskCell c11 = mask[(j + quadHeight - 1) * dsz[u] + i + quadWidth - 1];
+                    MaskCell c01 = mask[(j + quadHeight - 1) * dsz[u] + i];
 
-                    glm::ivec3 quad_corners[] = {
-                        p_local,
-                        p_local + du_i * quadWidth,
-                        p_local + du_i * quadWidth + dv_i * quadHeight,
-                        p_local + dv_i * quadHeight};
-
-                    glm::ivec3 side1_offsets[] = {-du_i, du_i, du_i, -du_i};
-                    glm::ivec3 side2_offsets[] = {-dv_i, -dv_i, dv_i, dv_i};
-
-                    for (int k = 0; k < 4; ++k)
-                    {
-                        glm::ivec3 corner_pos = quad_corners[k];
-                        bool s1 = isSolid(corner_pos.x + side1_offsets[k].x, corner_pos.y + side1_offsets[k].y, corner_pos.z + side1_offsets[k].z);
-                        bool s2 = isSolid(corner_pos.x + side2_offsets[k].x, corner_pos.y + side2_offsets[k].y, corner_pos.z + side2_offsets[k].z);
-                        bool corner = isSolid(corner_pos.x + side1_offsets[k].x + side2_offsets[k].x, corner_pos.y + side1_offsets[k].y + side2_offsets[k].y, corner_pos.z + side1_offsets[k].z + side2_offsets[k].z);
-                        ao[k] = calculateAO(s1, s2, corner);
-                    }
+                    ao[0] = c00.ao[0];
+                    ao[1] = c10.ao[1];
+                    ao[2] = c11.ao[2];
+                    ao[3] = c01.ao[3];
 
                     glm::vec3 v0 = p0, v1 = p0 + du_vec, v2 = p0 + du_vec + dv_vec, v3 = p0 + dv_vec;
 
@@ -426,7 +465,8 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
 
                     for (int y_ = 0; y_ < quadHeight; ++y_)
                         for (int x_ = 0; x_ < quadWidth; ++x_)
-                            mask[(j + y_) * dsz[u] + i + x_] = 0;
+
+                            mask[(j + y_) * dsz[u] + i + x_].block_id = 0;
 
                     i += quadWidth;
                 }
