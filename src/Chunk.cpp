@@ -150,7 +150,7 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
 
         for (int slice = 0; slice <= dsz[dim]; ++slice)
         {
-            std::vector<BlockId> mask(dsz[u] * dsz[v], BlockId::AIR);
+            std::vector<int8_t> mask(dsz[u] * dsz[v], 0);
 
             for (int j = 0; j < dsz[v]; ++j)
             {
@@ -173,9 +173,9 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
                     if (dataA.is_solid != dataB.is_solid)
                     {
                         if (dataA.is_solid)
-                            mask[j * dsz[u] + i] = blockA.id;
+                            mask[j * dsz[u] + i] = static_cast<int8_t>(blockA.id);
                         else
-                            mask[j * dsz[u] + i] = blockB.id;
+                            mask[j * dsz[u] + i] = -static_cast<int8_t>(blockB.id);
                     }
                 }
             }
@@ -184,15 +184,18 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
             {
                 for (int i = 0; i < dsz[u];)
                 {
-                    BlockId id = mask[j * dsz[u] + i];
-                    if (id == BlockId::AIR)
+                    int8_t m = mask[j * dsz[u] + i];
+                    if (!m)
                     {
                         ++i;
                         continue;
                     }
 
+                    bool back_face = m < 0;
+                    BlockId id = static_cast<BlockId>(back_face ? -m : m);
+
                     int quadWidth = 1;
-                    while (i + quadWidth < dsz[u] && mask[j * dsz[u] + i + quadWidth] == id)
+                    while (i + quadWidth < dsz[u] && mask[j * dsz[u] + i + quadWidth] == m)
                         ++quadWidth;
 
                     int quadHeight = 1;
@@ -201,7 +204,7 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
                     {
                         for (int k = 0; k < quadWidth; ++k)
                         {
-                            if (mask[(j + quadHeight) * dsz[u] + i + k] != id)
+                            if (mask[(j + quadHeight) * dsz[u] + i + k] != m)
                             {
                                 stop = true;
                                 break;
@@ -224,25 +227,10 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
                     const auto &data = db.get_block_data(id);
                     
                     int texture_index;
-                    
-                    // Re-calculate blockA and blockB for the current i,j to determine 'back_face'
-                    glm::ivec3 current_a{0}, current_b{0};
-                    current_a[dim] = slice;
-                    current_b[dim] = slice - 1;
-                    current_a[u] = i;
-                    current_b[u] = i;
-                    current_a[v] = j;
-                    current_b[v] = j;
-
-                    Block current_blockA = (slice < dsz[dim]) ? getVoxel(current_a.x, current_a.y, current_a.z) : Block{BlockId::AIR};
-                    Block current_blockB = (slice > 0) ? getVoxel(current_b.x, current_b.y, current_b.z) : Block{BlockId::AIR};
-
-                    bool back_face = (current_blockA.id == BlockId::AIR && current_blockB.id == id);
-
                     if (dim == 0) { // X-axis
                         texture_index = back_face ? data.texture_indices[4] : data.texture_indices[5]; // Left : Right
                     } else if (dim == 1) { // Y-axis
-                        texture_index = back_face ? data.texture_indices[1] : data.texture_indices[0]; // Bottom : Top
+                        texture_index = back_face ? data.texture_indices[0] : data.texture_indices[1]; // Top : Bottom
                     } else { // dim == 2, Z-axis
                         texture_index = back_face ? data.texture_indices[3] : data.texture_indices[2]; // Back : Front
                     }
@@ -289,7 +277,7 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
                     {
                         for (int x = 0; x < quadWidth; ++x)
                         {
-                            mask[(j + y) * dsz[u] + i + x] = BlockId::AIR;
+                            mask[(j + y) * dsz[u] + i + x] = 0;
                         }
                     }
 
