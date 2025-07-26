@@ -1,9 +1,9 @@
 
 #include "OceanBiome.h"
-#include "../BlockIds.h"
+#include "../Block.h"
 
-uint8_t OceanBiome::surface(uint8_t beneath, int) const
+Block OceanBiome::surface(int) const
 {
-    return beneath ? STONE : SAND;
+    return {BlockId::SAND};
 }
 void OceanBiome::decorate(Chunk &, FastNoiseLite &) const {}

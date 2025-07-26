@@ -1,5 +1,5 @@
 #include "TerrainGenerator.h"
-#include "BlockIds.h"
+#include "../Block.h"
 #include <cmath>
 
 TerrainGenerator::TerrainGenerator()
@@ -68,23 +68,18 @@ void TerrainGenerator::populateChunk(Chunk &c)
                 if (y > ih)
                 {
                     if (y < SEA_LEVEL)
-                        c.setBlock(x, y, z, BlockID::WATER);
+                        c.setBlock(x, y, z, {BlockId::WATER});
                     continue;
                 }
 
-                uint8_t beneath = (y < ih)
-                                      ? static_cast<uint8_t>(BlockID::STONE)
-                                      : static_cast<uint8_t>(BlockID::AIR);
-
-                BlockID id = static_cast<BlockID>(
-                    b.surface(beneath, ih - y));
+                Block block = b.surface(ih - y);
 
                 if (isCave(static_cast<float>(gx),
                            static_cast<float>(y),
                            static_cast<float>(gz)))
-                    id = BlockID::AIR;
+                    block.id = BlockId::AIR;
 
-                c.setBlock(x, y, z, id);
+                c.setBlock(x, y, z, block);
             }
         }
 

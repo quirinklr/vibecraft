@@ -1,18 +1,18 @@
 #include "PlainsBiome.h"
-#include "../BlockIds.h"
+#include "../Block.h"
 
-uint8_t PlainsBiome::surface(uint8_t, int y) const
+Block PlainsBiome::surface(int y) const
 {
     if(y == 0) {
-        return GRASS;
+        return {BlockId::GRASS};
     }
     else if (y <= 3) 
     {
-        return DIRT;
+        return {BlockId::DIRT};
     }
     else 
     {
-        return STONE;
+        return {BlockId::STONE};
     }
 }
 

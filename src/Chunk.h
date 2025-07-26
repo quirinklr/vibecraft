@@ -1,6 +1,6 @@
 #pragma once
 
-#include "BlockIds.h"
+#include "Block.h"
 #include <glm/glm.hpp>
 #include <vector>
 #include <atomic>
@@ -55,8 +55,8 @@ public:
     const ChunkMesh *getMesh(int lodLevel) const;
 
     const glm::mat4 &getModelMatrix() const { return m_ModelMatrix; }
-    BlockID getBlock(int x, int y, int z) const;
-    void setBlock(int x, int y, int z, BlockID id);
+    Block getBlock(int x, int y, int z) const;
+    void setBlock(int x, int y, int z, Block block);
     glm::ivec3 getPos() const { return m_Pos; }
 
     std::atomic<State> m_State;
@@ -70,7 +70,7 @@ private:
 
     glm::ivec3 m_Pos;
     glm::mat4 m_ModelMatrix;
-    std::vector<BlockID> m_Blocks;
+    std::vector<Block> m_Blocks;
 
     std::map<int, ChunkMesh> m_Meshes;
     std::map<int, UploadJob> m_PendingUploads;

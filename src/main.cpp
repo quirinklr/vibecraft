@@ -1,7 +1,7 @@
-
 #include <iostream>
 #include <exception>
 #include "Engine.h"
+#include "Block.h"
 
 int main()
 {
@@ -10,6 +10,7 @@ int main()
 
     try
     {
+        BlockDatabase::get().init();
         std::cout << "Starte Engine ...\n";
         Engine engine;
         engine.run();
@@ -22,7 +23,7 @@ int main()
         std::cin.get();
     }
 
-    std::cout << "Programmende – <Return> druecken …";
+    std::cout << "Programmende – <Return> druecken …";
     std::cin.get();
     return 0;
 }

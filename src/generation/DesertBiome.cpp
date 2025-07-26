@@ -1,9 +1,9 @@
 #include "DesertBiome.h"
-#include "../BlockIds.h"
+#include "../Block.h"
 
-uint8_t DesertBiome::surface(uint8_t, int) const
+Block DesertBiome::surface(int) const
 {
-    return SAND;
+    return {BlockId::SAND};
 }
 
 void DesertBiome::decorate(Chunk &, FastNoiseLite &) const {}

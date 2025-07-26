@@ -4,12 +4,12 @@
 #include "BlockAtlas.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <stdexcept>
-#include "BlockIds.h"
+#include "Block.h"
 #include "renderer/resources/UploadHelpers.h"
 
 Chunk::Chunk(glm::ivec3 pos) : m_Pos(pos)
 {
-    m_Blocks.resize(WIDTH * HEIGHT * DEPTH, BlockID::AIR);
+    m_Blocks.resize(WIDTH * HEIGHT * DEPTH, {BlockId::AIR});
     m_ModelMatrix = glm::translate(glm::mat4(1.f), glm::vec3(pos.x * WIDTH, pos.y * HEIGHT, pos.z * DEPTH));
     m_State.store(State::INITIAL, std::memory_order_release);
 }
@@ -23,28 +23,28 @@ AABB Chunk::getAABB() const
     return {min, max};
 }
 
-void Chunk::setBlock(int x, int y, int z, BlockID id)
+void Chunk::setBlock(int x, int y, int z, Block block)
 {
     if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT || z < 0 || z >= DEPTH)
         return;
-    m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x] = id;
+    m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x] = block;
 }
 
-BlockID Chunk::getBlock(int x, int y, int z) const
+Block Chunk::getBlock(int x, int y, int z) const
 {
     if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT || z < 0 || z >= DEPTH)
-        return BlockID::AIR;
+        return {BlockId::AIR};
     return m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x];
 }
 
 #include <array>
 
-std::vector<BlockID> downsample(const std::vector<BlockID> &original, int factor)
+std::vector<Block> downsample(const std::vector<Block> &original, int factor)
 {
     const int newWidth = Chunk::WIDTH / factor;
     const int newHeight = Chunk::HEIGHT / factor;
     const int newDepth = Chunk::DEPTH / factor;
-    std::vector<BlockID> downsampled(newWidth * newHeight * newDepth, BlockID::AIR);
+    std::vector<Block> downsampled(newWidth * newHeight * newDepth, {BlockId::AIR});
 
     for (int y = 0; y < newHeight; ++y)
     {
@@ -65,18 +65,18 @@ std::vector<BlockID> downsample(const std::vector<BlockID> &original, int factor
                             int originalY = y * factor + oy;
                             int originalZ = z * factor + oz;
 
-                            BlockID currentBlock = original[originalY * Chunk::WIDTH * Chunk::DEPTH + originalZ * Chunk::WIDTH + originalX];
+                            Block currentBlock = original[originalY * Chunk::WIDTH * Chunk::DEPTH + originalZ * Chunk::WIDTH + originalX];
 
-                            if (currentBlock != BlockID::AIR)
+                            if (currentBlock.id != BlockId::AIR)
                             {
 
-                                counts[static_cast<uint8_t>(currentBlock)]++;
+                                counts[static_cast<uint8_t>(currentBlock.id)]++;
                             }
                         }
                     }
                 }
 
-                BlockID mostCommonBlock = BlockID::AIR;
+                BlockId mostCommonBlock = BlockId::AIR;
                 int maxCount = 0;
 
                 for (int i = 1; i < 256; ++i)
@@ -84,11 +84,11 @@ std::vector<BlockID> downsample(const std::vector<BlockID> &original, int factor
                     if (counts[i] > maxCount)
                     {
                         maxCount = counts[i];
-                        mostCommonBlock = static_cast<BlockID>(i);
+                        mostCommonBlock = static_cast<BlockId>(i);
                     }
                 }
 
-                downsampled[(y * newDepth + z) * newWidth + x] = mostCommonBlock;
+                downsampled[(y * newDepth + z) * newWidth + x] = {mostCommonBlock};
             }
         }
     }
@@ -105,19 +105,23 @@ void Chunk::generateTerrain(FastNoiseLite &noise)
             float h = noise.GetNoise(gx, gz);
             int ground = 64 + int(h * 30.f);
             for (int y = 0; y < ground && y < HEIGHT; ++y)
-                m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x] = BlockID::STONE;
+                m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x] = {BlockId::STONE};
         }
     m_State.store(State::TERRAIN_READY, std::memory_order_release);
 }
 
+#include <cstdio>
+
 void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std::vector<uint32_t> &outIndices)
 {
+    printf("Chunk::buildMeshGreedy called for LOD %d\n", lodLevel);
     const int factor = 1 << lodLevel;
+
     const int w = WIDTH / factor;
     const int h = HEIGHT / factor;
     const int d = DEPTH / factor;
 
-    std::vector<BlockID> voxels;
+    std::vector<Block> voxels;
     if (lodLevel == 0)
     {
         voxels = m_Blocks;
@@ -127,17 +131,17 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
         voxels = downsample(m_Blocks, factor);
     }
 
-    auto getVoxel = [&](int x, int y, int z) -> BlockID
+    auto getVoxel = [&](int x, int y, int z) -> Block
     {
         if (x < 0 || x >= w || y < 0 || y >= h || z < 0 || z >= d)
-            return BlockID::AIR;
+            return {BlockId::AIR};
         return voxels[y * d * w + z * w + x];
     };
 
     outVertices.clear();
     outIndices.clear();
 
-    std::vector<int8_t> mask(w * h);
+    auto &db = BlockDatabase::get();
 
     for (int dim = 0; dim < 3; ++dim)
     {
@@ -146,7 +150,7 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
 
         for (int slice = 0; slice <= dsz[dim]; ++slice)
         {
-            mask.assign(dsz[u] * dsz[v], 0);
+            std::vector<BlockId> mask(dsz[u] * dsz[v], BlockId::AIR);
 
             for (int j = 0; j < dsz[v]; ++j)
             {
@@ -160,15 +164,19 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
                     a[v] = j;
                     b[v] = j;
 
-                    BlockID idA = (slice < dsz[dim]) ? getVoxel(a.x, a.y, a.z) : BlockID::AIR;
-                    BlockID idB = (slice > 0) ? getVoxel(b.x, b.y, b.z) : BlockID::AIR;
+                    Block blockA = (slice < dsz[dim]) ? getVoxel(a.x, a.y, a.z) : Block{BlockId::AIR};
+                    Block blockB = (slice > 0) ? getVoxel(b.x, b.y, b.z) : Block{BlockId::AIR};
 
-                    int8_t entry = 0;
-                    if ((idA != BlockID::AIR) != (idB != BlockID::AIR))
+                    const auto &dataA = db.get_block_data(blockA.id);
+                    const auto &dataB = db.get_block_data(blockB.id);
+
+                    if (dataA.is_solid != dataB.is_solid)
                     {
-                        entry = (idA != BlockID::AIR) ? static_cast<int8_t>(idA) : -static_cast<int8_t>(idB);
+                        if (dataA.is_solid)
+                            mask[j * dsz[u] + i] = blockA.id;
+                        else
+                            mask[j * dsz[u] + i] = blockB.id;
                     }
-                    mask[j * dsz[u] + i] = entry;
                 }
             }
 
@@ -176,18 +184,15 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
             {
                 for (int i = 0; i < dsz[u];)
                 {
-                    int8_t m = mask[j * dsz[u] + i];
-                    if (!m)
+                    BlockId id = mask[j * dsz[u] + i];
+                    if (id == BlockId::AIR)
                     {
                         ++i;
                         continue;
                     }
 
-                    bool back = m < 0;
-                    BlockID id = static_cast<BlockID>(back ? -m : m);
-
                     int quadWidth = 1;
-                    while (i + quadWidth < dsz[u] && mask[j * dsz[u] + i + quadWidth] == m)
+                    while (i + quadWidth < dsz[u] && mask[j * dsz[u] + i + quadWidth] == id)
                         ++quadWidth;
 
                     int quadHeight = 1;
@@ -196,7 +201,7 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
                     {
                         for (int k = 0; k < quadWidth; ++k)
                         {
-                            if (mask[(j + quadHeight) * dsz[u] + i + k] != m)
+                            if (mask[(j + quadHeight) * dsz[u] + i + k] != id)
                             {
                                 stop = true;
                                 break;
@@ -216,7 +221,34 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
                     dv[v] = quadHeight;
 
                     uint32_t base = outVertices.size();
-                    const uint32_t idVal = static_cast<uint32_t>(id);
+                    const auto &data = db.get_block_data(id);
+                    
+                    int texture_index;
+                    
+                    // Re-calculate blockA and blockB for the current i,j to determine 'back_face'
+                    glm::ivec3 current_a{0}, current_b{0};
+                    current_a[dim] = slice;
+                    current_b[dim] = slice - 1;
+                    current_a[u] = i;
+                    current_b[u] = i;
+                    current_a[v] = j;
+                    current_b[v] = j;
+
+                    Block current_blockA = (slice < dsz[dim]) ? getVoxel(current_a.x, current_a.y, current_a.z) : Block{BlockId::AIR};
+                    Block current_blockB = (slice > 0) ? getVoxel(current_b.x, current_b.y, current_b.z) : Block{BlockId::AIR};
+
+                    bool back_face = (current_blockA.id == BlockId::AIR && current_blockB.id == id);
+
+                    if (dim == 0) { // X-axis
+                        texture_index = back_face ? data.texture_indices[4] : data.texture_indices[5]; // Left : Right
+                    } else if (dim == 1) { // Y-axis
+                        texture_index = back_face ? data.texture_indices[1] : data.texture_indices[0]; // Bottom : Top
+                    } else { // dim == 2, Z-axis
+                        texture_index = back_face ? data.texture_indices[3] : data.texture_indices[2]; // Back : Front
+                    }
+
+
+                    uint32_t idVal = texture_index;
                     glm::vec3 tileOrigin{(idVal % 16) * ATLAS_INV_SIZE, (idVal / 16) * ATLAS_INV_SIZE, 0.f};
 
                     glm::vec3 v0 = p0 * (float)factor;
@@ -239,7 +271,7 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
                         }
                     };
 
-                    if (back)
+                    if (back_face)
                     {
                         outIndices.insert(outIndices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
                     }
@@ -257,7 +289,7 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
                     {
                         for (int x = 0; x < quadWidth; ++x)
                         {
-                            mask[(j + y) * dsz[u] + i + x] = 0;
+                            mask[(j + y) * dsz[u] + i + x] = BlockId::AIR;
                         }
                     }
 
