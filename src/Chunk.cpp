@@ -225,16 +225,20 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
 
                     uint32_t base = outVertices.size();
                     const auto &data = db.get_block_data(id);
-                    
-                    int texture_index;
-                    if (dim == 0) { // X-axis
-                        texture_index = back_face ? data.texture_indices[4] : data.texture_indices[5]; // Left : Right
-                    } else if (dim == 1) { // Y-axis
-                        texture_index = back_face ? data.texture_indices[0] : data.texture_indices[1]; // Top : Bottom
-                    } else { // dim == 2, Z-axis
-                        texture_index = back_face ? data.texture_indices[3] : data.texture_indices[2]; // Back : Front
-                    }
 
+                    int texture_index;
+                    if (dim == 0)
+                    {
+                        texture_index = back_face ? data.texture_indices[4] : data.texture_indices[5];
+                    }
+                    else if (dim == 1)
+                    {
+                        texture_index = back_face ? data.texture_indices[0] : data.texture_indices[1];
+                    }
+                    else
+                    {
+                        texture_index = back_face ? data.texture_indices[3] : data.texture_indices[2];
+                    }
 
                     uint32_t idVal = texture_index;
                     glm::vec3 tileOrigin{(idVal % 16) * ATLAS_INV_SIZE, (idVal / 16) * ATLAS_INV_SIZE, 0.f};
