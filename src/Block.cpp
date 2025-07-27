@@ -31,4 +31,7 @@ void BlockDatabase::init()
 
     m_block_data[static_cast<size_t>(BlockId::GRASS)].is_solid = true;
     m_block_data[static_cast<size_t>(BlockId::GRASS)].texture_indices = {5, 2, 6, 6, 6, 6};
+
+    m_block_data[static_cast<size_t>(BlockId::BEDROCK)].is_solid = true;
+    m_block_data[static_cast<size_t>(BlockId::BEDROCK)].texture_indices.fill(7);
 }

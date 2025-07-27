@@ -15,6 +15,5 @@ class Biome
 {
 public:
     virtual ~Biome() = default;
-    virtual Block surface(int y) const = 0;
     virtual void decorate(Chunk &c, FastNoiseLite &n) const = 0;
 };

@@ -11,14 +11,14 @@ enum class BlockId : uint8_t
     GRASS,
     SAND,
     WATER,
+    BEDROCK,
     LAST
 };
 
 struct BlockData
 {
     bool is_solid;
-    
-    // top, bottom, front, back, left, right
+
     std::array<uint8_t, 6> texture_indices;
 };
 
