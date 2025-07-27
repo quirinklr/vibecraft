@@ -306,6 +306,8 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
         for (int slice = 0; slice <= dsz[dim]; ++slice)
         {
 
+             if (dim == 1 && slice == 0) continue;
+             
             std::vector<MaskCell> mask(dsz[u] * dsz[v]);
 
             for (int j = 0; j < dsz[v]; ++j)

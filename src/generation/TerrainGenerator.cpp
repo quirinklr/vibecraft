@@ -34,18 +34,22 @@ BiomeType TerrainGenerator::biomeAt(int gx, int gz) const
         return BiomeType::Desert;
     return BiomeType::Plains;
 }
+
 bool TerrainGenerator::isCave(float x, float y, float z) const
 {
 
-    if (y > SEA_LEVEL - 5)
+    if (y > SEA_LEVEL + 20)
         return false;
 
-    float shape = m_caveShape.GetNoise(x * 0.4f, z * 0.4f);
-    if (shape < 0.2f)
+    float caveRegion = m_caveShape.GetNoise(x, z);
+    if (caveRegion < 0.4f)
+    {
         return false;
+    }
 
-    float n = fabs(m_caves.GetNoise(x, y, z));
-    return n > 0.55f;
+    float n = m_caves.GetNoise(x, y * 0.6f, z);
+    return n > 0.6f;
+
 }
 void TerrainGenerator::populateChunk(Chunk &c)
 {
