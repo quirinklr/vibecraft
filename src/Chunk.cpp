@@ -306,8 +306,9 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
         for (int slice = 0; slice <= dsz[dim]; ++slice)
         {
 
-             if (dim == 1 && slice == 0) continue;
-             
+            if (dim == 1 && slice == 0)
+                continue;
+
             std::vector<MaskCell> mask(dsz[u] * dsz[v]);
 
             for (int j = 0; j < dsz[v]; ++j)
@@ -322,15 +323,34 @@ void Chunk::buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std:
                     a_local[v] = j;
                     b_local[v] = j;
 
-                    bool solidA = isSolid(a_local.x, a_local.y, a_local.z);
-                    bool solidB = isSolid(b_local.x, b_local.y, b_local.z);
+                    Block blockA = getBlockFromCache(a_local.x, a_local.y, a_local.z);
+                    Block blockB = getBlockFromCache(b_local.x, b_local.y, b_local.z);
+                    const auto &dataA = db.get_block_data(blockA.id);
+                    const auto &dataB = db.get_block_data(blockB.id);
 
-                    if (solidA != solidB)
+                    bool solidA = dataA.is_solid;
+                    bool solidB = dataB.is_solid;
+
+                    if (solidA != solidB || (blockA.id == BlockId::WATER && blockB.id == BlockId::AIR) || (blockA.id == BlockId::AIR && blockB.id == BlockId::WATER))
                     {
                         MaskCell cell;
                         bool back_face = !solidA;
-                        BlockId id = solidA ? getBlockFromCache(a_local.x, a_local.y, a_local.z).id
-                                            : getBlockFromCache(b_local.x, b_local.y, b_local.z).id;
+                        BlockId id;
+                        
+                        if (solidA)
+                        {
+                            id = blockA.id;
+                        }
+                        else if (solidB)
+                        {
+                            id = blockB.id;
+                        }
+                        else
+                        {
+
+                            id = BlockId::WATER;
+                            back_face = (blockA.id == BlockId::AIR);
+                        }
 
                         cell.block_id = static_cast<int8_t>(id) * (back_face ? -1 : 1);
 
