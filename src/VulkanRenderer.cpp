@@ -3,6 +3,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include "math/Ivec3Less.h"
 #include "renderer/UniformBufferObject.h"
+#include <Globals.h>
 
 VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings)
     : m_Window(window), m_Settings(settings)
@@ -31,7 +32,10 @@ VulkanRenderer::~VulkanRenderer()
     vkDeviceWaitIdle(m_DeviceContext->getDevice());
 }
 
-void VulkanRenderer::drawFrame(Camera &camera, const std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks, const glm::ivec3 &playerChunkPos, int lod0Distance)
+void VulkanRenderer::drawFrame(Camera &camera,
+                               const std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks,
+                               const glm::ivec3 &playerChunkPos,
+                               int lod0Distance)
 {
     vkWaitForFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(m_CurrentFrame), VK_TRUE, UINT64_MAX);
 
@@ -39,85 +43,84 @@ void VulkanRenderer::drawFrame(Camera &camera, const std::map<glm::ivec3, std::s
     m_ImageDestroyQueue[m_CurrentFrame].clear();
 
     uint32_t imageIndex;
-    VkResult result = vkAcquireNextImageKHR(m_DeviceContext->getDevice(), m_SwapChainContext->getSwapChain(), UINT64_MAX, m_SyncPrimitives->getImageAvailableSemaphore(m_CurrentFrame), VK_NULL_HANDLE, &imageIndex);
-
+    VkResult result = vkAcquireNextImageKHR(m_DeviceContext->getDevice(),
+                                            m_SwapChainContext->getSwapChain(),
+                                            UINT64_MAX,
+                                            m_SyncPrimitives->getImageAvailableSemaphore(m_CurrentFrame),
+                                            VK_NULL_HANDLE,
+                                            &imageIndex);
     if (result == VK_ERROR_OUT_OF_DATE_KHR)
     {
         m_SwapChainContext->recreateSwapChain();
         return;
     }
-    else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
-    {
-        throw std::runtime_error("failed to acquire swap chain image!");
-    }
+    if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
+        throw std::runtime_error("failed to acquire swap chain image");
 
     if (m_SyncPrimitives->getImageInFlight(imageIndex) != VK_NULL_HANDLE)
-    {
         vkWaitForFences(m_DeviceContext->getDevice(), 1, &m_SyncPrimitives->getImageInFlight(imageIndex), VK_TRUE, UINT64_MAX);
-    }
     m_SyncPrimitives->getImageInFlight(imageIndex) = m_SyncPrimitives->getInFlightFence(m_CurrentFrame);
 
     updateUniformBuffer(m_CurrentFrame, camera);
 
-    std::vector<std::pair<const Chunk *, int>> chunksToRender;
-    chunksToRender.reserve(chunks.size());
+    std::vector<std::pair<const Chunk *, int>> renderChunks;
+    renderChunks.reserve(chunks.size());
     const Frustum &frustum = camera.getFrustum();
 
     for (auto const &[pos, chunkPtr] : chunks)
     {
-
         chunkPtr->markReady(*this);
-
         if (!frustum.intersects(chunkPtr->getAABB()))
-        {
             continue;
-        }
 
         float dist = glm::distance(glm::vec2(pos.x, pos.z), glm::vec2(playerChunkPos.x, playerChunkPos.z));
-        int requiredLod = (dist <= lod0Distance) ? 0 : 1;
-
-        int bestLod = chunkPtr->getBestAvailableLOD(requiredLod);
-        if (bestLod != -1)
-        {
-            chunksToRender.push_back({chunkPtr.get(), bestLod});
-        }
+        int reqLod = (dist <= lod0Distance) ? 0 : 1;
+        int best = chunkPtr->getBestAvailableLOD(reqLod);
+        if (best != -1)
+            renderChunks.push_back({chunkPtr.get(), best});
     }
 
     vkResetFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(m_CurrentFrame));
     vkResetCommandBuffer(m_CommandManager->getCommandBuffer(m_CurrentFrame), 0);
 
-    m_CommandManager->recordCommandBuffer(imageIndex, m_CurrentFrame, chunksToRender,
-                                          m_DescriptorSets, m_CrosshairVertexBuffer.get(), m_Settings.wireframe);
+    m_CommandManager->recordCommandBuffer(imageIndex,
+                                          m_CurrentFrame,
+                                          renderChunks,
+                                          m_DescriptorSets,
+                                          m_CrosshairVertexBuffer.get(),
+                                          m_Settings.wireframe);
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    VkSemaphore waitSemaphores[] = {m_SyncPrimitives->getImageAvailableSemaphore(m_CurrentFrame)};
-    VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-    submitInfo.waitSemaphoreCount = 1;
-    submitInfo.pWaitSemaphores = waitSemaphores;
-    submitInfo.pWaitDstStageMask = waitStages;
-    submitInfo.commandBufferCount = 1;
-    VkCommandBuffer cmdBuf = m_CommandManager->getCommandBuffer(m_CurrentFrame);
-    submitInfo.pCommandBuffers = &cmdBuf;
-    VkSemaphore signalSemaphores[] = {m_SyncPrimitives->getRenderFinishedSemaphore(m_CurrentFrame)};
-    submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores = signalSemaphores;
+    VkSemaphore waitSemas[]{m_SyncPrimitives->getImageAvailableSemaphore(m_CurrentFrame)};
+    VkPipelineStageFlags waitStages[]{VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    VkSemaphore signalSemas[]{m_SyncPrimitives->getRenderFinishedSemaphore(m_CurrentFrame)};
 
-    if (vkQueueSubmit(m_DeviceContext->getGraphicsQueue(), 1, &submitInfo, m_SyncPrimitives->getInFlightFence(m_CurrentFrame)) != VK_SUCCESS)
+    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    si.waitSemaphoreCount = 1;
+    si.pWaitSemaphores = waitSemas;
+    si.pWaitDstStageMask = waitStages;
+    VkCommandBuffer cb = m_CommandManager->getCommandBuffer(m_CurrentFrame);
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &cb;
+    si.signalSemaphoreCount = 1;
+    si.pSignalSemaphores = signalSemas;
+
     {
-        throw std::runtime_error("failed to submit draw command buffer!");
+        std::scoped_lock lk(gGraphicsQueueMutex);
+        vkQueueSubmit(m_DeviceContext->getGraphicsQueue(), 1, &si, m_SyncPrimitives->getInFlightFence(m_CurrentFrame));
     }
 
-    VkPresentInfoKHR presentInfo{};
-    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = signalSemaphores;
-    VkSwapchainKHR swapChains[] = {m_SwapChainContext->getSwapChain()};
-    presentInfo.swapchainCount = 1;
-    presentInfo.pSwapchains = swapChains;
-    presentInfo.pImageIndices = &imageIndex;
+    VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+    pi.waitSemaphoreCount = 1;
+    pi.pWaitSemaphores = signalSemas;
+    VkSwapchainKHR swp[]{m_SwapChainContext->getSwapChain()};
+    pi.swapchainCount = 1;
+    pi.pSwapchains = swp;
+    pi.pImageIndices = &imageIndex;
 
-    result = vkQueuePresentKHR(m_DeviceContext->getPresentQueue(), &presentInfo);
+    {
+        std::scoped_lock lk(gGraphicsQueueMutex);
+        result = vkQueuePresentKHR(m_DeviceContext->getPresentQueue(), &pi);
+    }
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || m_Window.wasWindowResized())
     {
@@ -125,9 +128,7 @@ void VulkanRenderer::drawFrame(Camera &camera, const std::map<glm::ivec3, std::s
         m_SwapChainContext->recreateSwapChain();
     }
     else if (result != VK_SUCCESS)
-    {
-        throw std::runtime_error("failed to present swap chain image!");
-    }
+        throw std::runtime_error("failed to present swap chain image");
 
     m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }

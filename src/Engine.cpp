@@ -357,17 +357,19 @@ void Engine::submitMeshJobs()
 
 void Engine::uploadReadyMeshes()
 {
-    int uploaded = 0;
+    int launched = 0;
     for (auto &[pos, chunk] : m_Chunks)
     {
-        if (uploaded >= m_Settings.chunksToUploadPerFrame)
+        if (launched >= m_Settings.chunksToUploadPerFrame)
             break;
         if (chunk->getState() == Chunk::State::STAGING_READY)
         {
-            if (chunk->uploadMesh(m_Renderer, 0) || chunk->uploadMesh(m_Renderer, 1))
-            {
-                uploaded++;
-            }
+            std::shared_ptr<Chunk> ch = chunk;
+            m_Pool.submit([this, ch](std::stop_token)
+                          {
+                ch->uploadMesh(m_Renderer,0);
+                ch->uploadMesh(m_Renderer,1); });
+            launched++;
         }
     }
 }

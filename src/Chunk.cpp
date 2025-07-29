@@ -137,21 +137,28 @@ static uint8_t calculateAO(bool side1, bool side2, bool corner)
         return 0;
     }
 }
+
 void Chunk::markReady(VulkanRenderer &renderer)
 {
     std::scoped_lock lock(m_PendingMutex);
     for (auto it = m_PendingUploads.begin(); it != m_PendingUploads.end();)
     {
-        if (it->second.fence == VK_NULL_HANDLE)
+        auto &job = it->second;
+
+        if (job.fence != VK_NULL_HANDLE &&
+            vkGetFenceStatus(renderer.getDevice(), job.fence) == VK_SUCCESS)
         {
-            it = m_PendingUploads.erase(it);
-            continue;
-        }
-        if (vkGetFenceStatus(renderer.getDevice(), it->second.fence) == VK_SUCCESS)
-        {
-            vkDestroyFence(renderer.getDevice(), it->second.fence, nullptr);
-            vmaDestroyBuffer(renderer.getAllocator(), it->second.stagingVB, it->second.stagingVbAlloc);
-            vmaDestroyBuffer(renderer.getAllocator(), it->second.stagingIB, it->second.stagingIbAlloc);
+            vkWaitForFences(renderer.getDevice(), 1, &job.fence, VK_TRUE, UINT64_MAX);
+
+            if (job.cmdBuffer != VK_NULL_HANDLE)
+                vkFreeCommandBuffers(renderer.getDevice(), job.cmdPool, 1, &job.cmdBuffer);
+            if (job.cmdPool != VK_NULL_HANDLE)
+                vkDestroyCommandPool(renderer.getDevice(), job.cmdPool, nullptr);
+            vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
+
+            vmaDestroyBuffer(renderer.getAllocator(), job.stagingVB, job.stagingVbAlloc);
+            vmaDestroyBuffer(renderer.getAllocator(), job.stagingIB, job.stagingIbAlloc);
+
             it = m_PendingUploads.erase(it);
         }
         else
@@ -180,12 +187,11 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
     }
     m_State.store(State::UPLOADING);
     ChunkMesh mesh;
-    UploadHelpers::submitChunkMeshUpload(
-        *renderer.getDeviceContext(),
-        renderer.getCommandManager()->getCommandPool(),
-        job,
-        mesh.vertexBuffer, mesh.vertexBufferAllocation,
-        mesh.indexBuffer, mesh.indexBufferAllocation);
+    UploadHelpers::submitChunkMeshUpload(*renderer.getDeviceContext(),
+                                         job,
+                                         mesh.vertexBuffer, mesh.vertexBufferAllocation,
+                                         mesh.indexBuffer, mesh.indexBufferAllocation);
+
     VmaAllocationInfo ibInfo;
     vmaGetAllocationInfo(renderer.getAllocator(), mesh.indexBufferAllocation, &ibInfo);
     mesh.indexCount = static_cast<uint32_t>(ibInfo.size / sizeof(uint32_t));

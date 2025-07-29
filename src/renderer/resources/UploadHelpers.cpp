@@ -1,5 +1,6 @@
 #include "UploadHelpers.h"
 #include <stdexcept>
+#include <Globals.h>
 
 void UploadHelpers::copyBuffer(const DeviceContext &deviceContext, VkCommandPool commandPool, VkBuffer src, VkBuffer dst, VkDeviceSize size, VkFence *outFence)
 {
@@ -192,50 +193,63 @@ void UploadHelpers::stageChunkMesh(VmaAllocator allocator, const std::vector<Ver
     }
 }
 
-void UploadHelpers::submitChunkMeshUpload(const DeviceContext &deviceContext, VkCommandPool commandPool, UploadJob &up, VkBuffer &vb, VmaAllocation &va, VkBuffer &ib, VmaAllocation &ia)
+void UploadHelpers::submitChunkMeshUpload(const DeviceContext &dc,
+                                          UploadJob &up,
+                                          VkBuffer &vb,
+                                          VmaAllocation &va,
+                                          VkBuffer &ib,
+                                          VmaAllocation &ia)
 {
-    VmaAllocationInfo allocInfoVb, allocInfoIb;
-    vmaGetAllocationInfo(deviceContext.getAllocator(), up.stagingVbAlloc, &allocInfoVb);
-    vmaGetAllocationInfo(deviceContext.getAllocator(), up.stagingIbAlloc, &allocInfoIb);
-    VkDeviceSize vs = allocInfoVb.size;
-    VkDeviceSize is = allocInfoIb.size;
+    VmaAllocationInfo info;
+    vmaGetAllocationInfo(dc.getAllocator(), up.stagingVbAlloc, &info);
+    VkDeviceSize vs = info.size;
+    vmaGetAllocationInfo(dc.getAllocator(), up.stagingIbAlloc, &info);
+    VkDeviceSize is = info.size;
+
+    VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    VmaAllocationCreateInfo aci{};
+    aci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    bci.size = vs;
+    bci.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    vmaCreateBuffer(dc.getAllocator(), &bci, &aci, &vb, &va, nullptr);
+
+    bci.size = is;
+    bci.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+    vmaCreateBuffer(dc.getAllocator(), &bci, &aci, &ib, &ia, nullptr);
+
+    DeviceContext::QueueFamilyIndices q = dc.findQueueFamilies(dc.getPhysicalDevice());
+    VkCommandPoolCreateInfo cpci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+    cpci.queueFamilyIndex = q.graphicsFamily.value();
+    cpci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    vkCreateCommandPool(dc.getDevice(), &cpci, nullptr, &up.cmdPool);
+
+    VkCommandBufferAllocateInfo cbai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    cbai.commandPool = up.cmdPool;
+    cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cbai.commandBufferCount = 1;
+    vkAllocateCommandBuffers(dc.getDevice(), &cbai, &up.cmdBuffer);
+
+    VkCommandBufferBeginInfo cbbi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    cbbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(up.cmdBuffer, &cbbi);
+
+    VkBufferCopy copy{0, 0, vs};
+    vkCmdCopyBuffer(up.cmdBuffer, up.stagingVB, vb, 1, &copy);
+    copy.size = is;
+    vkCmdCopyBuffer(up.cmdBuffer, up.stagingIB, ib, 1, &copy);
+
+    vkEndCommandBuffer(up.cmdBuffer);
+
+    VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    vkCreateFence(dc.getDevice(), &fci, nullptr, &up.fence);
+
+    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &up.cmdBuffer;
 
     {
-        VkBufferCreateInfo bInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, vs, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT};
-        VmaAllocationCreateInfo aInfo{0, VMA_MEMORY_USAGE_GPU_ONLY};
-        vmaCreateBuffer(deviceContext.getAllocator(), &bInfo, &aInfo, &vb, &va, nullptr);
+        std::scoped_lock lk(gGraphicsQueueMutex);
+        vkQueueSubmit(dc.getGraphicsQueue(), 1, &si, up.fence);
     }
-    {
-        VkBufferCreateInfo bInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, is, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT};
-        VmaAllocationCreateInfo aInfo{0, VMA_MEMORY_USAGE_GPU_ONLY};
-        vmaCreateBuffer(deviceContext.getAllocator(), &bInfo, &aInfo, &ib, &ia, nullptr);
-    }
-
-    VkCommandBufferAllocateInfo a{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    a.commandPool = commandPool;
-    a.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    a.commandBufferCount = 1;
-    VkCommandBuffer cmd;
-    vkAllocateCommandBuffers(deviceContext.getDevice(), &a, &cmd);
-
-    VkCommandBufferBeginInfo b{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
-    vkBeginCommandBuffer(cmd, &b);
-
-    VkBufferCopy cv{0, 0, vs};
-    vkCmdCopyBuffer(cmd, up.stagingVB, vb, 1, &cv);
-    VkBufferCopy ci{0, 0, is};
-    vkCmdCopyBuffer(cmd, up.stagingIB, ib, 1, &ci);
-
-    vkEndCommandBuffer(cmd);
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    vkCreateFence(deviceContext.getDevice(), &fenceInfo, nullptr, &up.fence);
-
-    vkQueueSubmit(deviceContext.getGraphicsQueue(), 1, &submitInfo, up.fence);
 }
