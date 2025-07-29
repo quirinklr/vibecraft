@@ -165,7 +165,6 @@ void Chunk::markReady(VulkanRenderer &renderer)
     }
 }
 
-
 bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
 {
     UploadJob job;
@@ -188,8 +187,12 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
     m_State.store(State::UPLOADING);
 
     ChunkMesh mesh;
+    VkCommandPool pool = renderer.getTransferCommandPool()
+                             ? renderer.getTransferCommandPool()
+                             : renderer.getCommandManager()->getCommandPool();
+
     UploadHelpers::submitChunkMeshUpload(*renderer.getDeviceContext(),
-                                         renderer.getCommandManager()->getCommandPool(),
+                                         pool,
                                          job,
                                          mesh.vertexBuffer, mesh.vertexBufferAllocation,
                                          mesh.indexBuffer, mesh.indexBufferAllocation);

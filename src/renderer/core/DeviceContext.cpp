@@ -45,77 +45,74 @@ void DeviceContext::pickPhysicalDevice()
 
 void DeviceContext::createLogicalDevice()
 {
-    QueueFamilyIndices indices = findQueueFamilies(m_PhysicalDevice);
-    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
-    std::set<uint32_t> uniqueQueueFamilies = {indices.graphicsFamily.value(), indices.presentFamily.value()};
-    float queuePriority = 1.0f;
-    for (uint32_t queueFamily : uniqueQueueFamilies)
+    QueueFamilyIndices idx = findQueueFamilies(m_PhysicalDevice);
+
+    std::set<uint32_t> families = {idx.graphicsFamily.value(), idx.presentFamily.value()};
+    if (idx.transferFamily)
+        families.insert(idx.transferFamily.value());
+
+    float prio = 1.f;
+    std::vector<VkDeviceQueueCreateInfo> qInfos;
+    for (auto f : families)
     {
-        VkDeviceQueueCreateInfo queueCreateInfo{};
-        queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        queueCreateInfo.queueFamilyIndex = queueFamily;
-        queueCreateInfo.queueCount = 1;
-        queueCreateInfo.pQueuePriorities = &queuePriority;
-        queueCreateInfos.push_back(queueCreateInfo);
+        VkDeviceQueueCreateInfo qi{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
+        qi.queueFamilyIndex = f;
+        qi.queueCount = 1;
+        qi.pQueuePriorities = &prio;
+        qInfos.push_back(qi);
     }
-    VkPhysicalDeviceFeatures deviceFeatures{};
-    deviceFeatures.wideLines = VK_TRUE;
-    deviceFeatures.fillModeNonSolid = VK_TRUE;
-    deviceFeatures.logicOp = VK_TRUE;
-    
-    VkDeviceCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
-    createInfo.pQueueCreateInfos = queueCreateInfos.data();
-    createInfo.pEnabledFeatures = &deviceFeatures;
-    createInfo.enabledExtensionCount = static_cast<uint32_t>(m_DeviceExtensions.size());
-    createInfo.ppEnabledExtensionNames = m_DeviceExtensions.data();
+
+    VkPhysicalDeviceFeatures feat{};
+    feat.wideLines = VK_TRUE;
+    feat.fillModeNonSolid = VK_TRUE;
+    feat.logicOp = VK_TRUE;
+
+    VkDeviceCreateInfo ci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+    ci.queueCreateInfoCount = static_cast<uint32_t>(qInfos.size());
+    ci.pQueueCreateInfos = qInfos.data();
+    ci.pEnabledFeatures = &feat;
+    ci.enabledExtensionCount = static_cast<uint32_t>(m_DeviceExtensions.size());
+    ci.ppEnabledExtensionNames = m_DeviceExtensions.data();
     if (m_EnableValidationLayers)
     {
-        createInfo.enabledLayerCount = static_cast<uint32_t>(m_ValidationLayers.size());
-        createInfo.ppEnabledLayerNames = m_ValidationLayers.data();
-    }
-    else
-    {
-        createInfo.enabledLayerCount = 0;
+        ci.enabledLayerCount = static_cast<uint32_t>(m_ValidationLayers.size());
+        ci.ppEnabledLayerNames = m_ValidationLayers.data();
     }
 
-    VkDevice device;
-    if (vkCreateDevice(m_PhysicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS)
-    {
-        throw std::runtime_error("failed to create logical device!");
-    }
-    m_Device = VulkanHandle<VkDevice, DeviceDeleter>(device, {});
+    VkDevice dev;
+    vkCreateDevice(m_PhysicalDevice, &ci, nullptr, &dev);
+    m_Device = {dev, {}};
 
-    vkGetDeviceQueue(m_Device.get(), indices.graphicsFamily.value(), 0, &m_GraphicsQueue);
-    vkGetDeviceQueue(m_Device.get(), indices.presentFamily.value(), 0, &m_PresentQueue);
+    vkGetDeviceQueue(dev, idx.graphicsFamily.value(), 0, &m_GraphicsQueue);
+    vkGetDeviceQueue(dev, idx.presentFamily.value(), 0, &m_PresentQueue);
+    if (idx.transferFamily)
+        vkGetDeviceQueue(dev, idx.transferFamily.value(), 0, &m_TransferQueue);
+
+    QueueFamilyIndices tmp = idx;
 }
 
 DeviceContext::QueueFamilyIndices DeviceContext::findQueueFamilies(const VkPhysicalDevice pdevice) const
 {
     QueueFamilyIndices indices;
-    uint32_t queueFamilyCount = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties(pdevice, &queueFamilyCount, nullptr);
-    std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
-    vkGetPhysicalDeviceQueueFamilyProperties(pdevice, &queueFamilyCount, queueFamilies.data());
+    uint32_t count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(pdevice, &count, nullptr);
+    std::vector<VkQueueFamilyProperties> props(count);
+    vkGetPhysicalDeviceQueueFamilyProperties(pdevice, &count, props.data());
+
     int i = 0;
-    for (const auto &queueFamily : queueFamilies)
+    for (auto &q : props)
     {
-        if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)
-        {
+        if (q.queueFlags & VK_QUEUE_GRAPHICS_BIT)
             indices.graphicsFamily = i;
-        }
-        VkBool32 presentSupport = false;
-        vkGetPhysicalDeviceSurfaceSupportKHR(pdevice, i, m_InstanceContext.getSurface(), &presentSupport);
-        if (presentSupport)
-        {
+        VkBool32 present = false;
+        vkGetPhysicalDeviceSurfaceSupportKHR(pdevice, i, m_InstanceContext.getSurface(), &present);
+        if (present)
             indices.presentFamily = i;
-        }
+        if ((q.queueFlags & VK_QUEUE_TRANSFER_BIT) && !(q.queueFlags & VK_QUEUE_GRAPHICS_BIT))
+            indices.transferFamily = i;
         if (indices.isComplete())
-        {
             break;
-        }
-        i++;
+        ++i;
     }
     return indices;
 }

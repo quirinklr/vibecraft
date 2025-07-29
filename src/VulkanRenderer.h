@@ -41,6 +41,7 @@ public:
     VmaAllocator getAllocator() const { return m_DeviceContext->getAllocator(); }
     DeviceContext *getDeviceContext() const { return m_DeviceContext.get(); }
     CommandManager *getCommandManager() const { return m_CommandManager.get(); }
+    VkCommandPool getTransferCommandPool() const { return m_TransferCommandPool; }
 
 private:
     void updateUniformBuffer(uint32_t currentImage, Camera &camera);
@@ -61,6 +62,7 @@ private:
     std::unique_ptr<SyncPrimitives> m_SyncPrimitives;
     std::unique_ptr<TextureManager> m_TextureManager;
 
+    VkCommandPool m_TransferCommandPool{VK_NULL_HANDLE};
     std::vector<VmaBuffer> m_UniformBuffers;
     std::vector<void *> m_UniformBuffersMapped;
     VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter> m_DescriptorPool;

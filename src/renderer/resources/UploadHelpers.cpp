@@ -2,46 +2,45 @@
 #include <stdexcept>
 #include <Globals.h>
 
-void UploadHelpers::copyBuffer(const DeviceContext &deviceContext,
-                               VkCommandPool commandPool,
-                               VkBuffer src, VkBuffer dst,
-                               VkDeviceSize size, VkFence *outFence)
+void UploadHelpers::copyBuffer(const DeviceContext &dc, VkCommandPool pool,
+                               VkBuffer src, VkBuffer dst, VkDeviceSize size, VkFence *outFence)
 {
     std::scoped_lock lk(gGraphicsQueueMutex);
 
-    VkCommandBufferAllocateInfo a{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    a.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    a.commandPool = commandPool;
-    a.commandBufferCount = 1;
-
     VkCommandBuffer cmd;
-    vkAllocateCommandBuffers(deviceContext.getDevice(), &a, &cmd);
+    VkCommandBufferAllocateInfo a{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    a.commandPool = pool;
+    a.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    a.commandBufferCount = 1;
+    vkAllocateCommandBuffers(dc.getDevice(), &a, &cmd);
 
-    VkCommandBufferBeginInfo b{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    b.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &b);
+    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &bi);
 
     VkBufferCopy r{0, 0, size};
     vkCmdCopyBuffer(cmd, src, dst, 1, &r);
     vkEndCommandBuffer(cmd);
 
-    VkSubmitInfo s{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    s.commandBufferCount = 1;
-    s.pCommandBuffers = &cmd;
+    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &cmd;
+
+    VkQueue q = dc.hasTransferQueue() ? dc.getTransferQueue() : dc.getGraphicsQueue();
 
     if (outFence)
     {
         if (*outFence == VK_NULL_HANDLE)
         {
             VkFenceCreateInfo f{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-            vkCreateFence(deviceContext.getDevice(), &f, nullptr, outFence);
+            vkCreateFence(dc.getDevice(), &f, nullptr, outFence);
         }
-        vkQueueSubmit(deviceContext.getGraphicsQueue(), 1, &s, *outFence);
+        vkQueueSubmit(q, 1, &si, *outFence);
     }
     else
     {
-        vkQueueSubmit(deviceContext.getGraphicsQueue(), 1, &s, VK_NULL_HANDLE);
-        vkQueueWaitIdle(deviceContext.getGraphicsQueue());
+        vkQueueSubmit(q, 1, &si, VK_NULL_HANDLE);
+        vkQueueWaitIdle(q);
     }
 }
 
@@ -237,11 +236,13 @@ void UploadHelpers::submitChunkMeshUpload(const DeviceContext &dc,
     vkCmdCopyBuffer(up.cmdBuffer, up.stagingIB, ib, 1, &copy);
     vkEndCommandBuffer(up.cmdBuffer);
 
+    VkQueue q = dc.hasTransferQueue() ? dc.getTransferQueue() : dc.getGraphicsQueue();
+
     VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     vkCreateFence(dc.getDevice(), &fci, nullptr, &up.fence);
 
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     si.commandBufferCount = 1;
     si.pCommandBuffers = &up.cmdBuffer;
-    vkQueueSubmit(dc.getGraphicsQueue(), 1, &si, up.fence);
+    vkQueueSubmit(q, 1, &si, up.fence);
 }
