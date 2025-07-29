@@ -205,35 +205,31 @@ void Engine::processGarbage()
                        [this](const std::shared_ptr<Chunk> &chunk)
                        {
                            if (chunk.use_count() > 1)
-                           {
                                return false;
-                           }
 
-                           bool isReadyForCleanup = (chunk->getState() == Chunk::State::GPU_READY || chunk->getState() == Chunk::State::TERRAIN_READY);
-                           if (!isReadyForCleanup)
-                           {
+                           const bool ready = (chunk->getState() == Chunk::State::GPU_READY ||
+                                               chunk->getState() == Chunk::State::TERRAIN_READY);
+                           if (!ready)
                                return false;
-                           }
 
-                           bool isJobInProgress = false;
+                           bool jobRunning = false;
                            {
-                               std::scoped_lock lock(m_MeshJobMutex);
+                               std::lock_guard lock(m_MeshJobsMutex);
                                for (int lod = 0; lod <= 1; ++lod)
                                {
                                    if (m_MeshJobsInProgress.count({chunk->getPos(), lod}))
                                    {
-                                       isJobInProgress = true;
+                                       jobRunning = true;
                                        break;
                                    }
                                }
                            }
 
-                           if (!isJobInProgress)
+                           if (!jobRunning)
                            {
                                chunk->cleanup(m_Renderer);
                                return true;
                            }
-
                            return false;
                        }),
         m_Garbage.end());
@@ -260,18 +256,19 @@ void Engine::createMeshJobs(const glm::ivec3 &playerChunkPos)
     {
         for (int x = -m_Settings.renderDistance; x <= m_Settings.renderDistance; ++x)
         {
-            glm::ivec3 chunkPos = playerChunkPos + glm::ivec3(x, 0, z);
+            const glm::ivec3 chunkPos = playerChunkPos + glm::ivec3(x, 0, z);
 
-            if (!m_Chunks.count(chunkPos))
+            auto chIt = m_Chunks.find(chunkPos);
+            if (chIt == m_Chunks.end())
                 continue;
 
-            Chunk *chunk = m_Chunks.at(chunkPos).get();
+            Chunk *chunk = chIt->second.get();
             if (chunk->getState() == Chunk::State::INITIAL)
                 continue;
 
-            float dist = glm::distance(glm::vec2(x, z), glm::vec2(0.f));
+            const float dist = glm::distance(glm::vec2(x, z), glm::vec2(0.f));
 
-            int requiredLod = -1;
+            int requiredLod = static_cast<int>(m_Settings.lodDistances.size());
             for (size_t i = 0; i < m_Settings.lodDistances.size(); ++i)
             {
                 if (dist <= m_Settings.lodDistances[i])
@@ -281,18 +278,12 @@ void Engine::createMeshJobs(const glm::ivec3 &playerChunkPos)
                 }
             }
 
-            if (requiredLod == -1)
-            {
-                requiredLod = static_cast<int>(m_Settings.lodDistances.size());
-            }
-
             if (!chunk->hasLOD(requiredLod))
             {
-                std::scoped_lock lock(m_MeshJobMutex);
-                auto job = std::make_pair(chunkPos, requiredLod);
+                const auto job = std::make_pair(chunkPos, requiredLod);
 
-                if (m_MeshJobsInProgress.find(job) == m_MeshJobsInProgress.end() &&
-                    m_MeshJobsToCreate.find(job) == m_MeshJobsToCreate.end())
+                std::lock_guard lock(m_MeshJobsMutex);
+                if (m_MeshJobsInProgress.find(job) == m_MeshJobsInProgress.end() && m_MeshJobsToCreate.find(job) == m_MeshJobsToCreate.end())
                 {
                     m_MeshJobsToCreate.insert(job);
                 }
@@ -304,25 +295,31 @@ void Engine::createMeshJobs(const glm::ivec3 &playerChunkPos)
 void Engine::submitMeshJobs()
 {
     int jobsCreated = 0;
-    while (jobsCreated < m_Settings.chunksToCreatePerFrame && !m_MeshJobsToCreate.empty())
+    while (jobsCreated < m_Settings.chunksToCreatePerFrame)
     {
         std::pair<glm::ivec3, int> job;
+
         {
-            std::scoped_lock lock(m_MeshJobMutex);
+            std::lock_guard lock(m_MeshJobsMutex);
+
+            if (m_MeshJobsToCreate.empty())
+                break;
+
             job = *m_MeshJobsToCreate.begin();
             m_MeshJobsToCreate.erase(m_MeshJobsToCreate.begin());
+
+            m_MeshJobsInProgress.insert(job);
         }
 
         auto it = m_Chunks.find(job.first);
         if (it == m_Chunks.end())
         {
+            std::lock_guard lock(m_MeshJobsMutex);
+            m_MeshJobsInProgress.erase(job);
             continue;
         }
 
-        m_MeshJobsInProgress.insert(job);
-
         ChunkMeshInput meshInput;
-
         meshInput.selfChunk = it->second;
 
         glm::ivec3 p = it->second->getPos();
@@ -337,39 +334,42 @@ void Engine::submitMeshJobs()
             }
         }
 
-        m_Pool.submit([this, job, meshInput = std::move(meshInput)](std::stop_token st) mutable
-                      {
-            if (st.stop_requested()) {
-                std::scoped_lock lock(m_MeshJobMutex);
-                m_MeshJobsInProgress.erase(job);
-                return;
-            }
-            
-            
-            Chunk* chunk = meshInput.selfChunk.get();
-            chunk->buildAndStageMesh(m_Renderer.getAllocator(), job.second, meshInput);
+        m_Pool.submit(
+            [this, job, meshInput = std::move(meshInput)](std::stop_token st) mutable
+            {
+                if (st.stop_requested())
+                {
+                    std::lock_guard lock(m_MeshJobsMutex);
+                    m_MeshJobsInProgress.erase(job);
+                    return;
+                }
 
-            std::scoped_lock lock(m_MeshJobMutex);
-            m_MeshJobsInProgress.erase(job); });
-        jobsCreated++;
+                meshInput.selfChunk->buildAndStageMesh(
+                    m_Renderer.getAllocator(), job.second, meshInput);
+
+                std::lock_guard lock(m_MeshJobsMutex);
+                m_MeshJobsInProgress.erase(job);
+            });
+
+        ++jobsCreated;
     }
 }
 
 void Engine::uploadReadyMeshes()
 {
-    int launched = 0;
+    int uploaded = 0;
+
     for (auto &[pos, chunk] : m_Chunks)
     {
-        if (launched >= m_Settings.chunksToUploadPerFrame)
+        if (uploaded >= m_Settings.chunksToUploadPerFrame)
             break;
+
         if (chunk->getState() == Chunk::State::STAGING_READY)
         {
-            std::shared_ptr<Chunk> ch = chunk;
-            m_Pool.submit([this, ch](std::stop_token)
-                          {
-                ch->uploadMesh(m_Renderer,0);
-                ch->uploadMesh(m_Renderer,1); });
-            launched++;
+
+            chunk->uploadMesh(m_Renderer, 0);
+            chunk->uploadMesh(m_Renderer, 1);
+            ++uploaded;
         }
     }
 }

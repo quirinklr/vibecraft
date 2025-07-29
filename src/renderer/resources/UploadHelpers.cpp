@@ -194,12 +194,14 @@ void UploadHelpers::stageChunkMesh(VmaAllocator allocator, const std::vector<Ver
 }
 
 void UploadHelpers::submitChunkMeshUpload(const DeviceContext &dc,
+                                          VkCommandPool cmdPool,
                                           UploadJob &up,
                                           VkBuffer &vb,
                                           VmaAllocation &va,
                                           VkBuffer &ib,
                                           VmaAllocation &ia)
 {
+
     VmaAllocationInfo info;
     vmaGetAllocationInfo(dc.getAllocator(), up.stagingVbAlloc, &info);
     VkDeviceSize vs = info.size;
@@ -218,14 +220,8 @@ void UploadHelpers::submitChunkMeshUpload(const DeviceContext &dc,
     bci.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
     vmaCreateBuffer(dc.getAllocator(), &bci, &aci, &ib, &ia, nullptr);
 
-    DeviceContext::QueueFamilyIndices q = dc.findQueueFamilies(dc.getPhysicalDevice());
-    VkCommandPoolCreateInfo cpci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
-    cpci.queueFamilyIndex = q.graphicsFamily.value();
-    cpci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-    vkCreateCommandPool(dc.getDevice(), &cpci, nullptr, &up.cmdPool);
-
     VkCommandBufferAllocateInfo cbai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    cbai.commandPool = up.cmdPool;
+    cbai.commandPool = cmdPool;
     cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     cbai.commandBufferCount = 1;
     vkAllocateCommandBuffers(dc.getDevice(), &cbai, &up.cmdBuffer);
@@ -248,8 +244,5 @@ void UploadHelpers::submitChunkMeshUpload(const DeviceContext &dc,
     si.commandBufferCount = 1;
     si.pCommandBuffers = &up.cmdBuffer;
 
-    {
-        std::scoped_lock lk(gGraphicsQueueMutex);
-        vkQueueSubmit(dc.getGraphicsQueue(), 1, &si, up.fence);
-    }
+    vkQueueSubmit(dc.getGraphicsQueue(), 1, &si, up.fence);
 }

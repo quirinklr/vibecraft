@@ -11,6 +11,7 @@ const BlockData &BlockDatabase::get_block_data(BlockId id) const
     return m_block_data[static_cast<size_t>(id)];
 }
 
+
 #include <cstdio>
 
 void BlockDatabase::init()

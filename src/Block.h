@@ -33,6 +33,7 @@ public:
     static BlockDatabase &get();
 
     const BlockData &get_block_data(BlockId id) const;
+    size_t blockCount() const { return m_block_data.size(); }
     void init();
 
 private:
