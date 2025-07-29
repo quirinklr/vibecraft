@@ -10,14 +10,15 @@ VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings)
 {
     m_InstanceContext = std::make_unique<InstanceContext>(m_Window);
     m_DeviceContext = std::make_unique<DeviceContext>(*m_InstanceContext);
-
+    VkDeviceSize arenaSize = 64ull * 1024 * 1024;
+    m_StagingArena = std::make_unique<RingStagingArena>(*m_DeviceContext, arenaSize);
     if (m_DeviceContext->hasTransferQueue())
     {
-        VkCommandPoolCreateInfo info{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
-        info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        info.queueFamilyIndex =
+        VkCommandPoolCreateInfo ci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+        ci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        ci.queueFamilyIndex =
             m_DeviceContext->findQueueFamilies(m_DeviceContext->getPhysicalDevice()).transferFamily.value();
-        vkCreateCommandPool(m_DeviceContext->getDevice(), &info, nullptr, &m_TransferCommandPool);
+        vkCreateCommandPool(m_DeviceContext->getDevice(), &ci, nullptr, &m_TransferCommandPool);
     }
 
     m_SwapChainContext = std::make_unique<SwapChainContext>(m_Window, m_Settings, *m_InstanceContext, *m_DeviceContext);
@@ -40,7 +41,6 @@ VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings)
 VulkanRenderer::~VulkanRenderer()
 {
     vkDeviceWaitIdle(m_DeviceContext->getDevice());
-    
     if (m_TransferCommandPool)
         vkDestroyCommandPool(m_DeviceContext->getDevice(), m_TransferCommandPool, nullptr);
 }

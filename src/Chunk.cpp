@@ -147,21 +147,21 @@ void Chunk::markReady(VulkanRenderer &renderer)
         if (job.fence != VK_NULL_HANDLE &&
             vkGetFenceStatus(renderer.getDevice(), job.fence) == VK_SUCCESS)
         {
+            vkWaitForFences(renderer.getDevice(), 1, &job.fence, VK_TRUE, UINT64_MAX);
+
             if (job.cmdBuffer != VK_NULL_HANDLE)
                 vkFreeCommandBuffers(renderer.getDevice(),
-                                     renderer.getCommandManager()->getCommandPool(),
+                                     renderer.getTransferCommandPool()
+                                         ? renderer.getTransferCommandPool()
+                                         : renderer.getCommandManager()->getCommandPool(),
                                      1, &job.cmdBuffer);
 
             vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
-            vmaDestroyBuffer(renderer.getAllocator(), job.stagingVB, job.stagingVbAlloc);
-            vmaDestroyBuffer(renderer.getAllocator(), job.stagingIB, job.stagingIbAlloc);
 
             it = m_PendingUploads.erase(it);
         }
         else
-        {
             ++it;
-        }
     }
 }
 
@@ -187,6 +187,7 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
     m_State.store(State::UPLOADING);
 
     ChunkMesh mesh;
+
     VkCommandPool pool = renderer.getTransferCommandPool()
                              ? renderer.getTransferCommandPool()
                              : renderer.getCommandManager()->getCommandPool();
@@ -526,8 +527,8 @@ void Chunk::buildMeshGreedy(int lodLevel,
 using hrc = std::chrono::high_resolution_clock;
 using milli = std::chrono::duration<double, std::milli>;
 
-void Chunk::buildAndStageMesh(VmaAllocator allocator, int lodLevel,
-                              ChunkMeshInput &meshInput)
+void Chunk::buildAndStageMesh(VmaAllocator allocator, RingStagingArena &arena,
+                              int lodLevel, ChunkMeshInput &meshInput)
 {
     const auto t0 = hrc::now();
 
@@ -553,7 +554,8 @@ void Chunk::buildAndStageMesh(VmaAllocator allocator, int lodLevel,
 
     const auto tStage0 = hrc::now();
     UploadJob job;
-    UploadHelpers::stageChunkMesh(allocator, vertices, indices, job);
+    UploadHelpers::stageChunkMesh(arena, vertices, indices, job);
+
     const auto tStage1 = hrc::now();
 
     {

@@ -14,6 +14,7 @@
 #include "renderer/command/CommandManager.h"
 #include "renderer/command/SyncPrimitives.h"
 #include "renderer/resources/TextureManager.h"
+#include "renderer/resources/RingStagingArena.h"
 #include "renderer/resources/UploadHelpers.h"
 #include "renderer/RendererConfig.h"
 #include "math/Ivec3Less.h"
@@ -42,6 +43,7 @@ public:
     DeviceContext *getDeviceContext() const { return m_DeviceContext.get(); }
     CommandManager *getCommandManager() const { return m_CommandManager.get(); }
     VkCommandPool getTransferCommandPool() const { return m_TransferCommandPool; }
+    RingStagingArena *getArena() const { return m_StagingArena.get(); }
 
 private:
     void updateUniformBuffer(uint32_t currentImage, Camera &camera);
@@ -61,7 +63,7 @@ private:
     std::unique_ptr<CommandManager> m_CommandManager;
     std::unique_ptr<SyncPrimitives> m_SyncPrimitives;
     std::unique_ptr<TextureManager> m_TextureManager;
-
+    std::unique_ptr<RingStagingArena> m_StagingArena;
     VkCommandPool m_TransferCommandPool{VK_NULL_HANDLE};
     std::vector<VmaBuffer> m_UniformBuffers;
     std::vector<void *> m_UniformBuffersMapped;

@@ -162,87 +162,74 @@ void UploadHelpers::copyBufferToImage(const DeviceContext &deviceContext, VkComm
     vkFreeCommandBuffers(deviceContext.getDevice(), commandPool, 1, &commandBuffer);
 }
 
-void UploadHelpers::stageChunkMesh(VmaAllocator allocator, const std::vector<Vertex> &v, const std::vector<uint32_t> &i, UploadJob &up)
+void UploadHelpers::stageChunkMesh(RingStagingArena &arena,
+                                   const std::vector<Vertex> &v,
+                                   const std::vector<uint32_t> &i,
+                                   UploadJob &up)
 {
     if (v.empty() || i.empty())
-    {
-        up.stagingVB = VK_NULL_HANDLE;
-        up.stagingIB = VK_NULL_HANDLE;
         return;
-    }
 
-    VkDeviceSize vs = sizeof(Vertex) * v.size();
-    VkDeviceSize is = sizeof(uint32_t) * i.size();
+    VkDeviceSize vs = v.size() * sizeof(Vertex);
+    VkDeviceSize is = i.size() * sizeof(uint32_t);
 
-    {
-        VkBufferCreateInfo bInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, vs, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
-        VmaAllocationCreateInfo aInfo{VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VMA_MEMORY_USAGE_CPU_ONLY};
-        vmaCreateBuffer(allocator, &bInfo, &aInfo, &up.stagingVB, &up.stagingVbAlloc, nullptr);
-        void *data;
-        vmaMapMemory(allocator, up.stagingVbAlloc, &data);
-        memcpy(data, v.data(), vs);
-        vmaUnmapMemory(allocator, up.stagingVbAlloc);
-    }
-    {
-        VkBufferCreateInfo bInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, is, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
-        VmaAllocationCreateInfo aInfo{VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VMA_MEMORY_USAGE_CPU_ONLY};
-        vmaCreateBuffer(allocator, &bInfo, &aInfo, &up.stagingIB, &up.stagingIbAlloc, nullptr);
-        void *data;
-        vmaMapMemory(allocator, up.stagingIbAlloc, &data);
-        memcpy(data, i.data(), is);
-        vmaUnmapMemory(allocator, up.stagingIbAlloc);
-    }
+    if (!arena.alloc(vs, up.stagingVbOffset))
+        return;
+    if (!arena.alloc(is, up.stagingIbOffset))
+        return;
+
+    up.stagingVB = arena.getBuffer();
+    up.stagingVbSize = vs;
+    up.stagingIB = arena.getBuffer();
+    up.stagingIbSize = is;
+
+    uint8_t *base = static_cast<uint8_t *>(arena.getMapped());
+    memcpy(base + up.stagingVbOffset, v.data(), vs);
+    memcpy(base + up.stagingIbOffset, i.data(), is);
 }
 
 void UploadHelpers::submitChunkMeshUpload(const DeviceContext &dc,
-                                          VkCommandPool cmdPool,
+                                          VkCommandPool pool,
                                           UploadJob &up,
                                           VkBuffer &vb, VmaAllocation &va,
                                           VkBuffer &ib, VmaAllocation &ia)
 {
-    std::scoped_lock lk(gGraphicsQueueMutex);
+    VkBufferCreateInfo b{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    VmaAllocationCreateInfo a{};
+    a.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    VmaAllocationInfo info;
-    vmaGetAllocationInfo(dc.getAllocator(), up.stagingVbAlloc, &info);
-    VkDeviceSize vs = info.size;
-    vmaGetAllocationInfo(dc.getAllocator(), up.stagingIbAlloc, &info);
-    VkDeviceSize is = info.size;
+    b.size = up.stagingVbSize;
+    b.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    vmaCreateBuffer(dc.getAllocator(), &b, &a, &vb, &va, nullptr);
 
-    VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-    VmaAllocationCreateInfo aci{};
-    aci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    b.size = up.stagingIbSize;
+    b.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+    vmaCreateBuffer(dc.getAllocator(), &b, &a, &ib, &ia, nullptr);
 
-    bci.size = vs;
-    bci.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    vmaCreateBuffer(dc.getAllocator(), &bci, &aci, &vb, &va, nullptr);
+    VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    ai.commandPool = pool;
+    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ai.commandBufferCount = 1;
+    vkAllocateCommandBuffers(dc.getDevice(), &ai, &up.cmdBuffer);
 
-    bci.size = is;
-    bci.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-    vmaCreateBuffer(dc.getAllocator(), &bci, &aci, &ib, &ia, nullptr);
+    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(up.cmdBuffer, &bi);
 
-    VkCommandBufferAllocateInfo cbai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    cbai.commandPool = cmdPool;
-    cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cbai.commandBufferCount = 1;
-    vkAllocateCommandBuffers(dc.getDevice(), &cbai, &up.cmdBuffer);
-
-    VkCommandBufferBeginInfo cbbi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    cbbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(up.cmdBuffer, &cbbi);
-
-    VkBufferCopy copy{0, 0, vs};
-    vkCmdCopyBuffer(up.cmdBuffer, up.stagingVB, vb, 1, &copy);
-    copy.size = is;
-    vkCmdCopyBuffer(up.cmdBuffer, up.stagingIB, ib, 1, &copy);
+    VkBufferCopy c1{up.stagingVbOffset, 0, up.stagingVbSize};
+    vkCmdCopyBuffer(up.cmdBuffer, up.stagingVB, vb, 1, &c1);
+    VkBufferCopy c2{up.stagingIbOffset, 0, up.stagingIbSize};
+    vkCmdCopyBuffer(up.cmdBuffer, up.stagingIB, ib, 1, &c2);
     vkEndCommandBuffer(up.cmdBuffer);
 
-    VkQueue q = dc.hasTransferQueue() ? dc.getTransferQueue() : dc.getGraphicsQueue();
-
-    VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    vkCreateFence(dc.getDevice(), &fci, nullptr, &up.fence);
+    VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    vkCreateFence(dc.getDevice(), &fi, nullptr, &up.fence);
 
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     si.commandBufferCount = 1;
     si.pCommandBuffers = &up.cmdBuffer;
+
+    VkQueue q = dc.hasTransferQueue() ? dc.getTransferQueue() : dc.getGraphicsQueue();
+    std::scoped_lock lk(gGraphicsQueueMutex);
     vkQueueSubmit(q, 1, &si, up.fence);
 }

@@ -9,6 +9,7 @@
 #include "math/AABB.h"
 #include <mutex>
 #include <array>
+#include <renderer/resources/RingStagingArena.h>
 
 class VulkanRenderer;
 class FastNoiseLite;
@@ -79,7 +80,9 @@ public:
     void cleanup(VulkanRenderer &renderer);
     void markReady(VulkanRenderer &renderer);
 
-    void buildAndStageMesh(VmaAllocator allocator, int lodLevel, ChunkMeshInput &meshInput);
+    void buildAndStageMesh(VmaAllocator allocator, RingStagingArena &arena,
+                           int lodLevel, ChunkMeshInput &meshInput);
+
     bool uploadMesh(VulkanRenderer &renderer, int lodLevel);
     const std::vector<Block> &getBlocks() const { return m_Blocks; }
 

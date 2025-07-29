@@ -320,14 +320,18 @@ void Engine::submitMeshJobs()
             {
                 if (st.stop_requested())
                 {
-                    std::lock_guard lock(m_MeshJobsMutex);
+                    std::lock_guard lk(m_MeshJobsMutex);
                     m_MeshJobsInProgress.erase(job);
                     return;
                 }
-                in.selfChunk->buildAndStageMesh(
-                    m_Renderer.getAllocator(), job.second, in);
 
-                std::lock_guard lock(m_MeshJobsMutex);
+                in.selfChunk->buildAndStageMesh(
+                    m_Renderer.getAllocator(),
+                    *m_Renderer.getArena(),
+                    job.second,
+                    in);
+
+                std::lock_guard lk(m_MeshJobsMutex);
                 m_MeshJobsInProgress.erase(job);
             });
     }
