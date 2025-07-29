@@ -58,6 +58,7 @@ private:
     VulkanRenderer m_Renderer{m_Window, m_Settings};
     Camera m_Camera{};
     TerrainGenerator m_TerrainGen;
+    double m_FrameEMA = 0.004;
 
     mutable std::mutex m_MeshJobsMutex;
     std::set<std::pair<glm::ivec3, int>, ChunkLodRequestLess> m_MeshJobsToCreate;

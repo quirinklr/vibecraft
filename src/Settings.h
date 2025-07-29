@@ -4,11 +4,10 @@
 
 struct Settings
 {
-
-    float mouseSensitivityX = 0.8f;
-    float mouseSensitivityY = 0.8f;
+    float mouseSensitivityX = 1.0f;
+    float mouseSensitivityY = 1.0f;
     bool invertMouseY = true;
-    float fov = 90.0f;
+    float fov = 100.0f;
 
     bool vsync = true;
     int fpsCap = 960;
@@ -16,9 +15,13 @@ struct Settings
     bool wireframe = false;
 
     int renderDistance = 8;
-    std::vector<int> lodDistances = { 8, 16, 24 };
+    std::vector<int> lodDistances = {8, 16, 24};
 
     int lod0Distance = 8;
+
     int chunksToCreatePerFrame = 8;
     int chunksToUploadPerFrame = 4;
+
+    int maxMeshJobsInFlight = 2;
+    int maxMeshJobsBurst = 6;
 };
