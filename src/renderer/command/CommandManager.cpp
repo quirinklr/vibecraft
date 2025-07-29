@@ -2,6 +2,7 @@
 #include <stdexcept>
 #include <array>
 #include "../../math/Ivec3Less.h"
+#include <Globals.h>
 
 CommandManager::CommandManager(const DeviceContext &deviceContext, const SwapChainContext &swapChainContext, const PipelineCache &pipelineCache)
     : m_DeviceContext(deviceContext), m_SwapChainContext(swapChainContext), m_PipelineCache(pipelineCache)
@@ -47,6 +48,7 @@ void CommandManager::recordCommandBuffer(uint32_t imageIndex, uint32_t currentFr
                                          const std::vector<VkDescriptorSet> &descriptorSets,
                                          VkBuffer crosshairVertexBuffer, bool wireframe)
 {
+    std::scoped_lock lk(gGraphicsQueueMutex);
     VkCommandBuffer cb = m_CommandBuffers[currentFrame];
 
     VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};

@@ -237,30 +237,29 @@ void Engine::loadVisibleChunks(const glm::ivec3 &playerChunkPos)
 void Engine::createMeshJobs(const glm::ivec3 &playerChunkPos)
 {
     std::vector<std::pair<glm::ivec3, int>> pending;
+
     for (int z = -m_Settings.renderDistance; z <= m_Settings.renderDistance; ++z)
         for (int x = -m_Settings.renderDistance; x <= m_Settings.renderDistance; ++x)
         {
-            glm::ivec3 chunkPos = playerChunkPos + glm::ivec3(x, 0, z);
-            auto it = m_Chunks.find(chunkPos);
+            glm::ivec3 pos = playerChunkPos + glm::ivec3(x, 0, z);
+            auto it = m_Chunks.find(pos);
             if (it == m_Chunks.end())
                 continue;
-            Chunk *chunk = it->second.get();
-            if (chunk->getState() == Chunk::State::INITIAL)
+            Chunk *ch = it->second.get();
+            if (ch->getState() == Chunk::State::INITIAL)
                 continue;
 
             float dist = glm::distance(glm::vec2(x, z), glm::vec2(0.f));
-            int requiredLod = static_cast<int>(m_Settings.lodDistances.size());
+            int reqLod = static_cast<int>(m_Settings.lodDistances.size());
             for (size_t i = 0; i < m_Settings.lodDistances.size(); ++i)
                 if (dist <= m_Settings.lodDistances[i])
                 {
-                    requiredLod = static_cast<int>(i);
+                    reqLod = static_cast<int>(i);
                     break;
                 }
 
-            if (chunk->hasLOD(requiredLod))
-                continue;
-
-            pending.emplace_back(chunkPos, requiredLod);
+            if (!ch->hasLOD(reqLod))
+                pending.emplace_back(pos, reqLod);
         }
 
     std::lock_guard lock(m_MeshJobsMutex);
@@ -334,19 +333,24 @@ void Engine::submitMeshJobs()
 
 void Engine::uploadReadyMeshes()
 {
-    int uploaded = 0;
+    std::vector<std::shared_ptr<Chunk>> ready;
+    for (auto &[pos, ch] : m_Chunks)
+        if (ch->getState() == Chunk::State::STAGING_READY)
+            ready.push_back(ch);
 
-    for (auto &[pos, chunk] : m_Chunks)
+    int uploaded = 0;
+    for (auto &chunk : ready)
     {
         if (uploaded >= m_Settings.chunksToUploadPerFrame)
             break;
 
-        if (chunk->getState() == Chunk::State::STAGING_READY)
-        {
+        m_Pool.submit([this, chunk](std::stop_token st)
+                      {
+                          if (st.stop_requested())
+                              return;
+                          chunk->uploadMesh(m_Renderer, 0);
+                          chunk->uploadMesh(m_Renderer, 1); });
 
-            chunk->uploadMesh(m_Renderer, 0);
-            chunk->uploadMesh(m_Renderer, 1);
-            ++uploaded;
-        }
+        ++uploaded;
     }
 }

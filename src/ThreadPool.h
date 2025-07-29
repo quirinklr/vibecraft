@@ -17,27 +17,31 @@ class ThreadPool
     bool quit = false;
 
 public:
-    explicit ThreadPool(size_t n = std::thread::hardware_concurrency())
+    explicit ThreadPool()
     {
-        if (n == 0)
-            n = 1;
+        size_t hw = std::thread::hardware_concurrency();
+        size_t n = hw > 2 ? hw - 2 : 1;
         for (size_t i = 0; i < n; ++i)
         {
             workers.emplace_back([this](std::stop_token st)
                                  {
-                for (;;) {
-                    std::function<void(std::stop_token)> job;
-                    {
-                        std::unique_lock lock(mtx);
-                        cv.wait(lock, st, [this] { return quit || !jobs.empty(); });
-                        if ((quit || st.stop_requested()) && jobs.empty()) return;
-                        job = std::move(jobs.front());
-                        jobs.pop();
-                    }
-                    job(st);
-                } });
+                                     for (;;)
+                                     {
+                                         std::function<void(std::stop_token)> job;
+                                         {
+                                             std::unique_lock lock(mtx);
+                                             cv.wait(lock, st, [this]
+                                                     { return quit || !jobs.empty(); });
+                                             if ((quit || st.stop_requested()) && jobs.empty())
+                                                 return;
+                                             job = std::move(jobs.front());
+                                             jobs.pop();
+                                         }
+                                         job(st);
+                                     } });
         }
     }
+
     ~ThreadPool()
     {
         {
@@ -46,6 +50,7 @@ public:
         }
         cv.notify_all();
     }
+
     void submit(std::function<void(std::stop_token)> f)
     {
         {

@@ -2,10 +2,14 @@
 #include <stdexcept>
 #include <Globals.h>
 
-void UploadHelpers::copyBuffer(const DeviceContext &deviceContext, VkCommandPool commandPool, VkBuffer src, VkBuffer dst, VkDeviceSize size, VkFence *outFence)
+void UploadHelpers::copyBuffer(const DeviceContext &deviceContext,
+                               VkCommandPool commandPool,
+                               VkBuffer src, VkBuffer dst,
+                               VkDeviceSize size, VkFence *outFence)
 {
-    VkCommandBufferAllocateInfo a{};
-    a.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    std::scoped_lock lk(gGraphicsQueueMutex);
+
+    VkCommandBufferAllocateInfo a{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     a.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     a.commandPool = commandPool;
     a.commandBufferCount = 1;
@@ -13,8 +17,7 @@ void UploadHelpers::copyBuffer(const DeviceContext &deviceContext, VkCommandPool
     VkCommandBuffer cmd;
     vkAllocateCommandBuffers(deviceContext.getDevice(), &a, &cmd);
 
-    VkCommandBufferBeginInfo b{};
-    b.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    VkCommandBufferBeginInfo b{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     b.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cmd, &b);
 
@@ -22,8 +25,7 @@ void UploadHelpers::copyBuffer(const DeviceContext &deviceContext, VkCommandPool
     vkCmdCopyBuffer(cmd, src, dst, 1, &r);
     vkEndCommandBuffer(cmd);
 
-    VkSubmitInfo s{};
-    s.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    VkSubmitInfo s{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     s.commandBufferCount = 1;
     s.pCommandBuffers = &cmd;
 
@@ -196,11 +198,10 @@ void UploadHelpers::stageChunkMesh(VmaAllocator allocator, const std::vector<Ver
 void UploadHelpers::submitChunkMeshUpload(const DeviceContext &dc,
                                           VkCommandPool cmdPool,
                                           UploadJob &up,
-                                          VkBuffer &vb,
-                                          VmaAllocation &va,
-                                          VkBuffer &ib,
-                                          VmaAllocation &ia)
+                                          VkBuffer &vb, VmaAllocation &va,
+                                          VkBuffer &ib, VmaAllocation &ia)
 {
+    std::scoped_lock lk(gGraphicsQueueMutex);
 
     VmaAllocationInfo info;
     vmaGetAllocationInfo(dc.getAllocator(), up.stagingVbAlloc, &info);
@@ -234,7 +235,6 @@ void UploadHelpers::submitChunkMeshUpload(const DeviceContext &dc,
     vkCmdCopyBuffer(up.cmdBuffer, up.stagingVB, vb, 1, &copy);
     copy.size = is;
     vkCmdCopyBuffer(up.cmdBuffer, up.stagingIB, ib, 1, &copy);
-
     vkEndCommandBuffer(up.cmdBuffer);
 
     VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
@@ -243,6 +243,5 @@ void UploadHelpers::submitChunkMeshUpload(const DeviceContext &dc,
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     si.commandBufferCount = 1;
     si.pCommandBuffers = &up.cmdBuffer;
-
     vkQueueSubmit(dc.getGraphicsQueue(), 1, &si, up.fence);
 }

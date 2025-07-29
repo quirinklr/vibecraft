@@ -153,7 +153,6 @@ void Chunk::markReady(VulkanRenderer &renderer)
                                      1, &job.cmdBuffer);
 
             vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
-
             vmaDestroyBuffer(renderer.getAllocator(), job.stagingVB, job.stagingVbAlloc);
             vmaDestroyBuffer(renderer.getAllocator(), job.stagingIB, job.stagingIbAlloc);
 
@@ -165,6 +164,7 @@ void Chunk::markReady(VulkanRenderer &renderer)
         }
     }
 }
+
 
 bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
 {
