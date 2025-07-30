@@ -20,15 +20,28 @@ void main() {
     vec2 uv = tileOrigin + fract(localUV) * TILE_SIZE;
     vec4 textureColor = texture(texSampler, uv);
     
-    vec3 fogColor = vec3(0.1, 0.2, 0.3); 
-    float fogDensity = 0.3; 
+    vec3 fogColor = vec3(0.05, 0.18, 0.25);
 
+    
+    vec3 viewVec = normalize(cameraUbo.cameraPos - fragWorldPos);
+    vec3 normalVec = vec3(0.0, 1.0, 0.0);
+    float angleFactor = 1.0 - dot(viewVec, normalVec);
+    angleFactor = pow(angleFactor, 2.0);
     
     float dist = distance(cameraUbo.cameraPos, fragWorldPos);
-    float fogFactor = 1.0 / exp(dist * fogDensity); 
-    fogFactor = clamp(fogFactor, 0.0, 1.0);
+    float distanceFactor = 1.0 - exp(-dist * 0.1);
     
-    vec4 finalColor = mix(vec4(fogColor, textureColor.a), textureColor, fogFactor);
+    float fogAmount = max(angleFactor, distanceFactor);
+    float fogFactor = 1.0 - clamp(fogAmount, 0.0, 1.0); 
 
-    outColor = finalColor;
+    
+    
+    
+    
+    float surfaceFogFactor = pow(fogFactor, 0.5); 
+    
+    vec3 finalRgb = mix(fogColor, textureColor.rgb, surfaceFogFactor);
+    float finalAlpha = mix(1.0, textureColor.a, fogFactor);
+
+    outColor = vec4(finalRgb, finalAlpha);
 }
