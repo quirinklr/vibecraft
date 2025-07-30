@@ -1,81 +1,81 @@
-# Vibecraft Engine - Ein C++ Voxel-Projekt mit Vulkan
+# Vibecraft Engine - A C++ Voxel Project with Vulkan
 
-Dieses Projekt ist eine von Grund auf in C++20 entwickelte Voxel-Engine, inspiriert von Minecraft. Der Fokus liegt auf einer hochperformanten, modernen und sauberen Architektur, die die Fähigkeiten der Vulkan-API voll ausnutzt und eine interaktive, prozedural generierte Welt simuliert.
+This project is a voxel engine built from scratch in C++20, inspired by Minecraft. The focus is on a high-performance, modern, and clean architecture that fully leverages the capabilities of the Vulkan API to simulate an interactive, procedurally generated world.
 
 ## 🚀 Key Features
 
-*   **Hocheffiziente Rendering-Pipeline mit Vulkan:** Nutzt moderne Vulkan-Konzepte für plattformübergreifende, leistungsstarke Grafik. Die Architektur ist sauber in logische Komponenten wie Device-, SwapChain- und Command-Management getrennt.
+*   **Highly Efficient Rendering Pipeline with Vulkan:** Utilizes modern Vulkan concepts for cross-platform, high-performance graphics. The architecture is cleanly separated into logical components for device, swap chain, and command management.
 
-*   **Vollständig asynchrones & priorisiertes Chunk-System:**
-    *   **Intelligentes, ruckelfreies Laden:** Die Welt wird basierend auf der Entfernung zum Spieler geladen und gemesht – von innen nach außen. Dies sorgt für ein nahtloses Spielerlebnis ohne sichtbare Lücken bei schnellen Bewegungen.
-    *   **Effizienter Thread-Pool:** Ein `std::jthread`-basierter Thread-Pool übernimmt rechenintensive Terrain-Generierung, Meshing und GPU-Datenvorbereitung im Hintergrund, ohne die Framerate zu beeinträchtigen.
+*   **Fully Asynchronous & Prioritized Chunk System:**
+    *   **Intelligent, Stutter-Free Loading:** The world is loaded and meshed based on player proximity—from the center outwards. This ensures a seamless gameplay experience without visible gaps during fast movement.
+    *   **Efficient Thread Pool:** A `std::jthread`-based thread pool handles computationally expensive tasks like terrain generation, meshing, and GPU data preparation in the background, without impacting the main thread's frame rate.
 
-*   **Interaktive Spielwelt & Spieler-Controller:**
-    *   **Physik-basierter Charakter:** Anstelle einer simplen Fliege-Kamera steuerst du einen echten Charakter mit Schwerkraft, Sprung-Mechanik und einer AABB-basierten Kollisionserkennung mit der Welt.
-    *   **Block-Interaktion:** Zerstöre Blöcke in Echtzeit mittels Ray-Casting. Dank eines "Swap-on-ready"-Mechanismus werden Chunks **flicker-frei** aktualisiert, sobald das neue Mesh auf der GPU bereit ist.
-    *   **Erweiterbares Entity-System:** Eine saubere `Entity`-Basisklasse ermöglicht die einfache Hinzufügung neuer Kreaturen (Zombies, Tiere etc.) mit eigener Logik in der Zukunft.
+*   **Interactive World & Player Controller:**
+    *   **Physics-Based Character:** Instead of a simple fly-through camera, you control a character with gravity, jumping mechanics, and AABB-based collision detection with the world.
+    *   **Block Interaction:** Destroy blocks in real-time using ray-casting. Thanks to a "swap-on-ready" mechanism, chunks are updated **flicker-free** as soon as the new mesh is ready on the GPU.
+    *   **Extensible Entity System:** A clean `Entity` base class allows for the easy addition of new creatures (zombies, animals, etc.) with their own logic in the future.
 
-*   **Optimierte Voxel-Darstellung:**
-    *   **Greedy Meshing:** Reduziert die Vertex-Anzahl von Chunks drastisch, indem benachbarte, identische Blockflächen zu großen Polygonen zusammengefasst werden.
-    *   **Frustum Culling:** Entlastet die GPU signifikant, indem nur die Chunks gerendert werden, die sich tatsächlich im Sichtfeld der Kamera befinden.
+*   **Optimized Voxel Rendering:**
+    *   **Greedy Meshing:** Drastically reduces the vertex count of chunks by merging adjacent, identical block faces into large polygons.
+    *   **Frustum Culling:** Significantly reduces GPU load by only rendering chunks that are actually within the camera's view frustum.
 
-*   **Modulare Welt-Generierung:**
-    *   **Layered Noise:** Nutzt `FastNoiseLite` (OpenSimplex2/Perlin), um mittels mehrerer überlagerter Noise-Maps (für Kontinente, Erosion, Höhlen) abwechslungsreiches Terrain zu erzeugen.
-    *   **Biom-System:** Ein sauberes, erweiterbares System basierend auf Temperatur-Maps erzeugt verschiedene Biome wie Ebenen, Wüsten und Ozeane.
+*   **Modular World Generation:**
+    *   **Layered Noise:** Uses `FastNoiseLite` (OpenSimplex2/Perlin) to create varied terrain through multiple layered noise maps for continents, erosion, and caves.
+    *   **Biome System:** A clean, extensible system based on temperature maps generates different biomes like plains, deserts, and oceans.
 
-## 🛠️ Verwendete Technologien
+## 🛠️ Technologies Used
 
-*   **Sprache:** C++20
-*   **Build-System:** CMake
-*   **Grafik-API:** [Vulkan](https://www.vulkan.org/)
-*   **Speicherverwaltung:** [Vulkan Memory Allocator (VMA)](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
-*   **Fensterverwaltung:** [GLFW](https://www.glfw.org/)
-*   **Mathematik:** [GLM](https://github.com/g-truc/glm)
-*   **Noise-Generierung:** [FastNoiseLite](https://github.com/Auburn/FastNoiseLite)
-*   **Bild-Laden:** [stb_image](https://github.com/nothings/stb)
+*   **Language:** C++20
+*   **Build System:** CMake
+*   **Graphics API:** [Vulkan](https://www.vulkan.org/)
+*   **Memory Management:** [Vulkan Memory Allocator (VMA)](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
+*   **Windowing:** [GLFW](https://www.glfw.org/)
+*   **Math:** [GLM](https://github.com/g-truc/glm)
+*   **Noise Generation:** [FastNoiseLite](https://github.com/Auburn/FastNoiseLite)
+*   **Image Loading:** [stb_image](https://github.com/nothings/stb)
 
-## ⚙️ Ausführen & Bauen
+## ⚙️ Running & Building
 
-### 🎮 Für Spieler (Release-Version)
+### 🎮 For Players (Release Version)
 
-1.  Gehe zur [**Releases-Seite**](https://github.com/quirinklr/minecraft-vibe/releases) des Projekts.
-2.  Lade die `.zip`-Datei des neuesten Releases herunter (z.B. `Vibecraft-v1.0.0-win64.zip`).
-3.  **WICHTIG:** Installiere die [**Microsoft Visual C++ Redistributable (x64)**](https://aka.ms/vs/17/release/vc_redist.x64.exe). Dies ist nur einmal erforderlich.
-4.  Entpacke die ZIP-Datei an einem beliebigen Ort.
-5.  Starte `Vibecraft.exe`.
+1.  Go to the project's [**Releases page**](https://github.com/quirinklr/minecraft-vibe/releases).
+2.  Download the `.zip` file of the latest release (e.g., `Vibecraft-v1.0.0-win64.zip`).
+3.  **IMPORTANT:** Install the [**Microsoft Visual C++ Redistributable (x64)**](https://aka.ms/vs/17/release/vc_redist.x64.exe). This is a one-time setup.
+4.  Unzip the file anywhere.
+5.  Run `Vibecraft.exe`.
 
-### 👨‍💻 Für Entwickler (Aus dem Quellcode)
+### 👨‍💻 For Developers (From Source)
 
-#### Voraussetzungen
+#### Prerequisites
 
-*   Ein C++ Compiler, der C++20 unterstützt (z.B. MSVC, GCC, Clang)
+*   A C++20 compliant compiler (e.g., MSVC, GCC, Clang)
 *   [CMake](https://cmake.org/download/) (Version 3.10+)
 *   [Vulkan SDK](https://vulkan.lunarg.com/sdk/home)
 
-#### Schritte
+#### Steps
 
-1.  **Klone das Repository:**
+1.  **Clone the repository:**
     ```bash
     git clone https://github.com/quirinklr/minecraft-vibe.git
     cd minecraft-vibe
     ```
 
-2.  **Konfiguriere das Projekt mit CMake:**
+2.  **Configure the project with CMake:**
     ```bash
     cmake -B build
     ```
 
-3.  **Baue das Projekt (empfohlen im Release-Modus):**
+3.  **Build the project (Release mode is recommended):**
     ```bash
     cmake --build build --config Release
     ```
 
-4.  **Führe die Anwendung aus:**
-    Die ausführbare Datei findest du im `build/Release`-Verzeichnis.
+4.  **Run the application:**
+    You will find the executable in the `build/Release` directory.
     ```bash
     ./build/Release/Vibecraft.exe
     ```
 
-## 📄 Lizenz
+## 📄 License
 
-Dieses Projekt steht unter der MIT-Lizenz. Siehe die `LICENSE`-Datei für weitere Details.
+This project is licensed under the MIT License. See the `LICENSE` file for more details.
