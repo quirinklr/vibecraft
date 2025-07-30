@@ -312,6 +312,17 @@ void Chunk::buildMeshGreedy(int lodLevel,
         return meshInput.cachedBlocks[sidx(x + 1, y, z + 1)];
     };
 
+    auto isNeighborMissing = [&](int x, int z)
+    {
+        int cx = (x < 0) ? -1 : (x >= W ? 1 : 0);
+        int cz = (z < 0) ? -1 : (z >= D ? 1 : 0);
+        if (cx == 0 && cz == 0)
+            return false;
+        static const int map[3][3] = {{4, 2, 5}, {0, -1, 1}, {6, 3, 7}};
+        int idx = map[cz + 1][cx + 1];
+        return idx != -1 && meshInput.neighborChunks[idx] == nullptr;
+    };
+
     outVertices.clear();
     outIndices.clear();
     auto &db = BlockDatabase::get();
@@ -334,13 +345,10 @@ void Chunk::buildMeshGreedy(int lodLevel,
 
         for (int slice = 0; slice <= dsz[dim]; ++slice)
         {
-
             if (dim == 1 && slice == 0)
                 continue;
 
-            mask.resize(static_cast<size_t>(U) * V);
-            for (auto &m : mask)
-                m.block_id = 0;
+            mask.assign(static_cast<size_t>(U) * V, {});
 
             for (int j = 0; j < V; ++j)
                 for (int i = 0; i < U; ++i)
@@ -359,17 +367,49 @@ void Chunk::buildMeshGreedy(int lodLevel,
                     const bool sa = isSolid(a.x, a.y, a.z);
                     const bool sb = isSolid(b.x, b.y, b.z);
 
-                    if (!(sa != sb || (ba.id == BlockId::WATER && bb.id == BlockId::AIR) ||
-                          (ba.id == BlockId::AIR && bb.id == BlockId::WATER)))
+                    if (ba.id == bb.id || (sa && sb))
+                    {
                         continue;
+                    }
+
+                    if (!sa && ba.id == BlockId::AIR && isNeighborMissing(a.x, a.z))
+                    {
+                        continue;
+                    }
+                    if (!sb && bb.id == BlockId::AIR && isNeighborMissing(b.x, b.z))
+                    {
+                        continue;
+                    }
 
                     MaskCell c;
-                    bool back = !sa;
-                    BlockId id = sa ? ba.id : (sb ? bb.id : BlockId::WATER);
-                    if (!sa && !sb)
-                        back = (ba.id == BlockId::AIR);
-                    c.block_id = static_cast<int8_t>(id) * (back ? -1 : 1);
+                    bool back = false;
+                    BlockId id = BlockId::AIR;
 
+                    if (sa && !sb)
+                    {
+                        id = ba.id;
+                        back = false;
+                    }
+                    else if (!sa && sb)
+                    {
+                        id = bb.id;
+                        back = true;
+                    }
+                    else
+                    {
+                        if (ba.id != BlockId::AIR)
+                        {
+                            id = ba.id;
+                            back = false;
+                        }
+                        else
+                        {
+                            id = bb.id;
+                            back = true;
+                        }
+                    }
+
+                    c.block_id = static_cast<int8_t>(id) * (back ? -1 : 1);
                     mask[static_cast<size_t>(j) * U + i] = c;
                 }
 
