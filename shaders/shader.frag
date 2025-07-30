@@ -23,7 +23,7 @@ void main() {
     
     if (cameraUbo.isUnderwater == 1) {
         vec3 fogColor = vec3(0.1, 0.2, 0.3); 
-        float fogDensity = 0.08; 
+        float fogDensity = 0.01; 
 
         float dist = distance(cameraUbo.cameraPos, fragWorldPos);
         float fogFactor = 1.0 / exp(dist * dist * fogDensity); 
