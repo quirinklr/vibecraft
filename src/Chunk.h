@@ -99,6 +99,7 @@ public:
 
     std::atomic<State> m_State;
     std::atomic<int> m_Flags{0};
+    std::atomic<bool> m_is_dirty{false};
 
     mutable std::mutex m_PendingMutex;
     mutable std::mutex m_MeshesMutex;

@@ -5,7 +5,12 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <stdexcept>
 #include "Block.h"
+#include <array>
 #include "renderer/resources/UploadHelpers.h"
+#include <chrono>
+
+using hrc = std::chrono::high_resolution_clock;
+using milli = std::chrono::duration<double, std::milli>;
 
 Chunk::Chunk(glm::ivec3 pos) : m_Pos(pos)
 {
@@ -28,6 +33,8 @@ void Chunk::setBlock(int x, int y, int z, Block block)
     if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT || z < 0 || z >= DEPTH)
         return;
     m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x] = block;
+
+    m_is_dirty.store(true, std::memory_order_release);
 }
 
 Block Chunk::getBlock(int x, int y, int z) const
@@ -36,8 +43,6 @@ Block Chunk::getBlock(int x, int y, int z) const
         return {BlockId::AIR};
     return m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x];
 }
-
-#include <array>
 
 std::vector<Block> downsample(const std::vector<Block> &original, int factor)
 {
@@ -152,15 +157,26 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
 
     if (job.stagingVB == VK_NULL_HANDLE)
     {
-        std::scoped_lock lock(m_MeshesMutex);
-        m_Meshes[lodLevel] = {};
+        ChunkMesh oldMesh;
+        {
+            std::scoped_lock lock(m_MeshesMutex);
+            if (m_Meshes.count(lodLevel))
+            {
+                oldMesh = std::move(m_Meshes.at(lodLevel));
+                m_Meshes.erase(lodLevel);
+            }
+        }
+        if (oldMesh.vertexBuffer != VK_NULL_HANDLE)
+            renderer.enqueueDestroy(oldMesh.vertexBuffer, oldMesh.vertexBufferAllocation);
+        if (oldMesh.indexBuffer != VK_NULL_HANDLE)
+            renderer.enqueueDestroy(oldMesh.indexBuffer, oldMesh.indexBufferAllocation);
         m_State.store(State::GPU_READY);
         return true;
     }
 
     m_State.store(State::UPLOADING);
 
-    ChunkMesh mesh;
+    ChunkMesh newMesh;
 
     VkCommandPool pool = renderer.getTransferCommandPool()
                              ? renderer.getTransferCommandPool()
@@ -169,17 +185,35 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
     UploadHelpers::submitChunkMeshUpload(*renderer.getDeviceContext(),
                                          pool,
                                          job,
-                                         mesh.vertexBuffer, mesh.vertexBufferAllocation,
-                                         mesh.indexBuffer, mesh.indexBufferAllocation);
+                                         newMesh.vertexBuffer, newMesh.vertexBufferAllocation,
+                                         newMesh.indexBuffer, newMesh.indexBufferAllocation);
 
     VmaAllocationInfo ibInfo;
-    vmaGetAllocationInfo(renderer.getAllocator(), mesh.indexBufferAllocation, &ibInfo);
-    mesh.indexCount = static_cast<uint32_t>(ibInfo.size / sizeof(uint32_t));
+    vmaGetAllocationInfo(renderer.getAllocator(), newMesh.indexBufferAllocation, &ibInfo);
+    newMesh.indexCount = static_cast<uint32_t>(ibInfo.size / sizeof(uint32_t));
 
+    ChunkMesh oldMesh;
     {
+
         std::scoped_lock lock(m_MeshesMutex);
-        m_Meshes[lodLevel] = std::move(mesh);
+
+        if (m_Meshes.count(lodLevel))
+        {
+            oldMesh = std::move(m_Meshes.at(lodLevel));
+        }
+
+        m_Meshes[lodLevel] = std::move(newMesh);
     }
+
+    if (oldMesh.vertexBuffer != VK_NULL_HANDLE)
+    {
+        renderer.enqueueDestroy(oldMesh.vertexBuffer, oldMesh.vertexBufferAllocation);
+    }
+    if (oldMesh.indexBuffer != VK_NULL_HANDLE)
+    {
+        renderer.enqueueDestroy(oldMesh.indexBuffer, oldMesh.indexBufferAllocation);
+    }
+
     {
         std::scoped_lock lock(m_PendingMutex);
         m_PendingUploads[lodLevel] = std::move(job);
@@ -432,10 +466,6 @@ void Chunk::buildMeshGreedy(int lodLevel,
     }
 }
 
-#include <chrono>
-using hrc = std::chrono::high_resolution_clock;
-using milli = std::chrono::duration<double, std::milli>;
-
 void Chunk::buildAndStageMesh(VmaAllocator allocator, RingStagingArena &arena,
                               int lodLevel, ChunkMeshInput &meshInput)
 {
@@ -502,12 +532,9 @@ void Chunk::cleanup(VulkanRenderer &renderer)
             renderer.enqueueDestroy(mesh.indexBuffer, mesh.indexBufferAllocation);
         }
     }
-    m_Meshes.clear();
 
-    if (m_State.load() >= State::TERRAIN_READY)
-    {
-        m_State.store(State::TERRAIN_READY);
-    }
+    m_Meshes.clear();
+    m_State.store(State::INITIAL);
 }
 
 bool Chunk::hasLOD(int lodLevel) const

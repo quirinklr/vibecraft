@@ -143,50 +143,45 @@ void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
 void Engine::set_block(int x, int y, int z, BlockId id)
 {
     if (y < 0 || y >= Chunk::HEIGHT)
-    {
         return;
-    }
 
-    int chunk_x = static_cast<int>(floor(static_cast<float>(x) / Chunk::WIDTH));
-    int chunk_z = static_cast<int>(floor(static_cast<float>(z) / Chunk::DEPTH));
-    glm::ivec3 chunk_pos(chunk_x, 0, chunk_z);
-
-    auto it = m_Chunks.find(chunk_pos);
-    if (it != m_Chunks.end())
+    auto set_chunk_dirty = [&](int block_x, int block_z)
     {
-        int local_x = x - chunk_x * Chunk::WIDTH;
-        int local_z = z - chunk_z * Chunk::DEPTH;
-        it->second->setBlock(local_x, y, local_z, {id});
+        int chunk_x = static_cast<int>(floor(static_cast<float>(block_x) / Chunk::WIDTH));
+        int chunk_z = static_cast<int>(floor(static_cast<float>(block_z) / Chunk::DEPTH));
+        auto it = m_Chunks.find({chunk_x, 0, chunk_z});
+        if (it != m_Chunks.end())
+        {
+            it->second->setBlock(block_x - chunk_x * Chunk::WIDTH, y, block_z - chunk_z * Chunk::DEPTH, {id});
+        }
+    };
 
-        rebuild_chunk_at(x, y, z);
+    set_chunk_dirty(x, z);
 
-        if (local_x == 0)
-            rebuild_chunk_at(x - 1, y, z);
-        if (local_x == Chunk::WIDTH - 1)
-            rebuild_chunk_at(x + 1, y, z);
-        if (local_z == 0)
-            rebuild_chunk_at(x, y, z - 1);
-        if (local_z == Chunk::DEPTH - 1)
-            rebuild_chunk_at(x, y, z + 1);
-    }
-}
+    int local_x = x % Chunk::WIDTH;
+    if (local_x < 0)
+        local_x += Chunk::WIDTH;
+    int local_z = z % Chunk::DEPTH;
+    if (local_z < 0)
+        local_z += Chunk::DEPTH;
 
-void Engine::rebuild_chunk_at(int x, int y, int z)
-{
-    int chunk_x = static_cast<int>(floor(static_cast<float>(x) / Chunk::WIDTH));
-    int chunk_z = static_cast<int>(floor(static_cast<float>(z) / Chunk::DEPTH));
-    glm::ivec3 chunk_pos(chunk_x, 0, chunk_z);
-
-    auto it = m_Chunks.find(chunk_pos);
-    if (it != m_Chunks.end())
+    auto mark_neighbor_dirty = [&](int nx, int nz)
     {
+        int chunk_x = static_cast<int>(floor(static_cast<float>(nx) / Chunk::WIDTH));
+        int chunk_z = static_cast<int>(floor(static_cast<float>(nz) / Chunk::DEPTH));
+        auto it = m_Chunks.find({chunk_x, 0, chunk_z});
+        if (it != m_Chunks.end())
+            it->second->m_is_dirty.store(true);
+    };
 
-        it->second->cleanup(m_Renderer);
-
-        std::lock_guard lock(m_MeshJobsMutex);
-        m_MeshJobsToCreate.insert({chunk_pos, 0});
-        m_MeshJobsToCreate.insert({chunk_pos, 1});
-    }
+    if (local_x == 0)
+        mark_neighbor_dirty(x - 1, z);
+    if (local_x == Chunk::WIDTH - 1)
+        mark_neighbor_dirty(x + 1, z);
+    if (local_z == 0)
+        mark_neighbor_dirty(x, z - 1);
+    if (local_z == Chunk::DEPTH - 1)
+        mark_neighbor_dirty(x, z + 1);
 }
 
 void Engine::updateWindowTitle(float now, float &fpsTime, int &frames, const glm::vec3 &player_pos)
@@ -292,12 +287,14 @@ void Engine::createMeshJobs(const glm::ivec3 &playerChunkPos)
     std::vector<std::pair<glm::ivec3, int>> pending;
 
     for (int z = -m_Settings.renderDistance; z <= m_Settings.renderDistance; ++z)
+    {
         for (int x = -m_Settings.renderDistance; x <= m_Settings.renderDistance; ++x)
         {
             glm::ivec3 pos = playerChunkPos + glm::ivec3(x, 0, z);
             auto it = m_Chunks.find(pos);
             if (it == m_Chunks.end())
                 continue;
+
             Chunk *ch = it->second.get();
             if (ch->getState() == Chunk::State::INITIAL)
                 continue;
@@ -305,18 +302,33 @@ void Engine::createMeshJobs(const glm::ivec3 &playerChunkPos)
             float dist = glm::distance(glm::vec2(x, z), glm::vec2(0.f));
             int reqLod = (dist <= m_Settings.lod0Distance) ? 0 : 1;
 
-            if (!ch->hasLOD(1))
-                reqLod = 1;
+            bool is_dirty = ch->m_is_dirty.load(std::memory_order_acquire);
 
-            if (!ch->hasLOD(reqLod))
+            if (!ch->hasLOD(reqLod) || is_dirty)
+            {
                 pending.emplace_back(pos, reqLod);
+            }
+            if (is_dirty && !ch->hasLOD(1 - reqLod))
+            {
+                pending.emplace_back(pos, 1 - reqLod);
+            }
         }
+    }
 
     std::lock_guard lock(m_MeshJobsMutex);
     for (auto &job : pending)
-        if (!m_MeshJobsInProgress.count(job) &&
-            !m_MeshJobsToCreate.count(job))
+    {
+        if (!m_MeshJobsInProgress.count(job) && !m_MeshJobsToCreate.count(job))
+        {
             m_MeshJobsToCreate.insert(job);
+
+            auto it = m_Chunks.find(job.first);
+            if (it != m_Chunks.end())
+            {
+                it->second->m_is_dirty.store(false, std::memory_order_release);
+            }
+        }
+    }
 }
 
 void Engine::submitMeshJobs()
