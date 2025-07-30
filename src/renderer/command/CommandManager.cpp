@@ -3,6 +3,7 @@
 #include <array>
 #include "../../math/Ivec3Less.h"
 #include <Globals.h>
+#include <glm/gtc/matrix_transform.hpp>
 
 CommandManager::CommandManager(const DeviceContext &deviceContext, const SwapChainContext &swapChainContext, const PipelineCache &pipelineCache)
     : m_DeviceContext(deviceContext), m_SwapChainContext(swapChainContext), m_PipelineCache(pipelineCache)
@@ -43,10 +44,14 @@ void CommandManager::createCommandBuffers()
     }
 }
 
-void CommandManager::recordCommandBuffer(uint32_t imageIndex, uint32_t currentFrame,
-                                         const std::vector<std::pair<const Chunk *, int>> &chunksToRender,
-                                         const std::vector<VkDescriptorSet> &descriptorSets,
-                                         VkBuffer crosshairVertexBuffer, bool wireframe)
+void CommandManager::recordCommandBuffer(
+    uint32_t imageIndex, uint32_t currentFrame,
+    const std::vector<std::pair<const Chunk *, int>> &chunksToRender,
+    const std::vector<VkDescriptorSet> &descriptorSets,
+    VkBuffer crosshairVertexBuffer,
+    VkBuffer debugCubeVB, VkBuffer debugCubeIB, uint32_t debugCubeIndexCount,
+    const Settings &settings,
+    const std::vector<AABB> &debugAABBs)
 {
     std::scoped_lock lk(gGraphicsQueueMutex);
     VkCommandBuffer cb = m_CommandBuffers[currentFrame];
@@ -75,11 +80,9 @@ void CommandManager::recordCommandBuffer(uint32_t imageIndex, uint32_t currentFr
     vkCmdSetViewport(cb, 0, 1, &vp);
     vkCmdSetScissor(cb, 0, 1, &sc);
 
-    VkPipeline mainPipe = wireframe
+    VkPipeline mainPipe = settings.wireframe
                               ? m_PipelineCache.getWireframePipeline()
                               : m_PipelineCache.getGraphicsPipeline();
-
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, mainPipe);
 
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, mainPipe);
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -103,6 +106,31 @@ void CommandManager::recordCommandBuffer(uint32_t imageIndex, uint32_t currentFr
                            &chunk->getModelMatrix());
 
         vkCmdDrawIndexed(cb, mesh->indexCount, 1, 0, 0, 0);
+    }
+
+    if (settings.showCollisionBoxes && !debugAABBs.empty())
+    {
+        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getDebugPipeline());
+
+        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                m_PipelineCache.getDebugPipelineLayout(),
+                                0, 1, &descriptorSets[currentFrame], 0, nullptr);
+
+        VkBuffer vertexBuffers[] = {debugCubeVB};
+        VkDeviceSize offsets[] = {0};
+        vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, offsets);
+        vkCmdBindIndexBuffer(cb, debugCubeIB, 0, VK_INDEX_TYPE_UINT32);
+
+        for (const auto &aabb : debugAABBs)
+        {
+            glm::mat4 model = glm::translate(glm::mat4(1.0f), aabb.min);
+            model = glm::scale(model, aabb.max - aabb.min);
+
+            vkCmdPushConstants(cb, m_PipelineCache.getDebugPipelineLayout(),
+                               VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
+
+            vkCmdDrawIndexed(cb, debugCubeIndexCount, 1, 0, 0, 0);
+        }
     }
 
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,

@@ -233,3 +233,31 @@ void UploadHelpers::submitChunkMeshUpload(const DeviceContext &dc,
     std::scoped_lock lk(gGraphicsQueueMutex);
     vkQueueSubmit(q, 1, &si, up.fence);
 }
+
+VmaBuffer UploadHelpers::createDeviceLocalBufferFromData(
+    const DeviceContext &dc, VkCommandPool pool,
+    const void *data, VkDeviceSize size, VkBufferUsageFlags usage)
+{
+
+    VmaBuffer stagingBuffer;
+    {
+        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+        VmaAllocationCreateInfo allocInfo{VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VMA_MEMORY_USAGE_CPU_ONLY};
+        stagingBuffer = VmaBuffer(dc.getAllocator(), bufferInfo, allocInfo);
+        void *mappedData;
+        vmaMapMemory(dc.getAllocator(), stagingBuffer.getAllocation(), &mappedData);
+        memcpy(mappedData, data, size);
+        vmaUnmapMemory(dc.getAllocator(), stagingBuffer.getAllocation());
+    }
+
+    VmaBuffer deviceLocalBuffer;
+    {
+        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage};
+        VmaAllocationCreateInfo allocInfo{0, VMA_MEMORY_USAGE_GPU_ONLY};
+        deviceLocalBuffer = VmaBuffer(dc.getAllocator(), bufferInfo, allocInfo);
+    }
+
+    copyBuffer(dc, pool, stagingBuffer.get(), deviceLocalBuffer.get(), size);
+
+    return deviceLocalBuffer;
+}

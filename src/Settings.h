@@ -11,12 +11,12 @@ struct Settings
 
     bool vsync = false;
     bool fullscreen = false;
+
     bool wireframe = false;
+    bool showCollisionBoxes = false;
 
     int renderDistance = 12;
     std::vector<int> lodDistances = {8, 16, 24};
-
-    int lod0Distance = 8;
 
     int chunksToCreatePerFrame = 8;
     int chunksToUploadPerFrame = 4;

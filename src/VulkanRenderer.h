@@ -32,7 +32,11 @@ public:
     VulkanRenderer(const VulkanRenderer &) = delete;
     VulkanRenderer &operator=(const VulkanRenderer &) = delete;
 
-    void drawFrame(Camera &camera, const std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks, const glm::ivec3 &playerChunkPos, int lod0Distance);
+    void drawFrame(Camera &camera,
+                   const std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks,
+                   const glm::ivec3 &playerChunkPos,
+                   const Settings &settings,
+                   const std::vector<AABB> &debugAABBs);
 
     void enqueueDestroy(VmaBuffer &&buffer);
     void enqueueDestroy(VmaImage &&image);
@@ -51,6 +55,7 @@ private:
     void createDescriptorPool();
     void createDescriptorSets();
     void createCrosshairVertexBuffer();
+    void createDebugCubeMesh();
 
     Window &m_Window;
     const Settings &m_Settings;
@@ -69,7 +74,11 @@ private:
     std::vector<void *> m_UniformBuffersMapped;
     VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter> m_DescriptorPool;
     std::vector<VkDescriptorSet> m_DescriptorSets;
+
     VmaBuffer m_CrosshairVertexBuffer;
+    VmaBuffer m_DebugCubeVertexBuffer;
+    VmaBuffer m_DebugCubeIndexBuffer;
+    uint32_t m_DebugCubeIndexCount = 0;
 
     uint32_t m_CurrentFrame{0};
     std::vector<VmaBuffer> m_BufferDestroyQueue[MAX_FRAMES_IN_FLIGHT];

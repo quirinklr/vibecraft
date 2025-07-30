@@ -17,6 +17,7 @@ public:
     virtual void update(float dt);
 
     glm::vec3 get_position() const { return m_position; }
+    AABB get_world_aabb() const { return {m_position + m_hitbox.min, m_position + m_hitbox.max}; }
 
 protected:
     void resolve_collisions();

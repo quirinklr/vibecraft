@@ -20,4 +20,7 @@ public:
                                       UploadJob &up,
                                       VkBuffer &vb, VmaAllocation &va,
                                       VkBuffer &ib, VmaAllocation &ia);
+    static VmaBuffer createDeviceLocalBufferFromData(
+        const DeviceContext &dc, VkCommandPool pool,
+        const void *data, VkDeviceSize size, VkBufferUsageFlags usage);
 };

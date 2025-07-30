@@ -79,6 +79,30 @@ void Engine::run()
             entity->update(dt);
         }
 
+        std::vector<AABB> debug_aabbs;
+        if (m_Settings.showCollisionBoxes)
+        {
+
+            debug_aabbs.push_back(m_player_ptr->get_world_aabb());
+
+            glm::vec3 p_pos = m_player_ptr->get_position();
+            const int radius = 16;
+            for (int y = static_cast<int>(p_pos.y) - radius; y < static_cast<int>(p_pos.y) + radius; ++y)
+            {
+                for (int x = static_cast<int>(p_pos.x) - radius; x < static_cast<int>(p_pos.x) + radius; ++x)
+                {
+                    for (int z = static_cast<int>(p_pos.z) - radius; z < static_cast<int>(p_pos.z) + radius; ++z)
+                    {
+                        Block block = get_block(x, y, z);
+                        if (BlockDatabase::get().get_block_data(block.id).is_solid)
+                        {
+                            debug_aabbs.push_back({glm::vec3(x, y, z), glm::vec3(x + 1, y + 1, z + 1)});
+                        }
+                    }
+                }
+            }
+        }
+
         glm::vec3 player_pos = m_player_ptr->get_position();
         updateChunks(player_pos);
 
@@ -86,7 +110,7 @@ void Engine::run()
             static_cast<int>(std::floor(player_pos.x / Chunk::WIDTH)), 0,
             static_cast<int>(std::floor(player_pos.z / Chunk::DEPTH))};
 
-        m_Renderer.drawFrame(m_player_ptr->get_camera(), m_Chunks, playerChunkPos, m_Settings.lod0Distance);
+        m_Renderer.drawFrame(m_player_ptr->get_camera(), m_Chunks, playerChunkPos, m_Settings, debug_aabbs);
 
         updateWindowTitle(now, fps_time, frames, m_player_ptr->get_position());
     }
@@ -111,6 +135,12 @@ void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
     if (fNow && !fLast)
         m_Settings.wireframe = !m_Settings.wireframe;
     fLast = fNow;
+
+    static bool cLast = false;
+    bool cNow = glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_C) == GLFW_PRESS;
+    if (cNow && !cLast)
+        m_Settings.showCollisionBoxes = !m_Settings.showCollisionBoxes;
+    cLast = cNow;
 
     if (mouse_enabled)
     {
@@ -326,7 +356,7 @@ void Engine::createMeshJobs(const glm::ivec3 &playerChunkPos)
                 continue;
 
             float dist = glm::distance(glm::vec2(x, z), glm::vec2(0.f));
-            int reqLod = (dist <= m_Settings.lod0Distance) ? 0 : 1;
+            int reqLod = (!m_Settings.lodDistances.empty() && dist <= m_Settings.lodDistances[0]) ? 0 : 1;
 
             bool is_dirty = ch->m_is_dirty.load(std::memory_order_acquire);
 

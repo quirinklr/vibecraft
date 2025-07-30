@@ -36,6 +36,7 @@ VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings)
     createDescriptorPool();
     createDescriptorSets();
     createCrosshairVertexBuffer();
+    createDebugCubeMesh();
 }
 
 VulkanRenderer::~VulkanRenderer()
@@ -44,11 +45,32 @@ VulkanRenderer::~VulkanRenderer()
     if (m_TransferCommandPool)
         vkDestroyCommandPool(m_DeviceContext->getDevice(), m_TransferCommandPool, nullptr);
 }
+void VulkanRenderer::createDebugCubeMesh()
+{
+    std::vector<glm::vec3> vertices = {
+        {0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}, {0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}};
+    std::vector<uint32_t> indices = {
+        0, 1, 1, 2, 2, 3, 3, 0,
+        4, 5, 5, 6, 6, 7, 7, 4,
+        0, 4, 1, 5, 2, 6, 3, 7};
+    m_DebugCubeIndexCount = static_cast<uint32_t>(indices.size());
+
+    VkDeviceSize vertexSize = sizeof(vertices[0]) * vertices.size();
+    VkDeviceSize indexSize = sizeof(indices[0]) * indices.size();
+
+    m_DebugCubeVertexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
+        *m_DeviceContext, m_CommandManager->getCommandPool(),
+        vertices.data(), vertexSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    m_DebugCubeIndexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
+        *m_DeviceContext, m_CommandManager->getCommandPool(),
+        indices.data(), indexSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+}
 
 void VulkanRenderer::drawFrame(Camera &camera,
                                const std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks,
                                const glm::ivec3 &playerChunkPos,
-                               int lod0Distance)
+                               const Settings &settings,
+                               const std::vector<AABB> &debugAABBs)
 {
     vkWaitForFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(m_CurrentFrame), VK_TRUE, UINT64_MAX);
 
@@ -87,7 +109,7 @@ void VulkanRenderer::drawFrame(Camera &camera,
             continue;
 
         float dist = glm::distance(glm::vec2(pos.x, pos.z), glm::vec2(playerChunkPos.x, playerChunkPos.z));
-        int reqLod = (dist <= lod0Distance) ? 0 : 1;
+        int reqLod = (!settings.lodDistances.empty() && dist <= settings.lodDistances[0]) ? 0 : 1;
         int best = chunkPtr->getBestAvailableLOD(reqLod);
         if (best != -1)
             renderChunks.push_back({chunkPtr.get(), best});
@@ -96,12 +118,11 @@ void VulkanRenderer::drawFrame(Camera &camera,
     vkResetFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(m_CurrentFrame));
     vkResetCommandBuffer(m_CommandManager->getCommandBuffer(m_CurrentFrame), 0);
 
-    m_CommandManager->recordCommandBuffer(imageIndex,
-                                          m_CurrentFrame,
-                                          renderChunks,
-                                          m_DescriptorSets,
-                                          m_CrosshairVertexBuffer.get(),
-                                          m_Settings.wireframe);
+    m_CommandManager->recordCommandBuffer(
+        imageIndex, m_CurrentFrame, renderChunks, m_DescriptorSets,
+        m_CrosshairVertexBuffer.get(),
+        m_DebugCubeVertexBuffer.get(), m_DebugCubeIndexBuffer.get(), m_DebugCubeIndexCount,
+        settings, debugAABBs);
 
     VkSemaphore waitSemas[]{m_SyncPrimitives->getImageAvailableSemaphore(m_CurrentFrame)};
     VkPipelineStageFlags waitStages[]{VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
