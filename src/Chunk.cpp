@@ -492,12 +492,38 @@ void Chunk::buildMeshGreedy(int lodLevel,
                     p0[dim] = static_cast<float>(slice);
                     p0[u] = static_cast<float>(i);
                     p0[v] = static_cast<float>(j);
-                    if (id == BlockId::WATER && dim == 1 && !back)
-                        p0.y -= 0.1f;
 
                     glm::vec3 duv(0), dvv(0);
                     duv[u] = static_cast<float>(quadW);
                     dvv[v] = static_cast<float>(quadH);
+
+                    glm::vec3 v0 = p0;
+                    glm::vec3 v1 = p0 + duv;
+                    glm::vec3 v2 = p0 + duv + dvv;
+                    glm::vec3 v3 = p0 + dvv;
+
+                    if (id == BlockId::WATER)
+                    {
+
+                        glm::ivec3 water_block_pos = back ? glm::ivec3(p0) - dn_i : glm::ivec3(p0);
+
+                        Block block_above = getCache(water_block_pos.x, water_block_pos.y + 1, water_block_pos.z);
+                        if (block_above.id == BlockId::AIR)
+                        {
+
+                            float top_y = static_cast<float>(water_block_pos.y) + 1.0f;
+
+                            if (std::abs(v0.y - top_y) < 0.01f)
+                                v0.y -= 0.1f;
+                            if (std::abs(v1.y - top_y) < 0.01f)
+                                v1.y -= 0.1f;
+                            if (std::abs(v2.y - top_y) < 0.01f)
+                                v2.y -= 0.1f;
+                            if (std::abs(v3.y - top_y) < 0.01f)
+                                v3.y -= 0.1f;
+                        }
+                    }
+
                     const auto &bd = db.get_block_data(id);
                     int tex = (dim == 0) ? (back ? bd.texture_indices[4] : bd.texture_indices[5]) : (dim == 1) ? (back ? bd.texture_indices[0] : bd.texture_indices[1])
                                                                                                                : (back ? bd.texture_indices[3] : bd.texture_indices[2]);
@@ -505,11 +531,6 @@ void Chunk::buildMeshGreedy(int lodLevel,
                     auto uv = [&](const glm::vec3 &p) -> glm::vec2
                     { return (dim == 0) ? glm::vec2(p.z, p.y) : (dim == 1) ? glm::vec2(p.x, p.z)
                                                                            : glm::vec2(p.x, p.y); };
-
-                    glm::vec3 v0 = p0;
-                    glm::vec3 v1 = p0 + duv;
-                    glm::vec3 v2 = p0 + duv + dvv;
-                    glm::vec3 v3 = p0 + dvv;
 
                     uint32_t base = static_cast<uint32_t>(vertices.size());
                     vertices.push_back({v0, tileO, uv(v0)});
