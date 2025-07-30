@@ -108,6 +108,31 @@ void CommandManager::recordCommandBuffer(
         vkCmdDrawIndexed(cb, mesh->indexCount, 1, 0, 0, 0);
     }
 
+    if (!settings.wireframe)
+    {
+        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getTransparentPipeline());
+
+        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                m_PipelineCache.getGraphicsPipelineLayout(),
+                                0, 1, &descriptorSets[currentFrame], 0, nullptr);
+
+        for (const auto &[chunk, lod] : chunksToRender)
+        {
+            const ChunkMesh *mesh = chunk->getMesh(lod);
+            if (!mesh || mesh->indexCount == 0)
+                continue;
+
+            VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
+            VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, offsets);
+            vkCmdBindIndexBuffer(cb, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdPushConstants(cb, m_PipelineCache.getGraphicsPipelineLayout(),
+                               VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4),
+                               &chunk->getModelMatrix());
+            vkCmdDrawIndexed(cb, mesh->indexCount, 1, 0, 0, 0);
+        }
+    }
+
     if (settings.showCollisionBoxes && !debugAABBs.empty())
     {
         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getDebugPipeline());

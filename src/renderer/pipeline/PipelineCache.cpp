@@ -42,9 +42,9 @@ namespace
     VkPipeline buildPipeline(VkDevice device,
                              VkRenderPass renderPass,
                              VkPipelineLayout layout,
-                             VkPolygonMode polyMode)
+                             VkPolygonMode polyMode,
+                             bool enableBlending)
     {
-
         auto vert = makeShader(device, "shaders/shader.vert.spv");
         auto frag = makeShader(device, "shaders/shader.frag.spv");
         VkPipelineShaderStageCreateInfo stages[2]{
@@ -71,7 +71,7 @@ namespace
 
         VkPipelineRasterizationStateCreateInfo rs{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
         rs.polygonMode = polyMode;
-        rs.cullMode = VK_CULL_MODE_NONE;
+        rs.cullMode = VK_CULL_MODE_BACK_BIT;
         rs.frontFace = VK_FRONT_FACE_CLOCKWISE;
         rs.lineWidth = 1.0f;
 
@@ -80,15 +80,35 @@ namespace
 
         VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
         ds.depthTestEnable = VK_TRUE;
-        ds.depthWriteEnable = VK_TRUE;
-        ds.depthCompareOp = VK_COMPARE_OP_LESS;
+        ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 
-        VkPipelineColorBlendAttachmentState cbAtt{};
-        cbAtt.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                               VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        VkPipelineColorBlendAttachmentState opaqueBlendAttachment{};
+        opaqueBlendAttachment.colorWriteMask = 0xf;
+        opaqueBlendAttachment.blendEnable = VK_FALSE;
+
+        VkPipelineColorBlendAttachmentState transparentBlendAttachment{};
+        transparentBlendAttachment.blendEnable = VK_TRUE;
+        transparentBlendAttachment.colorWriteMask = 0xf;
+        transparentBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        transparentBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        transparentBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+        transparentBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        transparentBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        transparentBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+
         VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
         cb.attachmentCount = 1;
-        cb.pAttachments = &cbAtt;
+
+        if (enableBlending)
+        {
+            ds.depthWriteEnable = VK_FALSE;
+            cb.pAttachments = &transparentBlendAttachment;
+        }
+        else
+        {
+            ds.depthWriteEnable = VK_TRUE;
+            cb.pAttachments = &opaqueBlendAttachment;
+        }
 
         std::array<VkDynamicState, 2> dyn{VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
         VkPipelineDynamicStateCreateInfo dynS{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
@@ -112,12 +132,10 @@ namespace
 
         VkPipeline pipe{};
         if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &info, nullptr, &pipe) != VK_SUCCESS)
-            throw std::runtime_error("vkCreateGraphicsPipelines failed (polyMode=" +
-                                     std::to_string(int(polyMode)) + ")");
+            throw std::runtime_error("vkCreateGraphicsPipelines failed!");
 
         return pipe;
     }
-
 }
 
 PipelineCache::PipelineCache(const DeviceContext &deviceContext,
@@ -157,12 +175,17 @@ void PipelineCache::createPipelines()
 
     m_GraphicsPipeline =
         VulkanHandle<VkPipeline, PipelineDeleter>(
-            buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_FILL),
+            buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_FILL, false),
+            {dev});
+
+    m_TransparentPipeline =
+        VulkanHandle<VkPipeline, PipelineDeleter>(
+            buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_FILL, true),
             {dev});
 
     m_WireframePipeline =
         VulkanHandle<VkPipeline, PipelineDeleter>(
-            buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_LINE),
+            buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_LINE, false),
             {dev});
 
     createCrosshairPipeline();

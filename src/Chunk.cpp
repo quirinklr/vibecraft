@@ -456,6 +456,11 @@ void Chunk::buildMeshGreedy(int lodLevel,
                     p0[u] = static_cast<float>(i);
                     p0[v] = static_cast<float>(j);
 
+                    if (id == BlockId::WATER && dim == 1 && !back)
+                    {
+                        p0.y -= 0.1f;
+                    }
+
                     glm::vec3 duv(0), dvv(0);
                     duv[u] = static_cast<float>(quadW);
                     dvv[v] = static_cast<float>(quadH);

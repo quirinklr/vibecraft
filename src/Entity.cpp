@@ -5,7 +5,7 @@
 
 Entity::Entity(Engine *engine, glm::vec3 position)
     : m_engine(engine),
-m_position(position)
+      m_position(position)
 {
     const float width = 0.6f;
     const float height = 1.8f;
@@ -16,10 +16,14 @@ m_position(position)
 void Entity::update(float dt)
 {
 
+    if (m_is_flying)
+    {
+        m_position += m_velocity * dt;
+        return;
+    }
+
     m_velocity.y += GRAVITY * dt;
-
     m_position += m_velocity * dt;
-
     resolve_collisions();
 }
 

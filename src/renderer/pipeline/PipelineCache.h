@@ -18,6 +18,7 @@ public:
     VkPipeline getWireframePipeline() const { return m_WireframePipeline.get(); }
     VkPipeline getDebugPipeline() const { return m_DebugPipeline.get(); }
     VkPipelineLayout getDebugPipelineLayout() const { return m_DebugPipelineLayout.get(); }
+    VkPipeline getTransparentPipeline() const { return m_TransparentPipeline.get(); }
 
     void createPipelines();
 
@@ -35,6 +36,7 @@ private:
 
     VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter> m_PipelineLayout;
     VulkanHandle<VkPipeline, PipelineDeleter> m_GraphicsPipeline;
+    VulkanHandle<VkPipeline, PipelineDeleter> m_TransparentPipeline;
     VulkanHandle<VkPipeline, PipelineDeleter> m_WireframePipeline;
     VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter> m_DebugPipelineLayout;
     VulkanHandle<VkPipeline, PipelineDeleter> m_DebugPipeline;

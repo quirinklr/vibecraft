@@ -171,6 +171,14 @@ void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
     }
     was_mouse_pressed = is_mouse_pressed;
 
+    static bool gLast = false;
+    bool gNow = glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_G) == GLFW_PRESS;
+    if (gNow && !gLast)
+    {
+        m_player_ptr->toggle_flight();
+    }
+    gLast = gNow;
+
     m_player_ptr->process_keyboard(m_Window.getGLFWwindow());
 }
 

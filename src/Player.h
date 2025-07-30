@@ -2,7 +2,6 @@
 
 #include "Entity.h"
 #include "Camera.h"
-#include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 #include <GLFW/glfw3.h>
 
@@ -15,9 +14,10 @@ public:
 
     void update(float dt) override;
 
+    bool raycast(glm::vec3 &out_block_pos) const;
     void process_mouse_movement(float dx, float dy);
     void process_keyboard(GLFWwindow *window);
-    bool raycast(glm::vec3& out_block_pos) const;
+    void toggle_flight();
 
     Camera &get_camera() { return m_camera; }
 
@@ -30,8 +30,10 @@ private:
     bool m_is_sprinting = false;
 
     const Settings &m_settings;
+
     const float MOUSE_SENSITIVITY = 0.002f;
     const float WALK_SPEED = 5.0f;
     const float SPRINT_SPEED = 8.0f;
-    const float JUMP_FORCE = 10.0f;
+    const float FLY_SPEED = 20.0f;
+    const float JUMP_FORCE = 8.5f;
 };
