@@ -29,13 +29,10 @@ void Player::process_keyboard(GLFWwindow *window)
 {
     if (m_is_flying)
     {
-        glm::vec3 forward{
-            cos(m_yaw) * cos(m_pitch),
-            sin(m_pitch),
-            sin(m_yaw) * cos(m_pitch)};
+
+        glm::vec3 forward{cos(m_yaw) * cos(m_pitch), sin(m_pitch), sin(m_yaw) * cos(m_pitch)};
         glm::vec3 right = glm::normalize(glm::cross(forward, {0.f, 1.f, 0.f}));
         glm::vec3 up = {0.f, 1.f, 0.f};
-
         glm::vec3 move_direction{0.f};
 
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
@@ -55,14 +52,41 @@ void Player::process_keyboard(GLFWwindow *window)
         {
             move_direction = glm::normalize(move_direction);
         }
-
         m_velocity = move_direction * FLY_SPEED;
+    }
+    else if (m_is_in_water)
+    {
+
+        glm::vec3 forward{cos(m_yaw), 0, sin(m_yaw)};
+        glm::vec3 right = glm::normalize(glm::cross(forward, {0.f, 1.f, 0.f}));
+        glm::vec3 move_direction{0.f};
+
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+            move_direction += forward;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+            move_direction -= forward;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+            move_direction -= right;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+            move_direction += right;
+
+        if (glm::length(move_direction) > 0.0f)
+        {
+            move_direction = glm::normalize(move_direction);
+        }
+
+        m_velocity += move_direction * SWIM_ACCELERATION * (1.0f / 60.0f);
+
+        if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+        {
+            m_velocity.y += SWIM_UP_ACCELERATION * (1.0f / 60.0f);
+        }
     }
     else
     {
+
         glm::vec3 forward{cos(m_yaw), 0, sin(m_yaw)};
         glm::vec3 right = glm::normalize(glm::cross(forward, {0.f, 1.f, 0.f}));
-
         glm::vec3 move_direction{0.f};
 
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)

@@ -13,8 +13,39 @@ Entity::Entity(Engine *engine, glm::vec3 position)
     m_hitbox.max = {width / 2.0f, height, width / 2.0f};
 }
 
+void Entity::check_for_water()
+{
+    m_is_in_water = false;
+    AABB entity_aabb = get_world_aabb();
+
+    int min_bx = static_cast<int>(floor(entity_aabb.min.x));
+    int max_bx = static_cast<int>(ceil(entity_aabb.max.x));
+    int min_by = static_cast<int>(floor(entity_aabb.min.y));
+    int max_by = static_cast<int>(ceil(entity_aabb.max.y));
+    int min_bz = static_cast<int>(floor(entity_aabb.min.z));
+    int max_bz = static_cast<int>(ceil(entity_aabb.max.z));
+
+    for (int by = min_by; by < max_by; ++by)
+    {
+        for (int bx = min_bx; bx < max_bx; ++bx)
+        {
+            for (int bz = min_bz; bz < max_bz; ++bz)
+            {
+                Block block = m_engine->get_block(bx, by, bz);
+                if (block.id == BlockId::WATER)
+                {
+
+                    m_is_in_water = true;
+                    return;
+                }
+            }
+        }
+    }
+}
+
 void Entity::update(float dt)
 {
+    check_for_water();
 
     if (m_is_flying)
     {
@@ -23,8 +54,23 @@ void Entity::update(float dt)
     }
 
     m_velocity.y += GRAVITY * dt;
+
+    if (m_is_in_water)
+    {
+
+        m_velocity.y += BUOYANCY_FORCE * dt;
+
+        m_velocity -= m_velocity * WATER_DRAG_FACTOR * dt;
+    }
+
     m_position += m_velocity * dt;
     resolve_collisions();
+
+    if (m_is_on_ground && !m_is_in_water)
+    {
+        m_velocity.x = 0;
+        m_velocity.z = 0;
+    }
 }
 
 void Entity::resolve_collisions()

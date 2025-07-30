@@ -34,6 +34,9 @@ private:
     const float MOUSE_SENSITIVITY = 0.002f;
     const float WALK_SPEED = 5.0f;
     const float SPRINT_SPEED = 8.0f;
-    const float FLY_SPEED = 20.0f;
     const float JUMP_FORCE = 8.5f;
+
+    const float FLY_SPEED = 20.0f;
+    const float SWIM_ACCELERATION = 1.0f;
+    const float SWIM_UP_ACCELERATION = 3.0f;
 };
