@@ -14,7 +14,7 @@ struct Settings
     bool fullscreen = false;
     bool wireframe = false;
 
-    int renderDistance = 16;
+    int renderDistance = 10;
     std::vector<int> lodDistances = {8, 16, 24};
 
     int lod0Distance = 8;
