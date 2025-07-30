@@ -1,14 +1,16 @@
 #include "InstanceContext.h"
 #include <stdexcept>
 
-InstanceContext::InstanceContext(Window& window) : m_Window(window) {
+InstanceContext::InstanceContext(Window &window) : m_Window(window)
+{
     createInstance();
     createSurface();
 }
 
 InstanceContext::~InstanceContext() {}
 
-void InstanceContext::createInstance() {
+void InstanceContext::createInstance()
+{
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName = "Vibecraft";
@@ -23,21 +25,28 @@ void InstanceContext::createInstance() {
     uint32_t glfwExtensionCount = 0;
     const char **glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
     createInfo.enabledExtensionCount = glfwExtensionCount;
+
     createInfo.ppEnabledExtensionNames = glfwExtensions;
     createInfo.enabledLayerCount = 0;
-    if (m_EnableValidationLayers) {
-        createInfo.enabledLayerCount = static_cast<uint32_t>(m_ValidationLayers.size());
-        createInfo.ppEnabledLayerNames = m_ValidationLayers.data();
-    }
+
+    #ifndef NDEBUG
+        if (m_EnableValidationLayers)
+        {
+            createInfo.enabledLayerCount = static_cast<uint32_t>(m_ValidationLayers.size());
+            createInfo.ppEnabledLayerNames = m_ValidationLayers.data();
+        }
+    #endif
 
     VkInstance instance;
-    if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS) {
+    if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS)
+    {
         throw std::runtime_error("failed to create instance!");
     }
     m_Instance = VulkanHandle<VkInstance, InstanceDeleter>(instance, {});
 }
 
-void InstanceContext::createSurface() {
+void InstanceContext::createSurface()
+{
     VkSurfaceKHR surface;
     m_Window.createWindowSurface(m_Instance.get(), &surface);
     m_Surface = VulkanHandle<VkSurfaceKHR, SurfaceDeleter>(surface, {m_Instance.get()});
