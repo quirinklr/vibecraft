@@ -80,6 +80,7 @@ void TerrainGenerator::populateChunk(Chunk &c)
     glm::ivec3 cp = c.getPos();
 
     for (int x = 0; x < Chunk::WIDTH; ++x)
+    {
         for (int z = 0; z < Chunk::DEPTH; ++z)
         {
             int gx = cp.x * Chunk::WIDTH + x;
@@ -98,7 +99,6 @@ void TerrainGenerator::populateChunk(Chunk &c)
                 }
                 else if (y < 5)
                 {
-
                     float bedrock_n = m_bedrockNoise.GetNoise((float)gx, (float)y, (float)gz);
                     if (bedrock_n > (y * -0.1f + 0.2f))
                     {
@@ -109,55 +109,57 @@ void TerrainGenerator::populateChunk(Chunk &c)
                         block.id = BlockId::STONE;
                     }
                 }
+                else if (y > ih)
+                {
+
+                    block.id = BlockId::AIR;
+                }
                 else
                 {
 
-                    if (y > ih)
+                    float h_dx = heightAt(gx + 1, gz);
+                    float h_dz = heightAt(gx, gz + 1);
+                    float steepness = std::sqrt(pow(h_dx - h_center, 2) + pow(h_dz - h_center, 2));
+                    BiomeType bt = biomeAt(gx, gz);
+
+                    if (bt == BiomeType::Desert)
                     {
-                        if (y < SEA_LEVEL)
-                            block.id = BlockId::WATER;
-                        else
-                            block.id = BlockId::AIR;
+                        block.id = (steepness > 1.5f) ? BlockId::STONE : BlockId::SAND;
                     }
                     else
                     {
-                        float h_dx = heightAt(gx + 1, gz);
-                        float h_dz = heightAt(gx, gz + 1);
-                        float steepness = std::sqrt(pow(h_dx - h_center, 2) + pow(h_dz - h_center, 2));
-                        BiomeType bt = biomeAt(gx, gz);
-
-                        if (bt == BiomeType::Desert)
+                        if (steepness > 1.5f)
                         {
-                            block.id = (steepness > 1.5f) ? BlockId::STONE : BlockId::SAND;
+                            block.id = BlockId::STONE;
+                        }
+                        else if (y == ih)
+                        {
+                            block.id = BlockId::GRASS;
+                        }
+                        else if (y > ih - 4)
+                        {
+                            block.id = BlockId::DIRT;
                         }
                         else
                         {
-                            if (steepness > 1.5f)
-                            {
-                                block.id = BlockId::STONE;
-                            }
-                            else if (y == ih)
-                            {
-                                block.id = BlockId::GRASS;
-                            }
-                            else if (y > ih - 4)
-                            {
-                                block.id = BlockId::DIRT;
-                            }
-                            else
-                            {
-                                block.id = BlockId::STONE;
-                            }
+                            block.id = BlockId::STONE;
                         }
                     }
-
-                    if (isCave(static_cast<float>(gx), static_cast<float>(y), static_cast<float>(gz)))
-                    {
-                        block.id = BlockId::AIR;
-                    }
                 }
+
+                if (block.id != BlockId::AIR && isCave(static_cast<float>(gx), static_cast<float>(y), static_cast<float>(gz)))
+                {
+                    block.id = BlockId::AIR;
+                }
+
+                if (block.id == BlockId::AIR && y < SEA_LEVEL)
+                {
+                    block.id = BlockId::WATER;
+                }
+
                 c.setBlock(x, y, z, block);
             }
         }
+    }
     c.m_State.store(Chunk::State::TERRAIN_READY, std::memory_order_release);
 }
