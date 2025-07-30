@@ -203,6 +203,7 @@ void VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &camera, 
     ubo.view = camera.getViewMatrix();
     ubo.proj = camera.getProjectionMatrix();
     ubo.cameraPos = cameraWorldPos;
+    ubo.skyColor = glm::vec3(0.5f, 0.7f, 1.0f);
     ubo.time = static_cast<float>(glfwGetTime());
 
     ubo.isUnderwater = (cameraWorldPos.y < TerrainGenerator::SEA_LEVEL) ? 1 : 0;

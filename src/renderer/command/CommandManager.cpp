@@ -59,16 +59,16 @@ void CommandManager::recordCommandBuffer(
     VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     vkBeginCommandBuffer(cb, &beginInfo);
 
-    std::array<VkClearValue, 2> clear{};
-    clear[0].color = {{0.5f, 0.7f, 1.0f, 1.0f}};
-    clear[1].depthStencil = {1.0f, 0};
+    const std::array<VkClearValue, 2> clearValues = {
+        VkClearValue{.color = {{0.5f, 0.7f, 1.0f, 1.0f}}},
+        VkClearValue{.depthStencil = {1.0f, 0}}};
 
     VkRenderPassBeginInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     rp.renderPass = m_SwapChainContext.getRenderPass();
     rp.framebuffer = m_SwapChainContext.getFramebuffers()[imageIndex].get();
     rp.renderArea = {{0, 0}, m_SwapChainContext.getSwapChainExtent()};
-    rp.clearValueCount = clear.size();
-    rp.pClearValues = clear.data();
+    rp.clearValueCount = static_cast<uint32_t>(clearValues.size());
+    rp.pClearValues = clearValues.data();
 
     vkCmdBeginRenderPass(cb, &rp, VK_SUBPASS_CONTENTS_INLINE);
 

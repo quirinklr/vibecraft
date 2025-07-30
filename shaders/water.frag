@@ -7,6 +7,7 @@ layout(std140, set = 0, binding = 0) uniform CameraUbo {
     mat4 view;
     mat4 proj;
     vec3 cameraPos;
+    vec3 skyColor;
     float time;
     int isUnderwater;
 } cameraUbo;
@@ -17,6 +18,10 @@ layout(location = 0) out vec4 outColor;
 const float TILE_SIZE = 1.0 / 16.0;
 
 void main() {
+    if (cameraUbo.isUnderwater == 1 && fragWorldPos.y > cameraUbo.cameraPos.y) {
+        discard;
+    }
+
     vec2 uv = tileOrigin + fract(localUV) * TILE_SIZE;
     vec4 textureColor = texture(texSampler, uv);
     

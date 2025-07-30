@@ -7,10 +7,10 @@ layout(std140, set = 0, binding = 0) uniform CameraUbo {
     mat4 view;
     mat4 proj;
     vec3 cameraPos;
+    vec3 skyColor;
     float time;
     int isUnderwater;
 } cameraUbo;
-
 
 layout(push_constant) uniform PushConstantData { mat4 model; } pc;
 layout(location = 2) out vec3 fragWorldPos;
