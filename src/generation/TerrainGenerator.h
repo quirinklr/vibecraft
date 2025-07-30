@@ -18,17 +18,21 @@ public:
 private:
     FastNoiseLite m_continent;
     FastNoiseLite m_erosion;
+    FastNoiseLite m_terrainRoughness;
+
     FastNoiseLite m_terrainType;
     FastNoiseLite m_domainWarp;
     FastNoiseLite m_temperature;
     FastNoiseLite m_humidity;
-    FastNoiseLite m_caves;
-    FastNoiseLite m_caveShape;
+
+    FastNoiseLite m_cavernNoise;
+    FastNoiseLite m_tunnelNoise1;
+    FastNoiseLite m_tunnelNoise2;
+
     FastNoiseLite m_bedrockNoise;
 
     std::unordered_map<BiomeType, std::unique_ptr<Biome>> m_biomes;
     float heightAt(int gx, int gz) const;
-    BiomeType biomeAt(int gx, int gz) const;
     bool isCave(float x, float y, float z) const;
 
     static constexpr int SEA_LEVEL = 80;
