@@ -112,32 +112,6 @@ void Chunk::generateTerrain(FastNoiseLite &noise)
 
 #include <cstdio>
 
-static constexpr uint8_t AO_TABLE[8] = {3, 2, 1, 0, 1, 0, 0, 0};
-
-inline uint8_t calcAOInt(bool s1, bool s2, bool c)
-{
-    return AO_TABLE[(s1 << 2) | (s2 << 1) | c];
-}
-
-static uint8_t calculateAO(bool side1, bool side2, bool corner)
-{
-    if (side1 && side2)
-        return 0;
-
-    const int occ = int(side1) + int(side2) + int(corner);
-    switch (occ)
-    {
-    case 0:
-        return 3;
-    case 1:
-        return 2;
-    case 2:
-        return 1;
-    default:
-        return 0;
-    }
-}
-
 void Chunk::markReady(VulkanRenderer &renderer)
 {
     std::scoped_lock lock(m_PendingMutex);
@@ -222,12 +196,9 @@ void Chunk::buildMeshGreedy(int lodLevel,
     struct MaskCell
     {
         int8_t block_id = 0;
-        uint8_t ao[4] = {3, 3, 3, 3};
         bool operator==(const MaskCell &r) const
         {
-            return block_id == r.block_id &&
-                   ao[0] == r.ao[0] && ao[1] == r.ao[1] &&
-                   ao[2] == r.ao[2] && ao[3] == r.ao[3];
+            return block_id == r.block_id;
         }
     };
 
@@ -365,31 +336,6 @@ void Chunk::buildMeshGreedy(int lodLevel,
                         back = (ba.id == BlockId::AIR);
                     c.block_id = static_cast<int8_t>(id) * (back ? -1 : 1);
 
-                    glm::ivec3 p = sa ? a : b;
-
-                    for (int k = 0; k < 4; ++k)
-                    {
-                        int su = (k & 1) ? 1 : -1;
-                        int sv = (k < 2) ? -1 : 1;
-                        glm::ivec3 off1 = du_i * su;
-                        glm::ivec3 off2 = dv_i * sv;
-                        bool s1 = isSolid(p.x + off1.x, p.y + off1.y, p.z + off1.z);
-                        bool s2 = isSolid(p.x + off2.x, p.y + off2.y, p.z + off2.z);
-                        bool cr = isSolid(p.x + off1.x + off2.x,
-                                          p.y + off1.y + off2.y,
-                                          p.z + off1.z + off2.z);
-
-                        if (s1 && s2)
-                            c.ao[k] = 0;
-                        else
-                        {
-                            const int occ = int(s1) + int(s2) + int(cr);
-                            c.ao[k] = (occ == 0) ? 3 : (occ == 1) ? 2
-                                                   : (occ == 2)   ? 1
-                                                                  : 0;
-                        }
-                    }
-
                     mask[static_cast<size_t>(j) * U + i] = c;
                 }
 
@@ -448,36 +394,6 @@ void Chunk::buildMeshGreedy(int lodLevel,
                     glm::vec3 tileO{(tex % 16) * ATLAS_INV_SIZE,
                                     (tex / 16) * ATLAS_INV_SIZE, 0.f};
 
-                    uint8_t aoV[4];
-                    glm::ivec3 solidV = back ? glm::ivec3(p0) - dn_i : glm::ivec3(p0);
-                    for (int k = 0; k < 4; ++k)
-                    {
-                        int su = (k & 1) ? 1 : -1;
-                        int sv = (k < 2) ? -1 : 1;
-                        glm::ivec3 off1 = du_i * su;
-                        glm::ivec3 off2 = dv_i * sv;
-                        bool s1 = isSolid(solidV.x + off1.x, solidV.y + off1.y, solidV.z + off1.z);
-                        bool s2 = isSolid(solidV.x + off2.x, solidV.y + off2.y, solidV.z + off2.z);
-                        bool cr = isSolid(solidV.x + off1.x + off2.x,
-                                          solidV.y + off1.y + off2.y,
-                                          solidV.z + off1.z + off2.z);
-                        if (s1 && s2)
-                            aoV[k] = 0;
-                        else
-                        {
-                            const int occ = int(s1) + int(s2) + int(cr);
-                            aoV[k] = (occ == 0) ? 3 : (occ == 1) ? 2
-                                                  : (occ == 2)   ? 1
-                                                                 : 0;
-                        }
-                    }
-
-                    float aoF[4] = {
-                        static_cast<float>(aoV[0]),
-                        static_cast<float>(aoV[1]),
-                        static_cast<float>(aoV[2]),
-                        static_cast<float>(aoV[3])};
-
                     auto uv = [&](const glm::vec3 &p) -> glm::vec2
                     {
                         return (dim == 0)   ? glm::vec2(p.z, p.y)
@@ -491,25 +407,18 @@ void Chunk::buildMeshGreedy(int lodLevel,
                     glm::vec3 v3 = p0 + dvv;
 
                     uint32_t base = static_cast<uint32_t>(outVertices.size());
-                    outVertices.push_back({v0, tileO, uv(v0), aoF[0]});
-                    outVertices.push_back({v1, tileO, uv(v1), aoF[1]});
-                    outVertices.push_back({v2, tileO, uv(v2), aoF[2]});
-                    outVertices.push_back({v3, tileO, uv(v3), aoF[3]});
+                    outVertices.push_back({v0, tileO, uv(v0)});
+                    outVertices.push_back({v1, tileO, uv(v1)});
+                    outVertices.push_back({v2, tileO, uv(v2)});
+                    outVertices.push_back({v3, tileO, uv(v3)});
 
-                    bool flip = (aoF[0] + aoF[2]) > (aoF[1] + aoF[3]);
-                    if (flip)
+                    if (back)
                     {
-                        if (back)
-                            outIndices.insert(outIndices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
-                        else
-                            outIndices.insert(outIndices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
+                        outIndices.insert(outIndices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
                     }
                     else
                     {
-                        if (back)
-                            outIndices.insert(outIndices.end(), {base + 1, base + 3, base, base + 1, base + 2, base + 3});
-                        else
-                            outIndices.insert(outIndices.end(), {base, base + 1, base + 3, base + 1, base + 2, base + 3});
+                        outIndices.insert(outIndices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
                     }
 
                     for (int y = 0; y < quadH; ++y)
