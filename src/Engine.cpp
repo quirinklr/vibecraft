@@ -5,6 +5,10 @@
 #include <iomanip>
 #include <thread>
 #include <glm/gtc/constants.hpp>
+
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/norm.hpp>
+
 #include <algorithm>
 
 Engine::Engine() : m_Window(WIDTH, HEIGHT, "Vibecraft", m_Settings)
@@ -269,6 +273,8 @@ void Engine::processGarbage()
 
 void Engine::loadVisibleChunks(const glm::ivec3 &playerChunkPos)
 {
+    std::vector<glm::ivec3> chunk_positions_to_load;
+
     for (int z = -m_Settings.renderDistance; z <= m_Settings.renderDistance; ++z)
     {
         for (int x = -m_Settings.renderDistance; x <= m_Settings.renderDistance; ++x)
@@ -276,9 +282,29 @@ void Engine::loadVisibleChunks(const glm::ivec3 &playerChunkPos)
             glm::ivec3 chunkPos = playerChunkPos + glm::ivec3(x, 0, z);
             if (!m_Chunks.count(chunkPos))
             {
-                createChunkContainer(chunkPos);
+                chunk_positions_to_load.push_back(chunkPos);
             }
         }
+    }
+
+    glm::vec2 player_pos_2d(playerChunkPos.x, playerChunkPos.z);
+    std::sort(chunk_positions_to_load.begin(), chunk_positions_to_load.end(),
+              [&](const glm::ivec3 &a, const glm::ivec3 &b)
+              {
+                  float dist_a = glm::distance2(glm::vec2(a.x, a.z), player_pos_2d);
+                  float dist_b = glm::distance2(glm::vec2(b.x, b.z), player_pos_2d);
+                  return dist_a < dist_b;
+              });
+
+    int chunks_created_this_frame = 0;
+    for (const auto &pos : chunk_positions_to_load)
+    {
+        if (chunks_created_this_frame >= m_Settings.chunksToCreatePerFrame)
+        {
+            break;
+        }
+        createChunkContainer(pos);
+        chunks_created_this_frame++;
     }
 }
 
@@ -341,28 +367,44 @@ void Engine::submitMeshJobs()
     else
         dynCap = m_Settings.maxMeshJobsInFlight;
 
-    for (;;)
+    std::scoped_lock lock(m_MeshJobsMutex);
+    if (m_MeshJobsToCreate.empty() || static_cast<int>(m_MeshJobsInProgress.size()) >= dynCap)
     {
-        {
-            std::lock_guard lock(m_MeshJobsMutex);
-            if (static_cast<int>(m_MeshJobsInProgress.size()) >= dynCap)
-                break;
-            if (m_MeshJobsToCreate.empty())
-                break;
-        }
+        return;
+    }
 
-        std::pair<glm::ivec3, int> job;
-        {
-            std::lock_guard lock(m_MeshJobsMutex);
-            job = *m_MeshJobsToCreate.begin();
-            m_MeshJobsToCreate.erase(m_MeshJobsToCreate.begin());
-            m_MeshJobsInProgress.insert(job);
-        }
+    glm::vec3 player_pos = m_player_ptr->get_position();
+    glm::vec2 player_chunk_pos_2d(
+        floor(player_pos.x / Chunk::WIDTH),
+        floor(player_pos.z / Chunk::DEPTH));
+
+    std::vector<std::pair<glm::ivec3, int>> sorted_jobs;
+    sorted_jobs.assign(m_MeshJobsToCreate.begin(), m_MeshJobsToCreate.end());
+
+    std::sort(sorted_jobs.begin(), sorted_jobs.end(),
+              [&](const auto &a, const auto &b)
+              {
+                  if (a.second != b.second)
+                  {
+                      return a.second < b.second;
+                  }
+
+                  float dist_a = glm::distance2(glm::vec2(a.first.x, a.first.z), player_chunk_pos_2d);
+                  float dist_b = glm::distance2(glm::vec2(b.first.x, b.first.z), player_chunk_pos_2d);
+                  return dist_a < dist_b;
+              });
+
+    int slots_to_fill = dynCap - static_cast<int>(m_MeshJobsInProgress.size());
+    for (int i = 0; i < slots_to_fill && i < sorted_jobs.size(); ++i)
+    {
+        auto &job = sorted_jobs[i];
+
+        m_MeshJobsToCreate.erase(job);
+        m_MeshJobsInProgress.insert(job);
 
         auto it = m_Chunks.find(job.first);
         if (it == m_Chunks.end())
         {
-            std::lock_guard lock(m_MeshJobsMutex);
             m_MeshJobsInProgress.erase(job);
             continue;
         }
@@ -370,13 +412,13 @@ void Engine::submitMeshJobs()
         ChunkMeshInput in;
         in.selfChunk = it->second;
         glm::ivec3 p = it->second->getPos();
+
         glm::ivec3 off[8] = {{p.x - 1, 0, p.z}, {p.x + 1, 0, p.z}, {p.x, 0, p.z - 1}, {p.x, 0, p.z + 1}, {p.x - 1, 0, p.z - 1}, {p.x + 1, 0, p.z - 1}, {p.x - 1, 0, p.z + 1}, {p.x + 1, 0, p.z + 1}};
-        for (int i = 0; i < 8; ++i)
+        for (int j = 0; j < 8; ++j)
         {
-            auto n = m_Chunks.find(off[i]);
-            if (n != m_Chunks.end() &&
-                n->second->getState() >= Chunk::State::TERRAIN_READY)
-                in.neighborChunks[i] = n->second;
+            auto n = m_Chunks.find(off[j]);
+            if (n != m_Chunks.end() && n->second->getState() >= Chunk::State::TERRAIN_READY)
+                in.neighborChunks[j] = n->second;
         }
 
         m_Pool.submit(
@@ -388,13 +430,7 @@ void Engine::submitMeshJobs()
                     m_MeshJobsInProgress.erase(job);
                     return;
                 }
-
-                in.selfChunk->buildAndStageMesh(
-                    m_Renderer.getAllocator(),
-                    *m_Renderer.getArena(),
-                    job.second,
-                    in);
-
+                in.selfChunk->buildAndStageMesh(m_Renderer.getAllocator(), *m_Renderer.getArena(), job.second, in);
                 std::lock_guard lk(m_MeshJobsMutex);
                 m_MeshJobsInProgress.erase(job);
             });
