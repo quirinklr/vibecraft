@@ -485,8 +485,19 @@ void Engine::uploadReadyMeshes()
         if (ch->getState() != Chunk::State::STAGING_READY)
             continue;
 
-        ch->uploadMesh(m_Renderer, 0);
-        ch->uploadMesh(m_Renderer, 1);
-        ++uploaded;
+        bool did_upload = false;
+        if (ch->uploadMesh(m_Renderer, 0))
+            did_upload = true;
+        if (ch->uploadMesh(m_Renderer, 1))
+            did_upload = true;
+        if (ch->uploadTransparentMesh(m_Renderer, 0))
+            did_upload = true;
+        if (ch->uploadTransparentMesh(m_Renderer, 1))
+            did_upload = true;
+
+        if (did_upload)
+        {
+            uploaded++;
+        }
     }
 }

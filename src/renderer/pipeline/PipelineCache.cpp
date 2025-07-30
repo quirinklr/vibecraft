@@ -71,9 +71,10 @@ namespace
 
         VkPipelineRasterizationStateCreateInfo rs{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
         rs.polygonMode = polyMode;
-        rs.cullMode = VK_CULL_MODE_BACK_BIT;
         rs.frontFace = VK_FRONT_FACE_CLOCKWISE;
         rs.lineWidth = 1.0f;
+
+        rs.cullMode = VK_CULL_MODE_BACK_BIT;
 
         VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
         ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
@@ -103,11 +104,14 @@ namespace
         {
             ds.depthWriteEnable = VK_FALSE;
             cb.pAttachments = &transparentBlendAttachment;
+
+            rs.cullMode = VK_CULL_MODE_NONE;
         }
         else
         {
             ds.depthWriteEnable = VK_TRUE;
             cb.pAttachments = &opaqueBlendAttachment;
+            rs.cullMode = VK_CULL_MODE_BACK_BIT;
         }
 
         std::array<VkDynamicState, 2> dyn{VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};

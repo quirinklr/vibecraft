@@ -92,7 +92,6 @@ void CommandManager::recordCommandBuffer(
     for (const auto &[chunk, lod] : chunksToRender)
     {
         const ChunkMesh *mesh = chunk->getMesh(lod);
-
         if (!mesh || mesh->indexCount == 0)
             continue;
 
@@ -100,11 +99,9 @@ void CommandManager::recordCommandBuffer(
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, offsets);
         vkCmdBindIndexBuffer(cb, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-
         vkCmdPushConstants(cb, m_PipelineCache.getGraphicsPipelineLayout(),
                            VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4),
                            &chunk->getModelMatrix());
-
         vkCmdDrawIndexed(cb, mesh->indexCount, 1, 0, 0, 0);
     }
 
@@ -112,13 +109,9 @@ void CommandManager::recordCommandBuffer(
     {
         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getTransparentPipeline());
 
-        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                m_PipelineCache.getGraphicsPipelineLayout(),
-                                0, 1, &descriptorSets[currentFrame], 0, nullptr);
-
         for (const auto &[chunk, lod] : chunksToRender)
         {
-            const ChunkMesh *mesh = chunk->getMesh(lod);
+            const ChunkMesh *mesh = chunk->getTransparentMesh(lod);
             if (!mesh || mesh->indexCount == 0)
                 continue;
 
@@ -136,11 +129,9 @@ void CommandManager::recordCommandBuffer(
     if (settings.showCollisionBoxes && !debugAABBs.empty())
     {
         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getDebugPipeline());
-
         vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 m_PipelineCache.getDebugPipelineLayout(),
                                 0, 1, &descriptorSets[currentFrame], 0, nullptr);
-
         VkBuffer vertexBuffers[] = {debugCubeVB};
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, offsets);
@@ -150,10 +141,8 @@ void CommandManager::recordCommandBuffer(
         {
             glm::mat4 model = glm::translate(glm::mat4(1.0f), aabb.min);
             model = glm::scale(model, aabb.max - aabb.min);
-
             vkCmdPushConstants(cb, m_PipelineCache.getDebugPipelineLayout(),
                                VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
-
             vkCmdDrawIndexed(cb, debugCubeIndexCount, 1, 0, 0, 0);
         }
     }

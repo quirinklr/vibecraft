@@ -57,9 +57,7 @@ std::vector<Block> downsample(const std::vector<Block> &original, int factor)
         {
             for (int x = 0; x < newWidth; ++x)
             {
-
                 std::array<int, 256> counts{};
-
                 for (int oy = 0; oy < factor; ++oy)
                 {
                     for (int oz = 0; oz < factor; ++oz)
@@ -69,21 +67,16 @@ std::vector<Block> downsample(const std::vector<Block> &original, int factor)
                             int originalX = x * factor + ox;
                             int originalY = y * factor + oy;
                             int originalZ = z * factor + oz;
-
                             Block currentBlock = original[originalY * Chunk::WIDTH * Chunk::DEPTH + originalZ * Chunk::WIDTH + originalX];
-
                             if (currentBlock.id != BlockId::AIR)
                             {
-
                                 counts[static_cast<uint8_t>(currentBlock.id)]++;
                             }
                         }
                     }
                 }
-
                 BlockId mostCommonBlock = BlockId::AIR;
                 int maxCount = 0;
-
                 for (int i = 1; i < 256; ++i)
                 {
                     if (counts[i] > maxCount)
@@ -92,7 +85,6 @@ std::vector<Block> downsample(const std::vector<Block> &original, int factor)
                         mostCommonBlock = static_cast<BlockId>(i);
                     }
                 }
-
                 downsampled[(y * newDepth + z) * newWidth + x] = {mostCommonBlock};
             }
         }
@@ -127,17 +119,33 @@ void Chunk::markReady(VulkanRenderer &renderer)
             vkGetFenceStatus(renderer.getDevice(), job.fence) == VK_SUCCESS)
         {
             vkWaitForFences(renderer.getDevice(), 1, &job.fence, VK_TRUE, UINT64_MAX);
-
             if (job.cmdBuffer != VK_NULL_HANDLE)
                 vkFreeCommandBuffers(renderer.getDevice(),
                                      renderer.getTransferCommandPool()
                                          ? renderer.getTransferCommandPool()
                                          : renderer.getCommandManager()->getCommandPool(),
                                      1, &job.cmdBuffer);
-
             vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
-
             it = m_PendingUploads.erase(it);
+        }
+        else
+            ++it;
+    }
+    for (auto it = m_PendingTransparentUploads.begin(); it != m_PendingTransparentUploads.end();)
+    {
+        auto &job = it->second;
+        if (job.fence != VK_NULL_HANDLE &&
+            vkGetFenceStatus(renderer.getDevice(), job.fence) == VK_SUCCESS)
+        {
+            vkWaitForFences(renderer.getDevice(), 1, &job.fence, VK_TRUE, UINT64_MAX);
+            if (job.cmdBuffer != VK_NULL_HANDLE)
+                vkFreeCommandBuffers(renderer.getDevice(),
+                                     renderer.getTransferCommandPool()
+                                         ? renderer.getTransferCommandPool()
+                                         : renderer.getCommandManager()->getCommandPool(),
+                                     1, &job.cmdBuffer);
+            vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
+            it = m_PendingTransparentUploads.erase(it);
         }
         else
             ++it;
@@ -177,16 +185,8 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
     m_State.store(State::UPLOADING);
 
     ChunkMesh newMesh;
-
-    VkCommandPool pool = renderer.getTransferCommandPool()
-                             ? renderer.getTransferCommandPool()
-                             : renderer.getCommandManager()->getCommandPool();
-
-    UploadHelpers::submitChunkMeshUpload(*renderer.getDeviceContext(),
-                                         pool,
-                                         job,
-                                         newMesh.vertexBuffer, newMesh.vertexBufferAllocation,
-                                         newMesh.indexBuffer, newMesh.indexBufferAllocation);
+    VkCommandPool pool = renderer.getTransferCommandPool() ? renderer.getTransferCommandPool() : renderer.getCommandManager()->getCommandPool();
+    UploadHelpers::submitChunkMeshUpload(*renderer.getDeviceContext(), pool, job, newMesh.vertexBuffer, newMesh.vertexBufferAllocation, newMesh.indexBuffer, newMesh.indexBufferAllocation);
 
     VmaAllocationInfo ibInfo;
     vmaGetAllocationInfo(renderer.getAllocator(), newMesh.indexBufferAllocation, &ibInfo);
@@ -194,14 +194,11 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
 
     ChunkMesh oldMesh;
     {
-
         std::scoped_lock lock(m_MeshesMutex);
-
         if (m_Meshes.count(lodLevel))
         {
             oldMesh = std::move(m_Meshes.at(lodLevel));
         }
-
         m_Meshes[lodLevel] = std::move(newMesh);
     }
 
@@ -222,18 +219,87 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
     return true;
 }
 
+bool Chunk::uploadTransparentMesh(VulkanRenderer &renderer, int lodLevel)
+{
+    UploadJob job;
+    {
+        std::scoped_lock lock(m_PendingMutex);
+        if (!m_PendingTransparentUploads.count(lodLevel))
+            return false;
+        job = std::move(m_PendingTransparentUploads.at(lodLevel));
+        m_PendingTransparentUploads.erase(lodLevel);
+    }
+
+    if (job.stagingVB == VK_NULL_HANDLE)
+    {
+        ChunkMesh oldMesh;
+        {
+            std::scoped_lock lock(m_MeshesMutex);
+            if (m_TransparentMeshes.count(lodLevel))
+            {
+                oldMesh = std::move(m_TransparentMeshes.at(lodLevel));
+                m_TransparentMeshes.erase(lodLevel);
+            }
+        }
+        if (oldMesh.vertexBuffer != VK_NULL_HANDLE)
+            renderer.enqueueDestroy(oldMesh.vertexBuffer, oldMesh.vertexBufferAllocation);
+        if (oldMesh.indexBuffer != VK_NULL_HANDLE)
+            renderer.enqueueDestroy(oldMesh.indexBuffer, oldMesh.indexBufferAllocation);
+        m_State.store(State::GPU_READY);
+        return true;
+    }
+
+    m_State.store(State::UPLOADING);
+
+    ChunkMesh newMesh;
+    VkCommandPool pool = renderer.getTransferCommandPool() ? renderer.getTransferCommandPool() : renderer.getCommandManager()->getCommandPool();
+    UploadHelpers::submitChunkMeshUpload(*renderer.getDeviceContext(), pool, job, newMesh.vertexBuffer, newMesh.vertexBufferAllocation, newMesh.indexBuffer, newMesh.indexBufferAllocation);
+
+    VmaAllocationInfo ibInfo;
+    vmaGetAllocationInfo(renderer.getAllocator(), newMesh.indexBufferAllocation, &ibInfo);
+    newMesh.indexCount = static_cast<uint32_t>(ibInfo.size / sizeof(uint32_t));
+
+    ChunkMesh oldMesh;
+    {
+        std::scoped_lock lock(m_MeshesMutex);
+        if (m_TransparentMeshes.count(lodLevel))
+        {
+            oldMesh = std::move(m_TransparentMeshes.at(lodLevel));
+        }
+        m_TransparentMeshes[lodLevel] = std::move(newMesh);
+    }
+
+    if (oldMesh.vertexBuffer != VK_NULL_HANDLE)
+    {
+        renderer.enqueueDestroy(oldMesh.vertexBuffer, oldMesh.vertexBufferAllocation);
+    }
+    if (oldMesh.indexBuffer != VK_NULL_HANDLE)
+    {
+        renderer.enqueueDestroy(oldMesh.indexBuffer, oldMesh.indexBufferAllocation);
+    }
+
+    {
+        std::scoped_lock lock(m_PendingMutex);
+        m_PendingTransparentUploads[lodLevel] = std::move(job);
+    }
+    m_State.store(State::GPU_READY);
+    return true;
+}
+
 void Chunk::buildMeshGreedy(int lodLevel,
-                            std::vector<Vertex> &outVertices,
-                            std::vector<uint32_t> &outIndices,
+                            std::vector<Vertex> &outOpaqueVertices, std::vector<uint32_t> &outOpaqueIndices,
+                            std::vector<Vertex> &outTransparentVertices, std::vector<uint32_t> &outTransparentIndices,
                             ChunkMeshInput &meshInput)
 {
+    outOpaqueVertices.clear();
+    outOpaqueIndices.clear();
+    outTransparentVertices.clear();
+    outTransparentIndices.clear();
+
     struct MaskCell
     {
         int8_t block_id = 0;
-        bool operator==(const MaskCell &r) const
-        {
-            return block_id == r.block_id;
-        }
+        bool operator==(const MaskCell &r) const { return block_id == r.block_id; }
     };
 
     auto getBlockFromSource = [&](int rx, int ry, int rz) -> Block
@@ -246,7 +312,6 @@ void Chunk::buildMeshGreedy(int lodLevel,
         int lz = rz - cz * DEPTH;
         if (cx == 0 && cz == 0)
             return meshInput.selfChunk->getBlock(lx, ry, lz);
-
         static const int map[3][3] = {{4, 2, 5}, {0, -1, 1}, {6, 3, 7}};
         int idx = map[cz + 1][cx + 1];
         if (idx != -1 && meshInput.neighborChunks[idx])
@@ -257,15 +322,14 @@ void Chunk::buildMeshGreedy(int lodLevel,
     for (int y = 0; y < HEIGHT; ++y)
         for (int z = 0; z < DEPTH + 2; ++z)
             for (int x = 0; x < WIDTH + 2; ++x)
-                meshInput.cachedBlocks[y * (DEPTH + 2) * (WIDTH + 2) + z * (WIDTH + 2) + x] =
-                    getBlockFromSource(x - 1, y, z - 1);
+                meshInput.cachedBlocks[y * (DEPTH + 2) * (WIDTH + 2) + z * (WIDTH + 2) + x] = getBlockFromSource(x - 1, y, z - 1);
 
     const int W = WIDTH, H = HEIGHT, D = DEPTH;
     const int PAD_W = W + 2, PAD_D = D + 2;
 
     static thread_local std::vector<uint8_t> solidLUT;
+    auto &db = BlockDatabase::get();
     {
-        auto &db = BlockDatabase::get();
         const size_t cnt = db.blockCount();
         if (solidLUT.size() != cnt)
         {
@@ -277,14 +341,10 @@ void Chunk::buildMeshGreedy(int lodLevel,
 
     static thread_local std::vector<uint8_t> solidCache;
     solidCache.resize(static_cast<size_t>(H) * PAD_W * PAD_D);
-
     auto sidx = [&](int x, int y, int z) -> size_t
     {
-        return static_cast<size_t>(y) * PAD_W * PAD_D +
-               static_cast<size_t>(z) * PAD_W +
-               static_cast<size_t>(x);
+        return static_cast<size_t>(y) * PAD_W * PAD_D + static_cast<size_t>(z) * PAD_W + static_cast<size_t>(x);
     };
-
     for (int y = 0; y < H; ++y)
         for (int z = 0; z < PAD_D; ++z)
             for (int x = 0; x < PAD_W; ++x)
@@ -301,17 +361,12 @@ void Chunk::buildMeshGreedy(int lodLevel,
             return false;
         return solidCache[sidx(px, y, pz)] != 0;
     };
-
     auto getCache = [&](int x, int y, int z) -> Block
     {
-        if (x < -1 || x > WIDTH ||
-            y < 0 || y >= HEIGHT ||
-            z < -1 || z > DEPTH)
+        if (x < -1 || x > WIDTH || y < 0 || y >= HEIGHT || z < -1 || z > DEPTH)
             return {BlockId::AIR};
-
         return meshInput.cachedBlocks[sidx(x + 1, y, z + 1)];
     };
-
     auto isNeighborMissing = [&](int x, int z)
     {
         int cx = (x < 0) ? -1 : (x >= W ? 1 : 0);
@@ -323,10 +378,6 @@ void Chunk::buildMeshGreedy(int lodLevel,
         return idx != -1 && meshInput.neighborChunks[idx] == nullptr;
     };
 
-    outVertices.clear();
-    outIndices.clear();
-    auto &db = BlockDatabase::get();
-
     static thread_local std::vector<MaskCell> mask;
 
     for (int dim = 0; dim < 3; ++dim)
@@ -334,12 +385,10 @@ void Chunk::buildMeshGreedy(int lodLevel,
         int u = (dim + 1) % 3;
         int v = (dim + 2) % 3;
         int dsz[3] = {W, H, D};
-
         glm::ivec3 du_i(0), dv_i(0), dn_i(0);
         du_i[u] = 1;
         dv_i[v] = 1;
         dn_i[dim] = 1;
-
         const int U = dsz[u];
         const int V = dsz[v];
 
@@ -347,10 +396,9 @@ void Chunk::buildMeshGreedy(int lodLevel,
         {
             if (dim == 1 && slice == 0)
                 continue;
-
             mask.assign(static_cast<size_t>(U) * V, {});
-
             for (int j = 0; j < V; ++j)
+            {
                 for (int i = 0; i < U; ++i)
                 {
                     glm::ivec3 a(0), b(0);
@@ -360,31 +408,21 @@ void Chunk::buildMeshGreedy(int lodLevel,
                     b[u] = i;
                     a[v] = j;
                     b[v] = j;
-
                     const Block ba = getCache(a.x, a.y, a.z);
                     const Block bb = getCache(b.x, b.y, b.z);
-
                     const bool sa = isSolid(a.x, a.y, a.z);
                     const bool sb = isSolid(b.x, b.y, b.z);
 
                     if (ba.id == bb.id || (sa && sb))
-                    {
                         continue;
-                    }
-
                     if (!sa && ba.id == BlockId::AIR && isNeighborMissing(a.x, a.z))
-                    {
                         continue;
-                    }
                     if (!sb && bb.id == BlockId::AIR && isNeighborMissing(b.x, b.z))
-                    {
                         continue;
-                    }
 
                     MaskCell c;
                     bool back = false;
                     BlockId id = BlockId::AIR;
-
                     if (sa && !sb)
                     {
                         id = ba.id;
@@ -408,10 +446,10 @@ void Chunk::buildMeshGreedy(int lodLevel,
                             back = true;
                         }
                     }
-
                     c.block_id = static_cast<int8_t>(id) * (back ? -1 : 1);
                     mask[static_cast<size_t>(j) * U + i] = c;
                 }
+            }
 
             auto canMergeX = [&](const MaskCell &l, const MaskCell &r) -> bool
             { return l == r; };
@@ -427,8 +465,7 @@ void Chunk::buildMeshGreedy(int lodLevel,
 
             for (int j = 0; j < V; ++j)
             {
-                int i = 0;
-                while (i < U)
+                for (int i = 0; i < U;)
                 {
                     MaskCell mc = mask[static_cast<size_t>(j) * U + i];
                     if (mc.block_id == 0)
@@ -436,74 +473,58 @@ void Chunk::buildMeshGreedy(int lodLevel,
                         ++i;
                         continue;
                     }
-
                     int quadW = 1;
-                    while (i + quadW < U &&
-                           canMergeX(mask[static_cast<size_t>(j) * U + i + quadW - 1],
-                                     mask[static_cast<size_t>(j) * U + i + quadW]))
+                    while (i + quadW < U && canMergeX(mask[static_cast<size_t>(j) * U + i + quadW - 1], mask[static_cast<size_t>(j) * U + i + quadW]))
                         ++quadW;
-
                     int quadH = 1;
-                    while (j + quadH < V &&
-                           canMergeY(j + quadH - 1, j + quadH, i, quadW))
+                    while (j + quadH < V && canMergeY(j + quadH - 1, j + quadH, i, quadW))
                         ++quadH;
 
                     bool back = mc.block_id < 0;
                     BlockId id = static_cast<BlockId>(back ? -mc.block_id : mc.block_id);
+                    const auto &blockData = db.get_block_data(id);
+
+                    bool is_transparent = !blockData.is_solid;
+                    auto &vertices = is_transparent ? outTransparentVertices : outOpaqueVertices;
+                    auto &indices = is_transparent ? outTransparentIndices : outOpaqueIndices;
 
                     glm::vec3 p0(0);
                     p0[dim] = static_cast<float>(slice);
                     p0[u] = static_cast<float>(i);
                     p0[v] = static_cast<float>(j);
-
                     if (id == BlockId::WATER && dim == 1 && !back)
-                    {
                         p0.y -= 0.1f;
-                    }
 
                     glm::vec3 duv(0), dvv(0);
                     duv[u] = static_cast<float>(quadW);
                     dvv[v] = static_cast<float>(quadH);
-
                     const auto &bd = db.get_block_data(id);
-                    int tex = (dim == 0)   ? (back ? bd.texture_indices[4] : bd.texture_indices[5])
-                              : (dim == 1) ? (back ? bd.texture_indices[0] : bd.texture_indices[1])
-                                           : (back ? bd.texture_indices[3] : bd.texture_indices[2]);
-
-                    glm::vec3 tileO{(tex % 16) * ATLAS_INV_SIZE,
-                                    (tex / 16) * ATLAS_INV_SIZE, 0.f};
-
+                    int tex = (dim == 0) ? (back ? bd.texture_indices[4] : bd.texture_indices[5]) : (dim == 1) ? (back ? bd.texture_indices[0] : bd.texture_indices[1])
+                                                                                                               : (back ? bd.texture_indices[3] : bd.texture_indices[2]);
+                    glm::vec3 tileO{(tex % 16) * ATLAS_INV_SIZE, (tex / 16) * ATLAS_INV_SIZE, 0.f};
                     auto uv = [&](const glm::vec3 &p) -> glm::vec2
-                    {
-                        return (dim == 0)   ? glm::vec2(p.z, p.y)
-                               : (dim == 1) ? glm::vec2(p.x, p.z)
-                                            : glm::vec2(p.x, p.y);
-                    };
+                    { return (dim == 0) ? glm::vec2(p.z, p.y) : (dim == 1) ? glm::vec2(p.x, p.z)
+                                                                           : glm::vec2(p.x, p.y); };
 
                     glm::vec3 v0 = p0;
                     glm::vec3 v1 = p0 + duv;
                     glm::vec3 v2 = p0 + duv + dvv;
                     glm::vec3 v3 = p0 + dvv;
 
-                    uint32_t base = static_cast<uint32_t>(outVertices.size());
-                    outVertices.push_back({v0, tileO, uv(v0)});
-                    outVertices.push_back({v1, tileO, uv(v1)});
-                    outVertices.push_back({v2, tileO, uv(v2)});
-                    outVertices.push_back({v3, tileO, uv(v3)});
+                    uint32_t base = static_cast<uint32_t>(vertices.size());
+                    vertices.push_back({v0, tileO, uv(v0)});
+                    vertices.push_back({v1, tileO, uv(v1)});
+                    vertices.push_back({v2, tileO, uv(v2)});
+                    vertices.push_back({v3, tileO, uv(v3)});
 
                     if (back)
-                    {
-                        outIndices.insert(outIndices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
-                    }
+                        indices.insert(indices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
                     else
-                    {
-                        outIndices.insert(outIndices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
-                    }
+                        indices.insert(indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
 
                     for (int y = 0; y < quadH; ++y)
                         for (int x = 0; x < quadW; ++x)
                             mask[static_cast<size_t>(j + y) * U + (i + x)].block_id = 0;
-
                     i += quadW;
                 }
             }
@@ -515,70 +536,55 @@ void Chunk::buildAndStageMesh(VmaAllocator allocator, RingStagingArena &arena,
                               int lodLevel, ChunkMeshInput &meshInput)
 {
     const auto t0 = hrc::now();
-
     if (m_State.load() == State::INITIAL)
         return;
     m_State.store(State::MESHING);
 
-    const auto tBuild0 = hrc::now();
+    static thread_local std::vector<Vertex> opaqueVertices, transparentVertices;
+    static thread_local std::vector<uint32_t> opaqueIndices, transparentIndices;
 
-    static thread_local std::vector<Vertex> verticesTLS;
-    static thread_local std::vector<uint32_t> indicesTLS;
-    auto &vertices = verticesTLS;
-    auto &indices = indicesTLS;
+    buildMeshGreedy(lodLevel, opaqueVertices, opaqueIndices, transparentVertices, transparentIndices, meshInput);
 
-    vertices.clear();
-    indices.clear();
-    vertices.reserve(6 * 16 * 16 * 16);
-    indices.reserve(6 * 6 * 16 * 16 * 16);
+    UploadJob opaqueJob;
+    UploadHelpers::stageChunkMesh(arena, opaqueVertices, opaqueIndices, opaqueJob);
 
-    buildMeshGreedy(lodLevel, vertices, indices, meshInput);
-
-    const auto tBuild1 = hrc::now();
-
-    const auto tStage0 = hrc::now();
-    UploadJob job;
-    UploadHelpers::stageChunkMesh(arena, vertices, indices, job);
-
-    const auto tStage1 = hrc::now();
+    UploadJob transparentJob;
+    UploadHelpers::stageChunkMesh(arena, transparentVertices, transparentIndices, transparentJob);
 
     {
         std::scoped_lock lock(m_PendingMutex);
-        m_PendingUploads[lodLevel] = std::move(job);
+        m_PendingUploads[lodLevel] = std::move(opaqueJob);
+        m_PendingTransparentUploads[lodLevel] = std::move(transparentJob);
     }
     m_State.store(State::STAGING_READY);
-
-    const auto tEnd = hrc::now();
-
-    double msBuild = milli(tBuild1 - tBuild0).count();
-    double msStage = milli(tStage1 - tStage0).count();
-    double msTotal = milli(tEnd - t0).count();
 }
 
 void Chunk::cleanup(VulkanRenderer &renderer)
 {
     markReady(renderer);
-
     for (auto &[lod, mesh] : m_Meshes)
     {
         if (mesh.vertexBuffer != VK_NULL_HANDLE)
-        {
             renderer.enqueueDestroy(mesh.vertexBuffer, mesh.vertexBufferAllocation);
-        }
         if (mesh.indexBuffer != VK_NULL_HANDLE)
-        {
             renderer.enqueueDestroy(mesh.indexBuffer, mesh.indexBufferAllocation);
-        }
     }
-
+    for (auto &[lod, mesh] : m_TransparentMeshes)
+    {
+        if (mesh.vertexBuffer != VK_NULL_HANDLE)
+            renderer.enqueueDestroy(mesh.vertexBuffer, mesh.vertexBufferAllocation);
+        if (mesh.indexBuffer != VK_NULL_HANDLE)
+            renderer.enqueueDestroy(mesh.indexBuffer, mesh.indexBufferAllocation);
+    }
     m_Meshes.clear();
+    m_TransparentMeshes.clear();
     m_State.store(State::INITIAL);
 }
 
 bool Chunk::hasLOD(int lodLevel) const
 {
     std::scoped_lock lock(m_MeshesMutex);
-    return m_Meshes.count(lodLevel);
+    return m_Meshes.count(lodLevel) || m_TransparentMeshes.count(lodLevel);
 }
 
 const ChunkMesh *Chunk::getMesh(int lodLevel) const
@@ -588,13 +594,20 @@ const ChunkMesh *Chunk::getMesh(int lodLevel) const
     return it == m_Meshes.end() ? nullptr : &it->second;
 }
 
+const ChunkMesh *Chunk::getTransparentMesh(int lodLevel) const
+{
+    std::scoped_lock lock(m_MeshesMutex);
+    auto it = m_TransparentMeshes.find(lodLevel);
+    return it == m_TransparentMeshes.end() ? nullptr : &it->second;
+}
+
 int Chunk::getBestAvailableLOD(int requiredLod) const
 {
     std::scoped_lock lock(m_MeshesMutex);
     for (int lod = requiredLod; lod >= 0; --lod)
-        if (m_Meshes.count(lod))
+        if (m_Meshes.count(lod) || m_TransparentMeshes.count(lod))
             return lod;
-    return m_Meshes.empty() ? -1 : m_Meshes.rbegin()->first;
+    return m_Meshes.empty() && m_TransparentMeshes.empty() ? -1 : m_Meshes.rbegin()->first;
 }
 
 void Chunk::buildAndStageDebugMesh(VmaAllocator allocator, RingStagingArena &arena)
@@ -603,7 +616,6 @@ void Chunk::buildAndStageDebugMesh(VmaAllocator allocator, RingStagingArena &are
     static thread_local std::vector<uint32_t> indices;
     vertices.clear();
     indices.clear();
-
     for (int y = 0; y < HEIGHT; ++y)
     {
         for (int x = 0; x < WIDTH; ++x)
@@ -613,7 +625,6 @@ void Chunk::buildAndStageDebugMesh(VmaAllocator allocator, RingStagingArena &are
                 if (getBlock(x, y, z).id != BlockId::AIR)
                 {
                     uint32_t base_vertex = static_cast<uint32_t>(vertices.size());
-
                     vertices.push_back(glm::vec3(x, y, z));
                     vertices.push_back(glm::vec3(x + 1, y, z));
                     vertices.push_back(glm::vec3(x + 1, y + 1, z));
@@ -622,11 +633,7 @@ void Chunk::buildAndStageDebugMesh(VmaAllocator allocator, RingStagingArena &are
                     vertices.push_back(glm::vec3(x + 1, y, z + 1));
                     vertices.push_back(glm::vec3(x + 1, y + 1, z + 1));
                     vertices.push_back(glm::vec3(x, y + 1, z + 1));
-
-                    std::vector<uint32_t> cube_indices = {
-                        0, 1, 1, 2, 2, 3, 3, 0,
-                        4, 5, 5, 6, 6, 7, 7, 4,
-                        0, 4, 1, 5, 2, 6, 3, 7};
+                    std::vector<uint32_t> cube_indices = {0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6, 6, 7, 7, 4, 0, 4, 1, 5, 2, 6, 3, 7};
                     for (uint32_t index : cube_indices)
                     {
                         indices.push_back(base_vertex + index);

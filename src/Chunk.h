@@ -86,6 +86,8 @@ public:
     void buildAndStageDebugMesh(VmaAllocator allocator, RingStagingArena &arena);
 
     bool uploadMesh(VulkanRenderer &renderer, int lodLevel);
+    bool uploadTransparentMesh(VulkanRenderer &renderer, int lodLevel);
+
     const std::vector<Block> &getBlocks() const { return m_Blocks; }
 
     State getState() const { return m_State.load(std::memory_order_acquire); }
@@ -93,6 +95,7 @@ public:
     int getBestAvailableLOD(int requiredLod) const;
 
     const ChunkMesh *getMesh(int lodLevel) const;
+    const ChunkMesh *getTransparentMesh(int lodLevel) const;
     const ChunkMesh *getDebugMesh() const { return &m_DebugMesh; }
 
     const glm::mat4 &getModelMatrix() const { return m_ModelMatrix; }
@@ -108,13 +111,18 @@ public:
     mutable std::mutex m_MeshesMutex;
 
 private:
-    void buildMeshGreedy(int lodLevel, std::vector<Vertex> &outVertices, std::vector<uint32_t> &outIndices, ChunkMeshInput &meshInput);
+    void buildMeshGreedy(int lodLevel,
+                         std::vector<Vertex> &outOpaqueVertices, std::vector<uint32_t> &outOpaqueIndices,
+                         std::vector<Vertex> &outTransparentVertices, std::vector<uint32_t> &outTransparentIndices,
+                         ChunkMeshInput &meshInput);
 
     glm::ivec3 m_Pos;
     glm::mat4 m_ModelMatrix;
     std::vector<Block> m_Blocks;
 
     std::map<int, ChunkMesh> m_Meshes;
+    std::map<int, ChunkMesh> m_TransparentMeshes;
     ChunkMesh m_DebugMesh;
     std::map<int, UploadJob> m_PendingUploads;
+    std::map<int, UploadJob> m_PendingTransparentUploads;
 };
