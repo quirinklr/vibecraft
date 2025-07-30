@@ -120,7 +120,73 @@ void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
         m_player_ptr->process_mouse_movement(dx, dy);
     }
 
+    static bool was_mouse_pressed = false;
+    bool is_mouse_pressed = glfwGetMouseButton(m_Window.getGLFWwindow(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+
+    if (is_mouse_pressed && !was_mouse_pressed && mouse_enabled)
+    {
+        glm::vec3 block_pos;
+        if (m_player_ptr->raycast(block_pos))
+        {
+            set_block(
+                static_cast<int>(block_pos.x),
+                static_cast<int>(block_pos.y),
+                static_cast<int>(block_pos.z),
+                BlockId::AIR);
+        }
+    }
+    was_mouse_pressed = is_mouse_pressed;
+
     m_player_ptr->process_keyboard(m_Window.getGLFWwindow());
+}
+
+void Engine::set_block(int x, int y, int z, BlockId id)
+{
+    if (y < 0 || y >= Chunk::HEIGHT)
+    {
+        return;
+    }
+
+    int chunk_x = static_cast<int>(floor(static_cast<float>(x) / Chunk::WIDTH));
+    int chunk_z = static_cast<int>(floor(static_cast<float>(z) / Chunk::DEPTH));
+    glm::ivec3 chunk_pos(chunk_x, 0, chunk_z);
+
+    auto it = m_Chunks.find(chunk_pos);
+    if (it != m_Chunks.end())
+    {
+        int local_x = x - chunk_x * Chunk::WIDTH;
+        int local_z = z - chunk_z * Chunk::DEPTH;
+        it->second->setBlock(local_x, y, local_z, {id});
+
+        rebuild_chunk_at(x, y, z);
+
+        if (local_x == 0)
+            rebuild_chunk_at(x - 1, y, z);
+        if (local_x == Chunk::WIDTH - 1)
+            rebuild_chunk_at(x + 1, y, z);
+        if (local_z == 0)
+            rebuild_chunk_at(x, y, z - 1);
+        if (local_z == Chunk::DEPTH - 1)
+            rebuild_chunk_at(x, y, z + 1);
+    }
+}
+
+void Engine::rebuild_chunk_at(int x, int y, int z)
+{
+    int chunk_x = static_cast<int>(floor(static_cast<float>(x) / Chunk::WIDTH));
+    int chunk_z = static_cast<int>(floor(static_cast<float>(z) / Chunk::DEPTH));
+    glm::ivec3 chunk_pos(chunk_x, 0, chunk_z);
+
+    auto it = m_Chunks.find(chunk_pos);
+    if (it != m_Chunks.end())
+    {
+
+        it->second->cleanup(m_Renderer);
+
+        std::lock_guard lock(m_MeshJobsMutex);
+        m_MeshJobsToCreate.insert({chunk_pos, 0});
+        m_MeshJobsToCreate.insert({chunk_pos, 1});
+    }
 }
 
 void Engine::updateWindowTitle(float now, float &fpsTime, int &frames, const glm::vec3 &player_pos)

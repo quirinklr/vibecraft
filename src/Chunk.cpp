@@ -503,7 +503,11 @@ void Chunk::cleanup(VulkanRenderer &renderer)
         }
     }
     m_Meshes.clear();
-    m_State.store(State::INITIAL);
+
+    if (m_State.load() >= State::TERRAIN_READY)
+    {
+        m_State.store(State::TERRAIN_READY);
+    }
 }
 
 bool Chunk::hasLOD(int lodLevel) const

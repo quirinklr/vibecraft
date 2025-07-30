@@ -41,12 +41,15 @@ public:
     void run();
 
     Block get_block(int x, int y, int z);
+    void set_block(int x, int y, int z, BlockId id);
+
     Window &get_window() { return m_Window; }
 
 private:
     void processInput(float dt, bool &mouse_enabled, double &lx, double &ly);
     void updateWindowTitle(float now, float &fpsTime, int &frames, const glm::vec3 &player_pos);
     void updateChunks(const glm::vec3 &cameraPos);
+    void rebuild_chunk_at(int x, int y, int z);
 
     void unloadDistantChunks(const glm::ivec3 &playerChunkPos);
     void processGarbage();

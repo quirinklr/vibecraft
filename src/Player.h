@@ -17,6 +17,7 @@ public:
 
     void process_mouse_movement(float dx, float dy);
     void process_keyboard(GLFWwindow *window);
+    bool raycast(glm::vec3& out_block_pos) const;
 
     Camera &get_camera() { return m_camera; }
 

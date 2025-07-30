@@ -1,5 +1,6 @@
 #include "Player.h"
 #include "Engine.h"
+#include "Block.h"
 #include <glm/gtc/constants.hpp>
 #include <algorithm>
 
@@ -13,6 +14,35 @@ void Player::update(float dt)
     Entity::update(dt);
 
     update_camera(m_engine);
+}
+
+bool Player::raycast(glm::vec3 &out_block_pos) const
+{
+    const float reach = 5.0f;
+    const float step = 0.05f;
+
+    glm::vec3 position = m_position + glm::vec3(0.f, m_hitbox.max.y * 0.9f, 0.f);
+    glm::vec3 direction{
+        cos(m_yaw) * cos(m_pitch),
+        sin(m_pitch),
+        sin(m_yaw) * cos(m_pitch)};
+
+    for (float t = 0.0f; t < reach; t += step)
+    {
+        glm::vec3 current_pos = position + direction * t;
+        int block_x = static_cast<int>(floor(current_pos.x));
+        int block_y = static_cast<int>(floor(current_pos.y));
+        int block_z = static_cast<int>(floor(current_pos.z));
+
+        Block block = m_engine->get_block(block_x, block_y, block_z);
+        if (BlockDatabase::get().get_block_data(block.id).is_solid)
+        {
+            out_block_pos = {block_x, block_y, block_z};
+            return true;
+        }
+    }
+
+    return false;
 }
 
 void Player::process_mouse_movement(float dx, float dy)
