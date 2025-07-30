@@ -14,6 +14,7 @@ class TerrainGenerator
 public:
     TerrainGenerator();
     void populateChunk(Chunk &c);
+    static constexpr int SEA_LEVEL = 80;
 
 private:
     FastNoiseLite m_continent;
@@ -34,6 +35,4 @@ private:
     std::unordered_map<BiomeType, std::unique_ptr<Biome>> m_biomes;
     float heightAt(int gx, int gz) const;
     bool isCave(float x, float y, float z) const;
-
-    static constexpr int SEA_LEVEL = 80;
 };

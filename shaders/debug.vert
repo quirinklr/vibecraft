@@ -2,10 +2,14 @@
 
 layout(location = 0) in vec3 inPosition;
 
-layout(set = 0, binding = 0) uniform CameraUbo {
+layout(std140, set = 0, binding = 0) uniform CameraUbo {
     mat4 view;
     mat4 proj;
+    vec3 cameraPos;
+    float time;
+    int isUnderwater;
 } cameraUbo;
+
 
 layout(push_constant) uniform PushConstantData {
     mat4 model;

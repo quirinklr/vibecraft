@@ -3,12 +3,15 @@ layout(location = 0) in  vec3 inPosition;
 layout(location = 1) in  vec3 inTileOrigin;          
 layout(location = 2) in  vec2 inBlockUV;
 
-layout(set = 0, binding = 0) uniform CameraUbo {
+layout(std140, set = 0, binding = 0) uniform CameraUbo {
     mat4 view;
     mat4 proj;
+    vec3 cameraPos;
     float time;
+    int isUnderwater;
 } cameraUbo;
 
+layout(location = 2) out vec3 fragWorldPos;
 layout(push_constant) uniform PushConstantData { mat4 model; } pc;
 
 layout(location = 0) flat out vec2 tileOrigin;       
@@ -44,4 +47,5 @@ void main() {
     gl_Position = cameraUbo.proj * cameraUbo.view * vec4(worldPos, 1.0);
     tileOrigin = inTileOrigin.xy;
     localUV    = inBlockUV;
+    fragWorldPos = worldPos;
 }

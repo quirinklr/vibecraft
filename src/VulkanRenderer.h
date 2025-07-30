@@ -33,6 +33,7 @@ public:
     VulkanRenderer &operator=(const VulkanRenderer &) = delete;
 
     void drawFrame(Camera &camera,
+                   const glm::vec3 &playerPos,
                    const std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks,
                    const glm::ivec3 &playerChunkPos,
                    const Settings &settings,
@@ -50,7 +51,7 @@ public:
     RingStagingArena *getArena() const { return m_StagingArena.get(); }
 
 private:
-    void updateUniformBuffer(uint32_t currentImage, Camera &camera);
+    void updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos);
     void createUniformBuffers();
     void createDescriptorPool();
     void createDescriptorSets();

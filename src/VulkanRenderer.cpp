@@ -4,6 +4,7 @@
 #include "math/Ivec3Less.h"
 #include "renderer/UniformBufferObject.h"
 #include <Globals.h>
+#include "generation/TerrainGenerator.h"
 
 VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings)
     : m_Window(window), m_Settings(settings)
@@ -67,6 +68,7 @@ void VulkanRenderer::createDebugCubeMesh()
 }
 
 void VulkanRenderer::drawFrame(Camera &camera,
+                               const glm::vec3 &playerPos,
                                const std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks,
                                const glm::ivec3 &playerChunkPos,
                                const Settings &settings,
@@ -96,7 +98,7 @@ void VulkanRenderer::drawFrame(Camera &camera,
         vkWaitForFences(m_DeviceContext->getDevice(), 1, &m_SyncPrimitives->getImageInFlight(imageIndex), VK_TRUE, UINT64_MAX);
     m_SyncPrimitives->getImageInFlight(imageIndex) = m_SyncPrimitives->getInFlightFence(m_CurrentFrame);
 
-    updateUniformBuffer(m_CurrentFrame, camera);
+    updateUniformBuffer(m_CurrentFrame, camera, playerPos);
 
     std::vector<std::pair<const Chunk *, int>> renderChunks;
     renderChunks.reserve(chunks.size());
@@ -191,12 +193,19 @@ void VulkanRenderer::enqueueDestroy(VkBuffer buffer, VmaAllocation allocation)
     }
 }
 
-void VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &camera)
+void VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos)
 {
+
+    const float eyeHeight = 1.8f * 0.9f;
+    glm::vec3 cameraWorldPos = playerPos + glm::vec3(0.0f, eyeHeight, 0.0f);
+
     UniformBufferObject ubo{};
     ubo.view = camera.getViewMatrix();
     ubo.proj = camera.getProjectionMatrix();
+    ubo.cameraPos = cameraWorldPos;
     ubo.time = static_cast<float>(glfwGetTime());
+
+    ubo.isUnderwater = (cameraWorldPos.y < TerrainGenerator::SEA_LEVEL) ? 1 : 0;
 
     memcpy(m_UniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }
