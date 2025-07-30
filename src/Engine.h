@@ -1,7 +1,6 @@
 #pragma once
 #include "Window.h"
 #include "VulkanRenderer.h"
-#include "Camera.h"
 #include "Settings.h"
 #include "Chunk.h"
 #include <map>
@@ -13,6 +12,8 @@
 #include <set>
 #include <mutex>
 #include <utility>
+#include "Entity.h"
+#include "Player.h"
 
 struct ChunkLodRequestLess
 {
@@ -39,12 +40,14 @@ public:
     Engine &operator=(const Engine &) = delete;
     void run();
 
-private:
-    void processInput(float dt, bool &mouse, double &lx, double &ly, float &yaw, float &pitch, glm::vec3 &cam, float &baseSpeed);
-    void updateCamera(const glm::vec3 &cam, float yaw, float pitch);
-    void updateWindowTitle(float now, float &fpsTime, int &frames, float yaw, float pitch, float baseSpeed);
+    Block get_block(int x, int y, int z);
+    Window &get_window() { return m_Window; }
 
+private:
+    void processInput(float dt, bool &mouse_enabled, double &lx, double &ly);
+    void updateWindowTitle(float now, float &fpsTime, int &frames, const glm::vec3 &player_pos);
     void updateChunks(const glm::vec3 &cameraPos);
+
     void unloadDistantChunks(const glm::ivec3 &playerChunkPos);
     void processGarbage();
     void loadVisibleChunks(const glm::ivec3 &playerChunkPos);
@@ -56,7 +59,10 @@ private:
     Settings m_Settings{};
     Window m_Window{WIDTH, HEIGHT, "Vibecraft", m_Settings};
     VulkanRenderer m_Renderer{m_Window, m_Settings};
-    Camera m_Camera{};
+
+    std::vector<std::unique_ptr<Entity>> m_entities;
+    Player *m_player_ptr = nullptr;
+
     TerrainGenerator m_TerrainGen;
     double m_FrameEMA = 0.004;
 

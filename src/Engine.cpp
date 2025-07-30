@@ -15,6 +15,10 @@ Engine::Engine() : m_Window(WIDTH, HEIGHT, "Vibecraft", m_Settings)
     for (int x = -ws / 2; x < ws / 2; ++x)
         for (int z = -ws / 2; z < ws / 2; ++z)
             m_ChunksToGenerate.insert({x, 0, z});
+
+    auto player = std::make_unique<Player>(this, glm::vec3(0.f, 120.f, 0.f), m_Settings);
+    m_player_ptr = player.get();
+    m_entities.push_back(std::move(player));
 }
 
 Engine::~Engine()
@@ -25,58 +29,76 @@ Engine::~Engine()
         c->cleanup(m_Renderer);
 }
 
+Block Engine::get_block(int x, int y, int z)
+{
+    if (y < 0 || y >= Chunk::HEIGHT)
+    {
+        return {BlockId::AIR};
+    }
+
+    int chunk_x = static_cast<int>(floor(static_cast<float>(x) / Chunk::WIDTH));
+    int chunk_z = static_cast<int>(floor(static_cast<float>(z) / Chunk::DEPTH));
+
+    auto it = m_Chunks.find({chunk_x, 0, chunk_z});
+    if (it != m_Chunks.end() && it->second->getState() >= Chunk::State::TERRAIN_READY)
+    {
+        int local_x = x - chunk_x * Chunk::WIDTH;
+        int local_z = z - chunk_z * Chunk::DEPTH;
+        return it->second->getBlock(local_x, y, local_z);
+    }
+
+    return {BlockId::AIR};
+}
+
 void Engine::run()
 {
-    glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-    bool mouse = true;
-    float last = static_cast<float>(glfwGetTime());
-    double lx, ly;
-    glfwGetCursorPos(m_Window.getGLFWwindow(), &lx, &ly);
-    float yaw = -glm::half_pi<float>();
-    float pitch = 0.f;
-    glm::vec3 cam = {0.f, 100.f, 3.f};
-    float baseSpeed = 10.f;
-    float fpsTime = last;
+    bool mouse_enabled = true;
+    float last_time = static_cast<float>(glfwGetTime());
+    double last_cursor_x, last_cursor_y;
+    glfwGetCursorPos(m_Window.getGLFWwindow(), &last_cursor_x, &last_cursor_y);
+    float fps_time = last_time;
     int frames = 0;
-
-    glfwGetCursorPos(m_Window.getGLFWwindow(), &lx, &ly);
 
     while (!m_Window.shouldClose())
     {
-        glm::ivec3 playerChunkPos{
-            static_cast<int>(std::floor(cam.x / Chunk::WIDTH)), 0,
-            static_cast<int>(std::floor(cam.z / Chunk::DEPTH))};
-
         float now = static_cast<float>(glfwGetTime());
-        float dt = now - last;
+        float dt = now - last_time;
         m_FrameEMA = 0.9 * m_FrameEMA + 0.1 * dt;
-        last = now;
+        last_time = now;
 
         glfwPollEvents();
 
-        processInput(dt, mouse, lx, ly, yaw, pitch, cam, baseSpeed);
-        updateCamera(cam, yaw, pitch);
+        processInput(dt, mouse_enabled, last_cursor_x, last_cursor_y);
 
-        updateChunks(cam);
+        for (auto &entity : m_entities)
+        {
+            entity->update(dt);
+        }
 
-        m_Renderer.drawFrame(m_Camera, m_Chunks, playerChunkPos, m_Settings.lod0Distance);
+        glm::vec3 player_pos = m_player_ptr->get_position();
+        updateChunks(player_pos);
 
-        updateWindowTitle(now, fpsTime, frames, yaw, pitch, baseSpeed);
+        glm::ivec3 playerChunkPos{
+            static_cast<int>(std::floor(player_pos.x / Chunk::WIDTH)), 0,
+            static_cast<int>(std::floor(player_pos.z / Chunk::DEPTH))};
+
+        m_Renderer.drawFrame(m_player_ptr->get_camera(), m_Chunks, playerChunkPos, m_Settings.lod0Distance);
+
+        updateWindowTitle(now, fps_time, frames, m_player_ptr->get_position());
     }
 }
 
-void Engine::processInput(float dt, bool &mouse, double &lx, double &ly, float &yaw, float &pitch, glm::vec3 &cam, float &baseSpeed)
+void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
 {
-
     if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_ESCAPE) == GLFW_PRESS)
     {
         glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-        mouse = false;
+        mouse_enabled = false;
     }
-    if (!mouse && glfwGetMouseButton(m_Window.getGLFWwindow(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
+    if (!mouse_enabled && glfwGetMouseButton(m_Window.getGLFWwindow(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
     {
         glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-        mouse = true;
+        mouse_enabled = true;
         glfwGetCursorPos(m_Window.getGLFWwindow(), &lx, &ly);
     }
 
@@ -86,7 +108,7 @@ void Engine::processInput(float dt, bool &mouse, double &lx, double &ly, float &
         m_Settings.wireframe = !m_Settings.wireframe;
     fLast = fNow;
 
-    if (mouse)
+    if (mouse_enabled)
     {
         double mx, my;
         glfwGetCursorPos(m_Window.getGLFWwindow(), &mx, &my);
@@ -94,57 +116,21 @@ void Engine::processInput(float dt, bool &mouse, double &lx, double &ly, float &
         float dy = static_cast<float>(my - ly);
         lx = mx;
         ly = my;
-        const float mScale = 0.0005f;
-        yaw -= dx * m_Settings.mouseSensitivityX * mScale;
-        pitch += (m_Settings.invertMouseY ? dy : -dy) * m_Settings.mouseSensitivityY * mScale;
-        pitch = glm::clamp(pitch, -glm::half_pi<float>() + 0.01f, glm::half_pi<float>() - 0.01f);
+
+        m_player_ptr->process_mouse_movement(dx, dy);
     }
 
-    glm::vec3 f{cos(yaw) * cos(pitch), sin(pitch), sin(yaw) * cos(pitch)};
-    f = glm::normalize(f);
-    glm::vec3 r = glm::normalize(glm::cross(f, {0.f, 1.f, 0.f}));
-
-    const float boost = 4.f;
-    const float step = 2.f;
-
-    if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_E) == GLFW_PRESS)
-        baseSpeed += step * dt * 10.f;
-    if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_Q) == GLFW_PRESS)
-        baseSpeed = glm::max(1.f, baseSpeed - step * dt * 10.f);
-
-    float speed = baseSpeed;
-    if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
-        speed *= boost;
-
-    if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_W) == GLFW_PRESS)
-        cam -= f * speed * dt;
-    if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_S) == GLFW_PRESS)
-        cam += f * speed * dt;
-    if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_A) == GLFW_PRESS)
-        cam -= r * speed * dt;
-    if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_D) == GLFW_PRESS)
-        cam += r * speed * dt;
+    m_player_ptr->process_keyboard(m_Window.getGLFWwindow());
 }
 
-void Engine::updateCamera(const glm::vec3 &cam, float yaw, float pitch)
-{
-    glm::vec3 f{cos(yaw) * cos(pitch), sin(pitch), sin(yaw) * cos(pitch)};
-    f = glm::normalize(f);
-    glm::vec3 r = glm::normalize(glm::cross(f, {0.f, 1.f, 0.f}));
-    glm::vec3 u = glm::normalize(glm::cross(r, f));
-
-    m_Camera.setViewDirection(cam, f, u);
-    auto ext = m_Window.getExtent();
-    m_Camera.setPerspectiveProjection(glm::radians(m_Settings.fov), static_cast<float>(ext.width) / ext.height, 0.1f, 1000.f);
-}
-
-void Engine::updateWindowTitle(float now, float &fpsTime, int &frames, float yaw, float pitch, float baseSpeed)
+void Engine::updateWindowTitle(float now, float &fpsTime, int &frames, const glm::vec3 &player_pos)
 {
     frames++;
     if (now - fpsTime >= 1.f)
     {
         std::stringstream s;
-        s << std::fixed << std::setprecision(1) << "Vibecraft | FPS: " << frames << " | Yaw: " << glm::degrees(yaw) << " | Pitch: " << glm::degrees(pitch) << " | Speed: " << baseSpeed;
+        s << std::fixed << std::setprecision(1) << "Vibecraft | FPS: " << frames
+          << " | Pos: " << player_pos.x << ", " << player_pos.y << ", " << player_pos.z;
         glfwSetWindowTitle(m_Window.getGLFWwindow(), s.str().c_str());
         frames = 0;
         fpsTime = now;
@@ -166,11 +152,11 @@ void Engine::createChunkContainer(const glm::ivec3 &pos)
         m_TerrainGen.populateChunk(*raw); });
 }
 
-void Engine::updateChunks(const glm::vec3 &cam)
+void Engine::updateChunks(const glm::vec3 &cam_pos)
 {
     glm::ivec3 playerChunkPos{
-        static_cast<int>(std::floor(cam.x / Chunk::WIDTH)), 0,
-        static_cast<int>(std::floor(cam.z / Chunk::DEPTH))};
+        static_cast<int>(std::floor(cam_pos.x / Chunk::WIDTH)), 0,
+        static_cast<int>(std::floor(cam_pos.z / Chunk::DEPTH))};
 
     unloadDistantChunks(playerChunkPos);
     processGarbage();

@@ -4,10 +4,10 @@
 
 struct Settings
 {
-    float mouseSensitivityX = 1.0f;
-    float mouseSensitivityY = 1.0f;
-    bool invertMouseY = true;
-    float fov = 100.0f;
+    float mouseSensitivityX = 0.5f;
+    float mouseSensitivityY = 0.5f;
+    bool invertMouseY = false;
+    float fov = 120.0f;
 
     bool vsync = true;
     int fpsCap = 960;

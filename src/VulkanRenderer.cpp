@@ -175,7 +175,7 @@ void VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &camera)
     UniformBufferObject ubo{};
     ubo.view = camera.getViewMatrix();
     ubo.proj = camera.getProjectionMatrix();
-    ubo.proj[1][1] *= -1.0f;
+
     memcpy(m_UniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }
 
