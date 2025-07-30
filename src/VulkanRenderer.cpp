@@ -196,6 +196,7 @@ void VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &camera)
     UniformBufferObject ubo{};
     ubo.view = camera.getViewMatrix();
     ubo.proj = camera.getProjectionMatrix();
+    ubo.time = static_cast<float>(glfwGetTime());
 
     memcpy(m_UniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }

@@ -107,7 +107,7 @@ void CommandManager::recordCommandBuffer(
 
     if (!settings.wireframe)
     {
-        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getTransparentPipeline());
+        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getWaterPipeline());
 
         for (const auto &[chunk, lod] : chunksToRender)
         {

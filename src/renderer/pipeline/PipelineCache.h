@@ -19,12 +19,14 @@ public:
     VkPipeline getDebugPipeline() const { return m_DebugPipeline.get(); }
     VkPipelineLayout getDebugPipelineLayout() const { return m_DebugPipelineLayout.get(); }
     VkPipeline getTransparentPipeline() const { return m_TransparentPipeline.get(); }
+    VkPipeline getWaterPipeline() const { return m_WaterPipeline.get(); }
 
     void createPipelines();
 
 private:
     void createCrosshairPipeline();
     void createDebugPipeline();
+    void createWaterPipeline();
 
     static std::vector<char> readFile(const std::string &filename);
     static VulkanHandle<VkShaderModule, ShaderModuleDeleter>
@@ -42,4 +44,5 @@ private:
     VulkanHandle<VkPipeline, PipelineDeleter> m_DebugPipeline;
     VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter> m_CrosshairPipelineLayout;
     VulkanHandle<VkPipeline, PipelineDeleter> m_CrosshairPipeline;
+    VulkanHandle<VkPipeline, PipelineDeleter> m_WaterPipeline;
 };

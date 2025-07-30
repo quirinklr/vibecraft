@@ -43,10 +43,13 @@ namespace
                              VkRenderPass renderPass,
                              VkPipelineLayout layout,
                              VkPolygonMode polyMode,
-                             bool enableBlending)
+                             bool enableBlending,
+                             const std::string &vertShaderPath,
+                             const std::string &fragShaderPath)
     {
-        auto vert = makeShader(device, "shaders/shader.vert.spv");
-        auto frag = makeShader(device, "shaders/shader.frag.spv");
+        auto vert = makeShader(device, vertShaderPath);
+        auto frag = makeShader(device, fragShaderPath);
+
         VkPipelineShaderStageCreateInfo stages[2]{
             {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
              VK_SHADER_STAGE_VERTEX_BIT, vert.get(), "main"},
@@ -157,9 +160,7 @@ PipelineCache::~PipelineCache() = default;
 
 void PipelineCache::createPipelines()
 {
-
     VkPushConstantRange pcRange{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4)};
-
     VkDescriptorSetLayout dsl = m_DescriptorLayout.getDescriptorSetLayout();
     VkPipelineLayoutCreateInfo plCI{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     plCI.setLayoutCount = 1;
@@ -170,27 +171,27 @@ void PipelineCache::createPipelines()
     VkPipelineLayout layoutRaw{};
     if (vkCreatePipelineLayout(m_DeviceContext.getDevice(), &plCI, nullptr, &layoutRaw) != VK_SUCCESS)
         throw std::runtime_error("failed to create pipeline layout!");
-
-    m_PipelineLayout =
-        VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter>(layoutRaw, {m_DeviceContext.getDevice()});
+    m_PipelineLayout = VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter>(layoutRaw, {m_DeviceContext.getDevice()});
 
     VkDevice dev = m_DeviceContext.getDevice();
     VkRenderPass rp = m_SwapChainContext.getRenderPass();
 
-    m_GraphicsPipeline =
-        VulkanHandle<VkPipeline, PipelineDeleter>(
-            buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_FILL, false),
-            {dev});
+    const std::string defaultVert = "shaders/shader.vert.spv";
+    const std::string defaultFrag = "shaders/shader.frag.spv";
+    const std::string waterVert = "shaders/water.vert.spv";
+    const std::string waterFrag = "shaders/water.frag.spv";
 
-    m_TransparentPipeline =
-        VulkanHandle<VkPipeline, PipelineDeleter>(
-            buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_FILL, true),
-            {dev});
+    m_GraphicsPipeline = VulkanHandle<VkPipeline, PipelineDeleter>(
+        buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_FILL, false, defaultVert, defaultFrag), {dev});
 
-    m_WireframePipeline =
-        VulkanHandle<VkPipeline, PipelineDeleter>(
-            buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_LINE, false),
-            {dev});
+    m_TransparentPipeline = VulkanHandle<VkPipeline, PipelineDeleter>(
+        buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_FILL, true, defaultVert, defaultFrag), {dev});
+
+    m_WaterPipeline = VulkanHandle<VkPipeline, PipelineDeleter>(
+        buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_FILL, true, waterVert, waterFrag), {dev});
+
+    m_WireframePipeline = VulkanHandle<VkPipeline, PipelineDeleter>(
+        buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_LINE, false, defaultVert, defaultFrag), {dev});
 
     createCrosshairPipeline();
 }

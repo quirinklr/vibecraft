@@ -488,60 +488,95 @@ void Chunk::buildMeshGreedy(int lodLevel,
                     auto &vertices = is_transparent ? outTransparentVertices : outOpaqueVertices;
                     auto &indices = is_transparent ? outTransparentIndices : outOpaqueIndices;
 
-                    glm::vec3 p0(0);
-                    p0[dim] = static_cast<float>(slice);
-                    p0[u] = static_cast<float>(i);
-                    p0[v] = static_cast<float>(j);
-
-                    glm::vec3 duv(0), dvv(0);
-                    duv[u] = static_cast<float>(quadW);
-                    dvv[v] = static_cast<float>(quadH);
-
-                    glm::vec3 v0 = p0;
-                    glm::vec3 v1 = p0 + duv;
-                    glm::vec3 v2 = p0 + duv + dvv;
-                    glm::vec3 v3 = p0 + dvv;
-
-                    if (id == BlockId::WATER)
+                    if (is_transparent && id == BlockId::WATER)
                     {
+                        const auto &bd = db.get_block_data(id);
+                        int tex = (dim == 0) ? (back ? bd.texture_indices[4] : bd.texture_indices[5]) : (dim == 1) ? (back ? bd.texture_indices[0] : bd.texture_indices[1])
+                                                                                                                   : (back ? bd.texture_indices[3] : bd.texture_indices[2]);
+                        glm::vec3 tileO{(tex % 16) * ATLAS_INV_SIZE, (tex / 16) * ATLAS_INV_SIZE, 0.f};
+                        auto uv = [&](const glm::vec3 &p) -> glm::vec2
+                        { return (dim == 0) ? glm::vec2(p.z, p.y) : (dim == 1) ? glm::vec2(p.x, p.z)
+                                                                               : glm::vec2(p.x, p.y); };
 
-                        glm::ivec3 water_block_pos = back ? glm::ivec3(p0) - dn_i : glm::ivec3(p0);
-
-                        Block block_above = getCache(water_block_pos.x, water_block_pos.y + 1, water_block_pos.z);
-                        if (block_above.id == BlockId::AIR)
+                        for (int qh = 0; qh < quadH; ++qh)
                         {
+                            for (int qw = 0; qw < quadW; ++qw)
+                            {
+                                glm::vec3 p0(0);
+                                p0[dim] = static_cast<float>(slice);
+                                p0[u] = static_cast<float>(i + qw);
+                                p0[v] = static_cast<float>(j + qh);
 
-                            float top_y = static_cast<float>(water_block_pos.y) + 1.0f;
+                                glm::vec3 duv(0), dvv(0);
+                                duv[u] = 1.0f;
+                                dvv[v] = 1.0f;
 
-                            if (std::abs(v0.y - top_y) < 0.01f)
-                                v0.y -= 0.1f;
-                            if (std::abs(v1.y - top_y) < 0.01f)
-                                v1.y -= 0.1f;
-                            if (std::abs(v2.y - top_y) < 0.01f)
-                                v2.y -= 0.1f;
-                            if (std::abs(v3.y - top_y) < 0.01f)
-                                v3.y -= 0.1f;
+                                glm::vec3 v0 = p0;
+                                glm::vec3 v1 = p0 + duv;
+                                glm::vec3 v2 = p0 + duv + dvv;
+                                glm::vec3 v3 = p0 + dvv;
+
+                                if (id == BlockId::WATER && dim == 1 && !back)
+                                {
+                                    float top_y = v0.y;
+                                    if (std::abs(v0.y - top_y) < 0.01f)
+                                        v0.y -= 0.1f;
+                                    if (std::abs(v1.y - top_y) < 0.01f)
+                                        v1.y -= 0.1f;
+                                    if (std::abs(v2.y - top_y) < 0.01f)
+                                        v2.y -= 0.1f;
+                                    if (std::abs(v3.y - top_y) < 0.01f)
+                                        v3.y -= 0.1f;
+                                }
+
+                                uint32_t base = static_cast<uint32_t>(vertices.size());
+                                vertices.push_back({v0, tileO, uv(v0)});
+                                vertices.push_back({v1, tileO, uv(v1)});
+                                vertices.push_back({v2, tileO, uv(v2)});
+                                vertices.push_back({v3, tileO, uv(v3)});
+
+                                if (back)
+                                    indices.insert(indices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
+                                else
+                                    indices.insert(indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
+                            }
                         }
                     }
-
-                    const auto &bd = db.get_block_data(id);
-                    int tex = (dim == 0) ? (back ? bd.texture_indices[4] : bd.texture_indices[5]) : (dim == 1) ? (back ? bd.texture_indices[0] : bd.texture_indices[1])
-                                                                                                               : (back ? bd.texture_indices[3] : bd.texture_indices[2]);
-                    glm::vec3 tileO{(tex % 16) * ATLAS_INV_SIZE, (tex / 16) * ATLAS_INV_SIZE, 0.f};
-                    auto uv = [&](const glm::vec3 &p) -> glm::vec2
-                    { return (dim == 0) ? glm::vec2(p.z, p.y) : (dim == 1) ? glm::vec2(p.x, p.z)
-                                                                           : glm::vec2(p.x, p.y); };
-
-                    uint32_t base = static_cast<uint32_t>(vertices.size());
-                    vertices.push_back({v0, tileO, uv(v0)});
-                    vertices.push_back({v1, tileO, uv(v1)});
-                    vertices.push_back({v2, tileO, uv(v2)});
-                    vertices.push_back({v3, tileO, uv(v3)});
-
-                    if (back)
-                        indices.insert(indices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
                     else
-                        indices.insert(indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
+                    {
+                        glm::vec3 p0(0);
+                        p0[dim] = static_cast<float>(slice);
+                        p0[u] = static_cast<float>(i);
+                        p0[v] = static_cast<float>(j);
+
+                        glm::vec3 duv(0), dvv(0);
+                        duv[u] = static_cast<float>(quadW);
+                        dvv[v] = static_cast<float>(quadH);
+
+                        const auto &bd = db.get_block_data(id);
+                        int tex = (dim == 0) ? (back ? bd.texture_indices[4] : bd.texture_indices[5]) : (dim == 1) ? (back ? bd.texture_indices[0] : bd.texture_indices[1])
+                                                                                                                   : (back ? bd.texture_indices[3] : bd.texture_indices[2]);
+                        glm::vec3 tileO{(tex % 16) * ATLAS_INV_SIZE, (tex / 16) * ATLAS_INV_SIZE, 0.f};
+                        auto uv = [&](const glm::vec3 &p) -> glm::vec2
+                        { return (dim == 0) ? glm::vec2(p.z, p.y) : (dim == 1) ? glm::vec2(p.x, p.z)
+                                                                               : glm::vec2(p.x, p.y); };
+
+                        glm::vec3 v0 = p0;
+                        glm::vec3 v1 = p0 + duv;
+                        glm::vec3 v2 = p0 + duv + dvv;
+                        glm::vec3 v3 = p0 + dvv;
+
+                        uint32_t base = static_cast<uint32_t>(vertices.size());
+                        vertices.push_back({v0, tileO, uv(v0)});
+                        vertices.push_back({v1, tileO, uv(v1)});
+                        vertices.push_back({v2, tileO, uv(v2)});
+                        vertices.push_back({v3, tileO, uv(v3)});
+
+                        if (back)
+                            indices.insert(indices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
+                        else
+                            indices.insert(indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
+                    }
 
                     for (int y = 0; y < quadH; ++y)
                         for (int x = 0; x < quadW; ++x)
