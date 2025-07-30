@@ -86,7 +86,7 @@ void Engine::run()
             debug_aabbs.push_back(m_player_ptr->get_world_aabb());
 
             glm::vec3 p_pos = m_player_ptr->get_position();
-            const int radius = 16;
+            const int radius = 4;
             for (int y = static_cast<int>(p_pos.y) - radius; y < static_cast<int>(p_pos.y) + radius; ++y)
             {
                 for (int x = static_cast<int>(p_pos.x) - radius; x < static_cast<int>(p_pos.x) + radius; ++x)

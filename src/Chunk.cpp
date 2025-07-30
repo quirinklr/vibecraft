@@ -591,3 +591,43 @@ int Chunk::getBestAvailableLOD(int requiredLod) const
             return lod;
     return m_Meshes.empty() ? -1 : m_Meshes.rbegin()->first;
 }
+
+void Chunk::buildAndStageDebugMesh(VmaAllocator allocator, RingStagingArena &arena)
+{
+    static thread_local std::vector<glm::vec3> vertices;
+    static thread_local std::vector<uint32_t> indices;
+    vertices.clear();
+    indices.clear();
+
+    for (int y = 0; y < HEIGHT; ++y)
+    {
+        for (int x = 0; x < WIDTH; ++x)
+        {
+            for (int z = 0; z < DEPTH; ++z)
+            {
+                if (getBlock(x, y, z).id != BlockId::AIR)
+                {
+                    uint32_t base_vertex = static_cast<uint32_t>(vertices.size());
+
+                    vertices.push_back(glm::vec3(x, y, z));
+                    vertices.push_back(glm::vec3(x + 1, y, z));
+                    vertices.push_back(glm::vec3(x + 1, y + 1, z));
+                    vertices.push_back(glm::vec3(x, y + 1, z));
+                    vertices.push_back(glm::vec3(x, y, z + 1));
+                    vertices.push_back(glm::vec3(x + 1, y, z + 1));
+                    vertices.push_back(glm::vec3(x + 1, y + 1, z + 1));
+                    vertices.push_back(glm::vec3(x, y + 1, z + 1));
+
+                    std::vector<uint32_t> cube_indices = {
+                        0, 1, 1, 2, 2, 3, 3, 0,
+                        4, 5, 5, 6, 6, 7, 7, 4,
+                        0, 4, 1, 5, 2, 6, 3, 7};
+                    for (uint32_t index : cube_indices)
+                    {
+                        indices.push_back(base_vertex + index);
+                    }
+                }
+            }
+        }
+    }
+}

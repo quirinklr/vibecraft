@@ -83,6 +83,8 @@ public:
     void buildAndStageMesh(VmaAllocator allocator, RingStagingArena &arena,
                            int lodLevel, ChunkMeshInput &meshInput);
 
+    void buildAndStageDebugMesh(VmaAllocator allocator, RingStagingArena &arena);
+
     bool uploadMesh(VulkanRenderer &renderer, int lodLevel);
     const std::vector<Block> &getBlocks() const { return m_Blocks; }
 
@@ -91,6 +93,7 @@ public:
     int getBestAvailableLOD(int requiredLod) const;
 
     const ChunkMesh *getMesh(int lodLevel) const;
+    const ChunkMesh *getDebugMesh() const { return &m_DebugMesh; }
 
     const glm::mat4 &getModelMatrix() const { return m_ModelMatrix; }
     Block getBlock(int x, int y, int z) const;
@@ -112,5 +115,6 @@ private:
     std::vector<Block> m_Blocks;
 
     std::map<int, ChunkMesh> m_Meshes;
+    ChunkMesh m_DebugMesh;
     std::map<int, UploadJob> m_PendingUploads;
 };
