@@ -508,13 +508,6 @@ void Chunk::buildAndStageMesh(VmaAllocator allocator, RingStagingArena &arena,
     double msBuild = milli(tBuild1 - tBuild0).count();
     double msStage = milli(tStage1 - tStage0).count();
     double msTotal = milli(tEnd - t0).count();
-
-    if (msTotal > 8.0)
-    {
-        printf("meshBuild %.2f ms  [build %.2f | stage %.2f | vtx %zu | idx %zu]\n",
-               msTotal, msBuild, msStage,
-               vertices.size(), indices.size());
-    }
 }
 
 void Chunk::cleanup(VulkanRenderer &renderer)

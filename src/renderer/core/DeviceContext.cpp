@@ -75,17 +75,13 @@ void DeviceContext::createLogicalDevice()
 
     ci.ppEnabledExtensionNames = m_DeviceExtensions.data();
 
-    #ifndef NDEBUG
-        if (m_EnableValidationLayers)
-        {
-            ci.enabledLayerCount = static_cast<uint32_t>(m_ValidationLayers.size());
-            ci.ppEnabledLayerNames = m_ValidationLayers.data();
-        }
-    #endif
-    else
+#ifndef NDEBUG
+    if (m_EnableValidationLayers)
     {
-        ci.enabledLayerCount = 0;
+        ci.enabledLayerCount = static_cast<uint32_t>(m_ValidationLayers.size());
+        ci.ppEnabledLayerNames = m_ValidationLayers.data();
     }
+#endif
 
     VkDevice dev;
     vkCreateDevice(m_PhysicalDevice, &ci, nullptr, &dev);

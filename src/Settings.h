@@ -9,12 +9,11 @@ struct Settings
     bool invertMouseY = false;
     float fov = 90.0f;
 
-    bool vsync = true;
-    int fpsCap = 960;
+    bool vsync = false;
     bool fullscreen = false;
     bool wireframe = false;
 
-    int renderDistance = 10;
+    int renderDistance = 64;
     std::vector<int> lodDistances = {8, 16, 24};
 
     int lod0Distance = 8;
