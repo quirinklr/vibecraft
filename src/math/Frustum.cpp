@@ -50,18 +50,13 @@ bool Frustum::intersects(const AABB &aabb) const
 {
     for (const auto &plane : planes)
     {
-        glm::vec3 p_vertex(aabb.min.x, aabb.min.y, aabb.min.z);
-        if (plane.normal.x >= 0)
-            p_vertex.x = aabb.max.x;
-        if (plane.normal.y >= 0)
-            p_vertex.y = aabb.max.y;
-        if (plane.normal.z >= 0)
-            p_vertex.z = aabb.max.z;
-
-        if (plane.getSignedDistance(p_vertex) < 0)
-        {
+        const glm::vec3 p(
+            plane.normal.x < 0 ? aabb.min.x : aabb.max.x,
+            plane.normal.y < 0 ? aabb.min.y : aabb.max.y,
+            plane.normal.z < 0 ? aabb.min.z : aabb.max.z);
+        if (glm::dot(plane.normal, p) + plane.distance < 0)
             return false;
-        }
     }
+
     return true;
 }

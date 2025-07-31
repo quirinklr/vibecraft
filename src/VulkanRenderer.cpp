@@ -76,6 +76,8 @@ void VulkanRenderer::drawFrame(Camera &camera,
 {
     vkWaitForFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(m_CurrentFrame), VK_TRUE, UINT64_MAX);
 
+    DeferredFreeQueue::poll();
+
     m_BufferDestroyQueue[m_CurrentFrame].clear();
     m_ImageDestroyQueue[m_CurrentFrame].clear();
 

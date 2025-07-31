@@ -2,45 +2,54 @@
 #include <stdexcept>
 #include <Globals.h>
 
-void UploadHelpers::copyBuffer(const DeviceContext &dc, VkCommandPool pool,
-                               VkBuffer src, VkBuffer dst, VkDeviceSize size, VkFence *outFence)
+void UploadHelpers::copyBuffer(const DeviceContext &dc,
+                               VkCommandPool pool,
+                               VkBuffer src,
+                               VkBuffer dst,
+                               VkDeviceSize size,
+                               VkFence *outFence)
 {
-    std::scoped_lock lk(gGraphicsQueueMutex);
+    std::scoped_lock lock(gGraphicsQueueMutex);
 
-    VkCommandBuffer cmd;
-    VkCommandBufferAllocateInfo a{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    a.commandPool = pool;
-    a.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    a.commandBufferCount = 1;
-    vkAllocateCommandBuffers(dc.getDevice(), &a, &cmd);
+    VkCommandBuffer cmd{};
+    VkCommandBufferAllocateInfo allocInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    allocInfo.commandPool = pool;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 1;
+    vkAllocateCommandBuffers(dc.getDevice(), &allocInfo, &cmd);
 
-    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &bi);
+    VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &beginInfo);
 
-    VkBufferCopy r{0, 0, size};
-    vkCmdCopyBuffer(cmd, src, dst, 1, &r);
+    VkBufferCopy region{0, 0, size};
+    vkCmdCopyBuffer(cmd, src, dst, 1, &region);
     vkEndCommandBuffer(cmd);
 
-    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    si.commandBufferCount = 1;
-    si.pCommandBuffers = &cmd;
+    VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
 
-    VkQueue q = dc.hasTransferQueue() ? dc.getTransferQueue() : dc.getGraphicsQueue();
+    VkQueue queue = dc.hasTransferQueue() ? dc.getTransferQueue()
+                                          : dc.getGraphicsQueue();
 
     if (outFence)
     {
+
         if (*outFence == VK_NULL_HANDLE)
         {
-            VkFenceCreateInfo f{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-            vkCreateFence(dc.getDevice(), &f, nullptr, outFence);
+            VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+            vkCreateFence(dc.getDevice(), &fenceInfo, nullptr, outFence);
         }
-        vkQueueSubmit(q, 1, &si, *outFence);
+        vkQueueSubmit(queue, 1, &submitInfo, *outFence);
+        DeferredFreeQueue::push(dc.getDevice(), pool, cmd, *outFence);
     }
     else
     {
-        vkQueueSubmit(q, 1, &si, VK_NULL_HANDLE);
-        vkQueueWaitIdle(q);
+
+        vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+        vkQueueWaitIdle(queue);
+        vkFreeCommandBuffers(dc.getDevice(), pool, 1, &cmd);
     }
 }
 

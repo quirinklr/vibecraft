@@ -7,7 +7,7 @@ struct Settings
     float mouseSensitivityX = 0.4f;
     float mouseSensitivityY = 0.4f;
     bool invertMouseY = false;
-    float fov = 110.0f;
+    float fov = 100.0f;
 
     bool vsync = false;
     bool fullscreen = false;

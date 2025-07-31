@@ -2,6 +2,7 @@
 #include "../../VulkanWrappers.h"
 #include "InstanceContext.h"
 #include <optional>
+#include <mutex>
 
 class DeviceContext
 {
@@ -42,6 +43,9 @@ private:
     VkQueue m_GraphicsQueue{VK_NULL_HANDLE};
     VkQueue m_PresentQueue{VK_NULL_HANDLE};
     VkQueue m_TransferQueue{VK_NULL_HANDLE};
+
+    mutable std::mutex m_CbFreeMtx;
+    mutable std::vector<std::tuple<VkCommandPool, VkCommandBuffer, VkFence>> m_CbDeferred;
 
     const std::vector<const char *> m_DeviceExtensions{VK_KHR_SWAPCHAIN_EXTENSION_NAME};
     const std::vector<const char *> m_ValidationLayers{"VK_LAYER_KHRONOS_validation"};

@@ -291,10 +291,23 @@ void Chunk::buildMeshGreedy(int lodLevel,
                             std::vector<Vertex> &outTransparentVertices, std::vector<uint32_t> &outTransparentIndices,
                             ChunkMeshInput &meshInput)
 {
+    constexpr size_t kMaxFaces = WIDTH * HEIGHT * DEPTH;
+    constexpr size_t kMaxVerts = kMaxFaces * 4;
+    constexpr size_t kMaxIdx = kMaxFaces * 6;
+
     outOpaqueVertices.clear();
-    outOpaqueIndices.clear();
     outTransparentVertices.clear();
+    outOpaqueIndices.clear();
     outTransparentIndices.clear();
+
+    if (outOpaqueVertices.capacity() < kMaxVerts)
+        outOpaqueVertices.reserve(kMaxVerts);
+    if (outTransparentVertices.capacity() < kMaxVerts)
+        outTransparentVertices.reserve(kMaxVerts >> 4);
+    if (outOpaqueIndices.capacity() < kMaxIdx)
+        outOpaqueIndices.reserve(kMaxIdx);
+    if (outTransparentIndices.capacity() < kMaxIdx)
+        outTransparentIndices.reserve(kMaxIdx >> 4);
 
     struct MaskCell
     {
@@ -340,7 +353,11 @@ void Chunk::buildMeshGreedy(int lodLevel,
     }
 
     static thread_local std::vector<uint8_t> solidCache;
-    solidCache.resize(static_cast<size_t>(H) * PAD_W * PAD_D);
+    const size_t scSize = static_cast<size_t>(H) * PAD_W * PAD_D;
+    
+    if (solidCache.size() < scSize)
+        solidCache.resize(scSize);
+
     auto sidx = [&](int x, int y, int z) -> size_t
     {
         return static_cast<size_t>(y) * PAD_W * PAD_D + static_cast<size_t>(z) * PAD_W + static_cast<size_t>(x);
@@ -396,7 +413,14 @@ void Chunk::buildMeshGreedy(int lodLevel,
         {
             if (dim == 1 && slice == 0)
                 continue;
-            mask.assign(static_cast<size_t>(U) * V, {});
+
+            const size_t cells = static_cast<size_t>(U) * V;
+
+            if (mask.size() < cells)
+                mask.resize(cells);
+
+            std::fill_n(mask.data(), cells, MaskCell{});
+
             for (int j = 0; j < V; ++j)
             {
                 for (int i = 0; i < U; ++i)

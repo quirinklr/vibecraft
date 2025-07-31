@@ -4,6 +4,8 @@
 #include <vk_mem_alloc.h>
 #include <utility>
 #include <vector>
+#include <mutex>
+#include <tuple>
 
 struct DeviceDeleter
 {
@@ -21,6 +23,7 @@ struct InstanceDeleter
             vkDestroyInstance(i, nullptr);
     }
 };
+
 struct SurfaceDeleter
 {
     VkInstance instance;
@@ -146,6 +149,21 @@ struct ShaderModuleDeleter
         if (m)
             vkDestroyShaderModule(device, m, nullptr);
     }
+};
+
+struct DeferredFreeQueue
+{
+
+    static void push(VkDevice device,
+                     VkCommandPool pool,
+                     VkCommandBuffer cmd,
+                     VkFence fence);
+
+    static void poll();
+
+private:
+    static std::mutex mtx;
+    static std::vector<std::tuple<VkDevice, VkCommandPool, VkCommandBuffer, VkFence>> items;
 };
 
 template <typename T, typename Deleter>
