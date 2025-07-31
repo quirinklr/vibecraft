@@ -93,36 +93,37 @@ void VulkanRenderer::drawFrame(Camera &camera,
     float sun_angle = time_of_day * 2.0f * glm::pi<float>() - glm::half_pi<float>();
     float moon_angle = sun_angle + glm::pi<float>();
 
-    glm::mat4 scaleMatrix = glm::scale(glm::mat4(1.0f), glm::vec3(30.0f));
-
     glm::mat4 invView = glm::inverse(camera.getViewMatrix());
     glm::vec3 camPos = glm::vec3(invView[3]);
 
-    glm::vec3 sunDir = glm::normalize(glm::vec3(sin(sun_angle), cos(sun_angle), 0.0f));
-    glm::vec3 moonDir = -sunDir;
+    glm::vec3 sunDir = glm::normalize(glm::vec3(sin(sun_angle), cos(sun_angle), 0.2f));
+    glm::vec3 moonDir = glm::normalize(glm::vec3(sin(moon_angle), cos(moon_angle), 0.2f));
 
-    auto makeBillboard = [&](const glm::vec3 &dir)
+    auto makeBillboardMatrix = [&](const glm::vec3 &objPos, const glm::vec3 &camPos, const glm::vec3 &up)
     {
-        glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
-        glm::vec3 right = glm::normalize(glm::cross(dir, up));
-        glm::vec3 realUp = glm::cross(right, dir);
-        glm::mat4 m(1.0f);
-        m[0] = glm::vec4(right, 0.0f);
-        m[1] = glm::vec4(realUp, 0.0f);
-        m[2] = glm::vec4(-dir, 0.0f);
-        return m;
+        glm::vec3 look = glm::normalize(camPos - objPos);
+        glm::vec3 right = glm::normalize(glm::cross(up, look));
+        glm::vec3 up2 = glm::cross(look, right);
+        glm::mat4 transform;
+        transform[0] = glm::vec4(right, 0);
+        transform[1] = glm::vec4(up2, 0);
+        transform[2] = glm::vec4(look, 0);
+        transform[3] = glm::vec4(objPos, 1);
+        return transform;
     };
 
-    float dist = 500.0f;
-    float size = 120.0f;
-    glm::mat4 scl = glm::scale(glm::mat4(1.0f), glm::vec3(size));
+    float distance = 400.0f;
+    float size = 50.0f;
+
+    glm::vec3 sunPos = camPos + sunDir * distance;
+    glm::vec3 moonPos = camPos + moonDir * distance;
 
     SkyPushConstant sun_pc;
-    sun_pc.model = glm::translate(glm::mat4(1.0f), camPos + sunDir * dist) * makeBillboard(sunDir) * scl;
+    sun_pc.model = makeBillboardMatrix(sunPos, camPos, glm::vec3(0, 1, 0)) * glm::scale(glm::mat4(1.0f), glm::vec3(size));
     sun_pc.is_sun = 1;
 
     SkyPushConstant moon_pc;
-    moon_pc.model = glm::translate(glm::mat4(1.0f), camPos + moonDir * dist) * makeBillboard(moonDir) * scl;
+    moon_pc.model = makeBillboardMatrix(moonPos, camPos, glm::vec3(0, 1, 0)) * glm::scale(glm::mat4(1.0f), glm::vec3(size));
     moon_pc.is_sun = 0;
 
     bool isSunVisible = sunDir.y > -0.1f;
@@ -148,11 +149,7 @@ void VulkanRenderer::drawFrame(Camera &camera,
     vkResetCommandBuffer(m_CommandManager->getCommandBuffer(m_CurrentFrame), 0);
     m_CommandManager->recordCommandBuffer(
         imageIndex, m_CurrentFrame, renderChunks, m_DescriptorSets,
-        skyColor,
-        sun_pc,
-        moon_pc,
-        isSunVisible,
-        isMoonVisible,
+        skyColor, sun_pc, moon_pc, isSunVisible, isMoonVisible,
         m_SkySphereVertexBuffer.get(), m_SkySphereIndexBuffer.get(), m_SkySphereIndexCount,
         m_CrosshairVertexBuffer.get(),
         m_DebugCubeVertexBuffer.get(), m_DebugCubeIndexBuffer.get(), m_DebugCubeIndexCount,
@@ -372,6 +369,7 @@ void VulkanRenderer::createSkyResources()
     m_MoonTextureView = createTexture("textures/moon.png", m_MoonTexture);
 
     std::vector<Vertex> vertices = {
+
         {{-0.5f, -0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
         {{0.5f, -0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
         {{0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
