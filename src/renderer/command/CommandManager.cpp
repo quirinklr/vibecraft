@@ -19,6 +19,7 @@ void CommandManager::recordCommandBuffer(
     const std::vector<std::pair<const Chunk *, int>> &chunksToRender,
     const std::vector<VkDescriptorSet> &descriptorSets,
     const glm::vec3 &clearColor,
+    const glm::mat4 &skyRotation,
     VkBuffer skySphereVB, VkBuffer skySphereIB, uint32_t skySphereIndexCount,
     VkBuffer crosshairVertexBuffer,
     VkBuffer debugCubeVB, VkBuffer debugCubeIB, uint32_t debugCubeIndexCount,
@@ -56,6 +57,7 @@ void CommandManager::recordCommandBuffer(
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             m_PipelineCache.getSkyPipelineLayout(),
                             0, 1, &descriptorSets[currentFrame], 0, nullptr);
+    vkCmdPushConstants(cb, m_PipelineCache.getSkyPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &skyRotation);
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cb, 0, 1, &skySphereVB, offsets);
     vkCmdBindIndexBuffer(cb, skySphereIB, 0, VK_INDEX_TYPE_UINT32);
@@ -138,7 +140,6 @@ void CommandManager::recordCommandBuffer(
     vkEndCommandBuffer(cb);
 }
 
-#pragma region Unchanged Functions
 void CommandManager::createCommandPool()
 {
     DeviceContext::QueueFamilyIndices queueFamilyIndices = m_DeviceContext.findQueueFamilies(m_DeviceContext.getPhysicalDevice());
@@ -168,4 +169,3 @@ void CommandManager::createCommandBuffers()
         throw std::runtime_error("failed to allocate command buffers!");
     }
 }
-#pragma endregion

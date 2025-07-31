@@ -183,10 +183,16 @@ void PipelineCache::createPipelines()
 
 void PipelineCache::createSkyPipeline()
 {
+
+    VkPushConstantRange pcRange{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4)};
+
     VkDescriptorSetLayout dsl = m_DescriptorLayout.getDescriptorSetLayout();
     VkPipelineLayoutCreateInfo plCI{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     plCI.setLayoutCount = 1;
     plCI.pSetLayouts = &dsl;
+
+    plCI.pushConstantRangeCount = 1;
+    plCI.pPushConstantRanges = &pcRange;
 
     VkPipelineLayout layoutRaw{};
     if (vkCreatePipelineLayout(m_DeviceContext.getDevice(), &plCI, nullptr, &layoutRaw) != VK_SUCCESS)

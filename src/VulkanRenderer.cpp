@@ -2,12 +2,12 @@
 #include <stdexcept>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/constants.hpp>
+#include <glm/common.hpp>
 #include "math/Ivec3Less.h"
 #include "renderer/UniformBufferObject.h"
 #include "Globals.h"
 #include "generation/TerrainGenerator.h"
 #include <stb_image.h>
-#include <glm/common.hpp>
 
 VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings)
     : m_Window(window), m_Settings(settings)
@@ -89,6 +89,10 @@ void VulkanRenderer::drawFrame(Camera &camera,
     updateLightUbo(m_CurrentFrame, gameTicks);
     glm::vec3 skyColor = updateUniformBuffer(m_CurrentFrame, camera, playerPos, settings);
 
+    float time_of_day = (float)gameTicks / 24000.0f;
+    float angle = time_of_day * 2.0f * glm::pi<float>() - glm::half_pi<float>();
+    glm::mat4 skyRotation = glm::rotate(glm::mat4(1.0f), -angle, glm::vec3(1.0f, 0.0f, 0.0f));
+
     std::vector<std::pair<const Chunk *, int>> renderChunks;
     renderChunks.reserve(chunks.size());
     const Frustum &frustum = camera.getFrustum();
@@ -112,6 +116,7 @@ void VulkanRenderer::drawFrame(Camera &camera,
     m_CommandManager->recordCommandBuffer(
         imageIndex, m_CurrentFrame, renderChunks, m_DescriptorSets,
         skyColor,
+        skyRotation,
         m_SkySphereVertexBuffer.get(), m_SkySphereIndexBuffer.get(), m_SkySphereIndexCount,
         m_CrosshairVertexBuffer.get(),
         m_DebugCubeVertexBuffer.get(), m_DebugCubeIndexBuffer.get(), m_DebugCubeIndexCount,
@@ -174,10 +179,10 @@ glm::vec3 VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &cam
     glm::vec3 nightColor(0.01f, 0.02f, 0.04f);
     glm::vec3 sunsetColor(1.0f, 0.4f, 0.1f);
 
-    glm::vec3 skyColor = mix(nightColor, dayColor, sunUpFactor);
+    glm::vec3 skyColor = glm::mix(nightColor, dayColor, sunUpFactor);
 
     float sunsetFactor = (1.0f - sunUpFactor) * glm::smoothstep(0.0f, 0.15f, -lightUbo.lightDirection.y);
-    skyColor = mix(skyColor, sunsetColor, sunsetFactor * 0.7f);
+    skyColor = glm::mix(skyColor, sunsetColor, sunsetFactor * 0.7f);
 
     UniformBufferObject ubo{};
     ubo.view = camera.getViewMatrix();
