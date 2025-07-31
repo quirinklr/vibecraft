@@ -48,6 +48,7 @@ void CommandManager::recordCommandBuffer(
     uint32_t imageIndex, uint32_t currentFrame,
     const std::vector<std::pair<const Chunk *, int>> &chunksToRender,
     const std::vector<VkDescriptorSet> &descriptorSets,
+    VkBuffer skySphereVB, VkBuffer skySphereIB, uint32_t skySphereIndexCount,
     VkBuffer crosshairVertexBuffer,
     VkBuffer debugCubeVB, VkBuffer debugCubeIB, uint32_t debugCubeIndexCount,
     const Settings &settings,
@@ -60,7 +61,7 @@ void CommandManager::recordCommandBuffer(
     vkBeginCommandBuffer(cb, &beginInfo);
 
     const std::array<VkClearValue, 2> clearValues = {
-        VkClearValue{.color = {{0.5f, 0.7f, 1.0f, 1.0f}}},
+        VkClearValue{.color = {{0.0f, 0.0f, 0.0f, 1.0f}}},
         VkClearValue{.depthStencil = {1.0f, 0}}};
 
     VkRenderPassBeginInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
@@ -80,6 +81,15 @@ void CommandManager::recordCommandBuffer(
     vkCmdSetViewport(cb, 0, 1, &vp);
     vkCmdSetScissor(cb, 0, 1, &sc);
 
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getSkyPipeline());
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            m_PipelineCache.getSkyPipelineLayout(),
+                            0, 1, &descriptorSets[currentFrame], 0, nullptr);
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cb, 0, 1, &skySphereVB, offsets);
+    vkCmdBindIndexBuffer(cb, skySphereIB, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(cb, skySphereIndexCount, 1, 0, 0, 0);
+
     VkPipeline mainPipe = settings.wireframe
                               ? m_PipelineCache.getWireframePipeline()
                               : m_PipelineCache.getGraphicsPipeline();
@@ -96,8 +106,8 @@ void CommandManager::recordCommandBuffer(
             continue;
 
         VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, offsets);
+        VkDeviceSize chunk_offsets[] = {0};
+        vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, chunk_offsets);
         vkCmdBindIndexBuffer(cb, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
         vkCmdPushConstants(cb, m_PipelineCache.getGraphicsPipelineLayout(),
                            VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4),
@@ -108,7 +118,6 @@ void CommandManager::recordCommandBuffer(
     if (!settings.wireframe)
     {
         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getWaterPipeline());
-
         for (const auto &[chunk, lod] : chunksToRender)
         {
             const ChunkMesh *mesh = chunk->getTransparentMesh(lod);
@@ -116,8 +125,8 @@ void CommandManager::recordCommandBuffer(
                 continue;
 
             VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
-            VkDeviceSize offsets[] = {0};
-            vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, offsets);
+            VkDeviceSize chunk_offsets[] = {0};
+            vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, chunk_offsets);
             vkCmdBindIndexBuffer(cb, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
             vkCmdPushConstants(cb, m_PipelineCache.getGraphicsPipelineLayout(),
                                VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4),
@@ -133,8 +142,8 @@ void CommandManager::recordCommandBuffer(
                                 m_PipelineCache.getDebugPipelineLayout(),
                                 0, 1, &descriptorSets[currentFrame], 0, nullptr);
         VkBuffer vertexBuffers[] = {debugCubeVB};
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, offsets);
+        VkDeviceSize debug_offsets[] = {0};
+        vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, debug_offsets);
         vkCmdBindIndexBuffer(cb, debugCubeIB, 0, VK_INDEX_TYPE_UINT32);
 
         for (const auto &aabb : debugAABBs)

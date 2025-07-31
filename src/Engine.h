@@ -14,6 +14,7 @@
 #include <utility>
 #include "Entity.h"
 #include "Player.h"
+#include "DebugController.h"
 
 struct ChunkLodRequestLess
 {
@@ -44,6 +45,8 @@ public:
     void set_block(int x, int y, int z, BlockId id);
 
     Window &get_window() { return m_Window; }
+    Settings &getSettings() { return m_Settings; }
+    void advanceTime(int32_t ticks);
 
 private:
     void processInput(float dt, bool &mouse_enabled, double &lx, double &ly);
@@ -59,8 +62,13 @@ private:
     void createChunkContainer(const glm::ivec3 &pos);
 
     Settings m_Settings{};
-    Window m_Window{WIDTH, HEIGHT, "Vibecraft", m_Settings};
-    VulkanRenderer m_Renderer{m_Window, m_Settings};
+    Window m_Window;
+    VulkanRenderer m_Renderer;
+    DebugController m_debugController;
+
+    uint32_t m_gameTicks = 6000;
+    float m_ticksPerSecond = 20.0f;
+    float m_timeAccumulator = 0.0f;
 
     std::vector<std::unique_ptr<Entity>> m_entities;
     Player *m_player_ptr = nullptr;

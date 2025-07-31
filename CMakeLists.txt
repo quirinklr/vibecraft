@@ -41,11 +41,19 @@ target_link_libraries(Vibecraft PRIVATE
     ${GLFW_LIBRARY_FILE}
 )
 
+# Kopiert den Haupt-Shader-Ordner
 add_custom_command(TARGET Vibecraft POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     "${CMAKE_SOURCE_DIR}/shaders"
     "$<TARGET_FILE_DIR:Vibecraft>/shaders")
 
+# NEU: Kopiert den Sky-Shader-Unterordner
+add_custom_command(TARGET Vibecraft POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_SOURCE_DIR}/shaders/sky"
+    "$<TARGET_FILE_DIR:Vibecraft>/shaders/sky")
+
+# Kopiert den Texturen-Ordner
 add_custom_command(TARGET Vibecraft POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     "${CMAKE_SOURCE_DIR}/textures"
