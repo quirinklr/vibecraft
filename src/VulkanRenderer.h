@@ -37,7 +37,7 @@ public:
 
     void drawFrame(Camera &camera,
                    const glm::vec3 &playerPos,
-                   const std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks,
+                   std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks,
                    const glm::ivec3 &playerChunkPos,
                    uint32_t gameTicks,
                    const std::vector<AABB> &debugAABBs,
@@ -58,6 +58,8 @@ public:
 private:
     glm::vec3 updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos);
     void updateLightUbo(uint32_t currentImage, uint32_t gameTicks);
+    void buildBlas(const std::vector<std::pair<Chunk *, int>> &chunksToRender);
+    void buildTlas(const std::vector<std::pair<Chunk *, int>> &chunksToRender);
 
     void createUniformBuffers();
     void createLightUbo();
@@ -65,6 +67,9 @@ private:
     void createDescriptorSets();
     void createCrosshairVertexBuffer();
     void createDebugCubeMesh();
+    void loadRayTracingFunctions();
+    VkDeviceAddress getBufferDeviceAddress(VkBuffer buffer);
+    VmaBuffer createScratchBuffer(VkDeviceSize size);
 
     void createSkyResources();
     VulkanHandle<VkImageView, ImageViewDeleter> createTexture(const char *path, VmaImage &outImage);
@@ -87,6 +92,21 @@ private:
     std::unique_ptr<RingStagingArena> m_StagingArena;
     VkCommandPool m_TransferCommandPool{VK_NULL_HANDLE};
     std::unique_ptr<DebugOverlay> m_debugOverlay;
+
+    bool m_rtFunctionsLoaded = false;
+
+    PFN_vkGetBufferDeviceAddressKHR vkGetBufferDeviceAddressKHR;
+    PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR;
+    PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR;
+    PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR;
+    PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR;
+    PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR;
+    PFN_vkCmdWriteAccelerationStructuresPropertiesKHR vkCmdWriteAccelerationStructuresPropertiesKHR;
+    PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR;
+    PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR;
+
+    AccelerationStructure m_tlas;
+    VmaBuffer m_tlasInstanceBuffer;
 
     std::vector<VmaBuffer> m_UniformBuffers;
     std::vector<void *> m_UniformBuffersMapped;

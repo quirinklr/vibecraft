@@ -8,6 +8,7 @@
 #include "Globals.h"
 #include "generation/TerrainGenerator.h"
 #include <stb_image.h>
+#include <numeric>
 
 VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings, Player *player, TerrainGenerator *terrainGen)
     : m_Window(window), m_Settings(settings), m_player(player), m_terrainGen(terrainGen)
@@ -44,18 +45,25 @@ VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings, Player 
     createDescriptorSets();
     createCrosshairVertexBuffer();
     createDebugCubeMesh();
+
+    if (m_DeviceContext->isRayTracingSupported())
+    {
+        loadRayTracingFunctions();
+    }
 }
 
 VulkanRenderer::~VulkanRenderer()
 {
     vkDeviceWaitIdle(m_DeviceContext->getDevice());
+    m_tlas.destroy(m_DeviceContext->getDevice());
+
     if (m_TransferCommandPool)
         vkDestroyCommandPool(m_DeviceContext->getDevice(), m_TransferCommandPool, nullptr);
 }
 
 void VulkanRenderer::drawFrame(Camera &camera,
                                const glm::vec3 &playerPos,
-                               const std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks,
+                               std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks,
                                const glm::ivec3 &playerChunkPos,
                                uint32_t gameTicks,
                                const std::vector<AABB> &debugAABBs,
@@ -94,7 +102,7 @@ void VulkanRenderer::drawFrame(Camera &camera,
 
     if (showDebugOverlay && this->m_debugOverlay)
     {
-        float fps = 1.0f / 0.004f; // TODO: fix this
+        float fps = 1.0f / 0.004f;
         this->m_debugOverlay->update(*this->m_player, this->m_Settings, fps, this->m_terrainGen->getSeed());
     }
 
@@ -136,10 +144,12 @@ void VulkanRenderer::drawFrame(Camera &camera,
     bool isSunVisible = sunDir.y > -0.1f;
     bool isMoonVisible = moonDir.y > -0.1f;
 
-    std::vector<std::pair<const Chunk *, int>> renderChunks;
+    std::vector<std::pair<Chunk *, int>> renderChunks;
     renderChunks.reserve(chunks.size());
+
     const Frustum &frustum = camera.getFrustum();
-    for (auto const &[pos, chunkPtr] : chunks)
+
+    for (auto &[pos, chunkPtr] : chunks)
     {
         chunkPtr->markReady(*this);
         if (!frustum.intersects(chunkPtr->getAABB()))
@@ -149,6 +159,12 @@ void VulkanRenderer::drawFrame(Camera &camera,
         int best = chunkPtr->getBestAvailableLOD(reqLod);
         if (best != -1)
             renderChunks.push_back({chunkPtr.get(), best});
+    }
+
+    if (m_DeviceContext->isRayTracingSupported())
+    {
+        buildBlas(renderChunks);
+        buildTlas(renderChunks);
     }
 
     vkResetFences(this->m_DeviceContext->getDevice(), 1, this->m_SyncPrimitives->getInFlightFencePtr(this->m_CurrentFrame));
@@ -202,6 +218,205 @@ void VulkanRenderer::drawFrame(Camera &camera,
         throw std::runtime_error("failed to present swap chain image");
 
     this->m_CurrentFrame = (this->m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+}
+
+void VulkanRenderer::loadRayTracingFunctions()
+{
+    vkGetBufferDeviceAddressKHR = (PFN_vkGetBufferDeviceAddressKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkGetBufferDeviceAddressKHR");
+    vkCreateAccelerationStructureKHR = (PFN_vkCreateAccelerationStructureKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkCreateAccelerationStructureKHR");
+    vkDestroyAccelerationStructureKHR = (PFN_vkDestroyAccelerationStructureKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkDestroyAccelerationStructureKHR");
+    vkGetAccelerationStructureBuildSizesKHR = (PFN_vkGetAccelerationStructureBuildSizesKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkGetAccelerationStructureBuildSizesKHR");
+    vkGetAccelerationStructureDeviceAddressKHR = (PFN_vkGetAccelerationStructureDeviceAddressKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkGetAccelerationStructureDeviceAddressKHR");
+    vkCmdBuildAccelerationStructuresKHR = (PFN_vkCmdBuildAccelerationStructuresKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkCmdBuildAccelerationStructuresKHR");
+    vkCreateRayTracingPipelinesKHR = (PFN_vkCreateRayTracingPipelinesKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkCreateRayTracingPipelinesKHR");
+    vkGetRayTracingShaderGroupHandlesKHR = (PFN_vkGetRayTracingShaderGroupHandlesKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkGetRayTracingShaderGroupHandlesKHR");
+    m_rtFunctionsLoaded = true;
+}
+
+void VulkanRenderer::buildBlas(const std::vector<std::pair<Chunk *, int>> &chunksToBuild)
+{
+    if (!m_rtFunctionsLoaded)
+        return;
+
+    std::vector<std::pair<Chunk *, int>> dirtyChunks;
+    for (const auto &pair : chunksToBuild)
+    {
+        if (pair.first->m_blas_dirty.load(std::memory_order_acquire))
+        {
+            dirtyChunks.push_back(pair);
+        }
+    }
+
+    if (dirtyChunks.empty())
+        return;
+
+    VkCommandBuffer cmd = m_CommandManager->getCommandBuffer(m_CurrentFrame);
+
+    std::vector<VkAccelerationStructureBuildGeometryInfoKHR> buildInfos;
+    std::vector<VkAccelerationStructureBuildRangeInfoKHR> rangeInfos;
+    std::vector<VmaBuffer> scratchBuffers;
+
+    for (const auto &pair : dirtyChunks)
+    {
+        Chunk *chunk = pair.first;
+        int lod = pair.second;
+
+        ChunkMesh *mesh = chunk->getMesh(lod);
+        if (!mesh || mesh->indexCount == 0)
+            continue;
+
+        VkDeviceAddress vertexAddress = getBufferDeviceAddress(mesh->vertexBuffer);
+        VkDeviceAddress indexAddress = getBufferDeviceAddress(mesh->indexBuffer);
+
+        VkAccelerationStructureGeometryTrianglesDataKHR triangles{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR};
+        triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+        triangles.vertexData.deviceAddress = vertexAddress;
+        triangles.vertexStride = sizeof(Vertex);
+        triangles.maxVertex = mesh->indexCount;
+        triangles.indexType = VK_INDEX_TYPE_UINT32;
+        triangles.indexData.deviceAddress = indexAddress;
+        triangles.transformData = {0};
+
+        VkAccelerationStructureGeometryKHR asGeom{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
+        asGeom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+        asGeom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+        asGeom.geometry.triangles = triangles;
+
+        uint32_t numTriangles = mesh->indexCount / 3;
+
+        VkAccelerationStructureBuildGeometryInfoKHR buildInfo{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
+        buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+        buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+        buildInfo.pGeometries = &asGeom;
+        buildInfo.geometryCount = 1;
+
+        VkAccelerationStructureBuildSizesInfoKHR sizeInfo{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+        vkGetAccelerationStructureBuildSizesKHR(m_DeviceContext->getDevice(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &numTriangles, &sizeInfo);
+
+        mesh->blas.destroy(m_DeviceContext->getDevice());
+        createAccelerationStructure(*m_DeviceContext, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, sizeInfo, mesh->blas);
+        buildInfo.dstAccelerationStructure = mesh->blas.handle;
+
+        VmaBuffer scratchBuffer = createScratchBuffer(sizeInfo.buildScratchSize);
+        buildInfo.scratchData.deviceAddress = getBufferDeviceAddress(scratchBuffer.get());
+
+        VkAccelerationStructureBuildRangeInfoKHR rangeInfo;
+        rangeInfo.primitiveCount = numTriangles;
+        rangeInfo.primitiveOffset = 0;
+        rangeInfo.firstVertex = 0;
+        rangeInfo.transformOffset = 0;
+
+        buildInfos.push_back(buildInfo);
+        rangeInfos.push_back(rangeInfo);
+        scratchBuffers.push_back(std::move(scratchBuffer));
+
+        chunk->m_blas_dirty.store(false, std::memory_order_release);
+    }
+
+    if (!buildInfos.empty())
+    {
+        std::vector<const VkAccelerationStructureBuildRangeInfoKHR *> pRangeInfos;
+        pRangeInfos.reserve(rangeInfos.size());
+        for (const auto &range : rangeInfos)
+        {
+            pRangeInfos.push_back(&range);
+        }
+        vkCmdBuildAccelerationStructuresKHR(cmd, static_cast<uint32_t>(buildInfos.size()), buildInfos.data(), pRangeInfos.data());
+
+        VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+        barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+        barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+    }
+}
+
+void VulkanRenderer::buildTlas(const std::vector<std::pair<Chunk *, int>> &chunksToRender)
+{
+    if (!m_rtFunctionsLoaded || chunksToRender.empty())
+        return;
+
+    std::vector<VkAccelerationStructureInstanceKHR> instances;
+    uint32_t customInstanceId = 0;
+    for (const auto &pair : chunksToRender)
+    {
+        const Chunk *chunk = pair.first;
+        const ChunkMesh *mesh = chunk->getMesh(pair.second);
+
+        if (!mesh || mesh->blas.handle == VK_NULL_HANDLE)
+            continue;
+
+        VkAccelerationStructureInstanceKHR instance{};
+
+        glm::mat4 transposedModel = glm::transpose(chunk->getModelMatrix());
+        memcpy(&instance.transform, &transposedModel, sizeof(VkTransformMatrixKHR));
+        instance.instanceCustomIndex = customInstanceId++;
+        instance.mask = 0xFF;
+        instance.instanceShaderBindingTableRecordOffset = 0;
+        instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+        instance.accelerationStructureReference = mesh->blas.deviceAddress;
+        instances.push_back(instance);
+    }
+
+    if (instances.empty())
+        return;
+
+    VkCommandBuffer cmd = m_CommandManager->getCommandBuffer(m_CurrentFrame);
+
+    VkDeviceSize instanceBufferSize = sizeof(VkAccelerationStructureInstanceKHR) * instances.size();
+    m_tlasInstanceBuffer = UploadHelpers::createDeviceLocalBufferFromData(*m_DeviceContext, m_CommandManager->getCommandPool(), instances.data(), instanceBufferSize, VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
+
+    VkBufferDeviceAddressInfo instAddrInfo{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, nullptr, m_tlasInstanceBuffer.get()};
+    VkDeviceAddress instanceAddress = vkGetBufferDeviceAddressKHR(m_DeviceContext->getDevice(), &instAddrInfo);
+
+    VkAccelerationStructureGeometryInstancesDataKHR instancesGeom{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR};
+    instancesGeom.arrayOfPointers = VK_FALSE;
+    instancesGeom.data.deviceAddress = instanceAddress;
+
+    VkAccelerationStructureGeometryKHR asGeom{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
+    asGeom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    asGeom.geometry.instances = instancesGeom;
+
+    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
+    buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    buildInfo.geometryCount = 1;
+    buildInfo.pGeometries = &asGeom;
+
+    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+    uint32_t numInstances = static_cast<uint32_t>(instances.size());
+    vkGetAccelerationStructureBuildSizesKHR(m_DeviceContext->getDevice(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &numInstances, &sizeInfo);
+
+    m_tlas.destroy(m_DeviceContext->getDevice());
+    createAccelerationStructure(*m_DeviceContext, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, sizeInfo, m_tlas);
+    buildInfo.dstAccelerationStructure = m_tlas.handle;
+
+    VmaBuffer scratchBuffer = createScratchBuffer(sizeInfo.buildScratchSize);
+    buildInfo.scratchData.deviceAddress = getBufferDeviceAddress(scratchBuffer.get());
+
+    VkAccelerationStructureBuildRangeInfoKHR rangeInfo;
+    rangeInfo.primitiveCount = numInstances;
+    const VkAccelerationStructureBuildRangeInfoKHR *pRangeInfo = &rangeInfo;
+
+    vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRangeInfo);
+}
+
+VkDeviceAddress VulkanRenderer::getBufferDeviceAddress(VkBuffer buffer)
+{
+    VkBufferDeviceAddressInfoKHR info{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+    info.buffer = buffer;
+    return vkGetBufferDeviceAddressKHR(m_DeviceContext->getDevice(), &info);
+}
+
+VmaBuffer VulkanRenderer::createScratchBuffer(VkDeviceSize size)
+{
+    VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    bufferInfo.size = size;
+    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    return VmaBuffer(m_DeviceContext->getAllocator(), bufferInfo, allocInfo);
 }
 
 glm::vec3 VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos)

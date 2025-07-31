@@ -137,6 +137,11 @@ PipelineCache::PipelineCache(const DeviceContext &deviceContext,
       m_DescriptorLayout(descriptorLayout)
 {
     createPipelines();
+
+    if (m_DeviceContext.isRayTracingSupported())
+    {
+        createRayTracingPipeline();
+    }
 }
 
 PipelineCache::~PipelineCache() = default;
@@ -179,6 +184,68 @@ void PipelineCache::createPipelines()
     createSkyPipeline();
     createDebugPipeline();
     createCrosshairPipeline();
+}
+
+void PipelineCache::createRayTracingPipeline()
+{
+    VkDevice device = m_DeviceContext.getDevice();
+
+    std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+
+    VkDescriptorSetLayoutCreateInfo setLayoutInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+
+    pipelineLayoutInfo.setLayoutCount = 0;
+
+    VkPipelineLayout layout;
+    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &layout) != VK_SUCCESS)
+    {
+        throw std::runtime_error("Failed to create ray tracing pipeline layout!");
+    }
+    m_RayTracingPipelineLayout = VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter>(layout, {device});
+
+    auto rgen = makeShader(device, "shaders/raytracing/shadow.rgen.spv");
+    auto rmiss = makeShader(device, "shaders/raytracing/shadow.rmiss.spv");
+    auto rchit = makeShader(device, "shaders/raytracing/shadow.rchit.spv");
+
+    std::vector<VkPipelineShaderStageCreateInfo> stages;
+    stages.push_back({VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_RAYGEN_BIT_KHR, rgen.get(), "main"});
+    stages.push_back({VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_MISS_BIT_KHR, rmiss.get(), "main"});
+    stages.push_back({VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, rchit.get(), "main"});
+
+    std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
+
+    groups.push_back({VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, 0, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR});
+
+    groups.push_back({VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, 1, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR});
+
+    groups.push_back({VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR, VK_SHADER_UNUSED_KHR, 2, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR});
+
+    VkRayTracingPipelineCreateInfoKHR pipelineInfo{VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR};
+    pipelineInfo.stageCount = static_cast<uint32_t>(stages.size());
+    pipelineInfo.pStages = stages.data();
+    pipelineInfo.groupCount = static_cast<uint32_t>(groups.size());
+    pipelineInfo.pGroups = groups.data();
+    pipelineInfo.maxPipelineRayRecursionDepth = 1;
+    pipelineInfo.layout = m_RayTracingPipelineLayout.get();
+
+    auto vkCreateRayTracingPipelinesKHR = (PFN_vkCreateRayTracingPipelinesKHR)vkGetDeviceProcAddr(device, "vkCreateRayTracingPipelinesKHR");
+    VkPipeline rtPipeline;
+    if (vkCreateRayTracingPipelinesKHR(device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &rtPipeline) != VK_SUCCESS)
+    {
+        throw std::runtime_error("Failed to create ray tracing pipeline!");
+    }
+    m_RayTracingPipeline = VulkanHandle<VkPipeline, PipelineDeleter>(rtPipeline, {device});
 }
 
 void PipelineCache::createSkyPipeline()

@@ -97,6 +97,7 @@ public:
     int getBestAvailableLOD(int requiredLod) const;
 
     const ChunkMesh *getMesh(int lodLevel) const;
+    ChunkMesh *getMesh(int lodLevel);
     const ChunkMesh *getTransparentMesh(int lodLevel) const;
     const ChunkMesh *getDebugMesh() const { return &m_DebugMesh; }
 

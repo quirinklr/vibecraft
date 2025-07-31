@@ -654,7 +654,7 @@ void Chunk::cleanup(VulkanRenderer &renderer)
             renderer.enqueueDestroy(mesh.vertexBuffer, mesh.vertexBufferAllocation);
         if (mesh.indexBuffer != VK_NULL_HANDLE)
             renderer.enqueueDestroy(mesh.indexBuffer, mesh.indexBufferAllocation);
-            
+
         mesh.blas.destroy(renderer.getDevice());
     }
 
@@ -677,6 +677,13 @@ bool Chunk::hasLOD(int lodLevel) const
 }
 
 const ChunkMesh *Chunk::getMesh(int lodLevel) const
+{
+    std::scoped_lock lock(m_MeshesMutex);
+    auto it = m_Meshes.find(lodLevel);
+    return it == m_Meshes.end() ? nullptr : &it->second;
+}
+
+ChunkMesh *Chunk::getMesh(int lodLevel)
 {
     std::scoped_lock lock(m_MeshesMutex);
     auto it = m_Meshes.find(lodLevel);

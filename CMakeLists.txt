@@ -48,14 +48,20 @@ add_custom_command(TARGET Vibecraft POST_BUILD
     "${CMAKE_SOURCE_DIR}/shaders"
     "$<TARGET_FILE_DIR:Vibecraft>/shaders")
 
+# Kopiert den Texturen-Ordner
+add_custom_command(TARGET Vibecraft POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_SOURCE_DIR}/textures"
+    "$<TARGET_FILE_DIR:Vibecraft>/textures")
+
 # NEU: Kopiert den Sky-Shader-Unterordner
 add_custom_command(TARGET Vibecraft POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     "${CMAKE_SOURCE_DIR}/shaders/sky"
     "$<TARGET_FILE_DIR:Vibecraft>/shaders/sky")
 
-# Kopiert den Texturen-Ordner
+# NEU: Kopiert den Raytracing-Shader-Unterordner
 add_custom_command(TARGET Vibecraft POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-    "${CMAKE_SOURCE_DIR}/textures"
-    "$<TARGET_FILE_DIR:Vibecraft>/textures")
+    "${CMAKE_SOURCE_DIR}/shaders/raytracing"
+    "$<TARGET_FILE_DIR:Vibecraft>/shaders/raytracing")
