@@ -173,16 +173,16 @@ glm::vec3 VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &cam
     LightUbo lightUbo;
     memcpy(&lightUbo, m_LightUbosMapped[currentImage], sizeof(LightUbo));
 
-    float sunUpFactor = glm::smoothstep(-0.1f, 0.1f, lightUbo.lightDirection.y);
+    float sunUpFactor = glm::smoothstep(-0.25f, 0.25f, lightUbo.lightDirection.y);
 
     glm::vec3 dayColor(0.5f, 0.7f, 1.0f);
     glm::vec3 nightColor(0.01f, 0.02f, 0.04f);
-    glm::vec3 sunsetColor(1.0f, 0.4f, 0.1f);
+    glm::vec3 sunsetColor(1.0f, 0.45f, 0.15f);
 
     glm::vec3 skyColor = glm::mix(nightColor, dayColor, sunUpFactor);
 
-    float sunsetFactor = (1.0f - sunUpFactor) * glm::smoothstep(0.0f, 0.15f, -lightUbo.lightDirection.y);
-    skyColor = glm::mix(skyColor, sunsetColor, sunsetFactor * 0.7f);
+    float sunsetFactor = pow(1.0f - abs(lightUbo.lightDirection.y), 16.0f);
+    skyColor = glm::mix(skyColor, sunsetColor, sunsetFactor);
 
     UniformBufferObject ubo{};
     ubo.view = camera.getViewMatrix();

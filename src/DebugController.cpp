@@ -23,13 +23,17 @@ void DebugController::handleInput(GLFWwindow *window)
     }
     m_key_L_last_state = l_now;
 
-    if (glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS)
+    bool p_now = glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS;
+    if (p_now && !m_key_P_last_state)
     {
-        m_engine->advanceTime(100);
+        m_engine->advanceTime(500);
     }
+    m_key_P_last_state = p_now;
 
-    if (glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS)
+    bool o_now = glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS;
+    if (o_now && !m_key_O_last_state)
     {
-        m_engine->advanceTime(-100);
+        m_engine->advanceTime(-500);
     }
+    m_key_O_last_state = o_now;
 }

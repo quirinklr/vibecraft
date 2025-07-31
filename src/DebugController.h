@@ -15,6 +15,6 @@ private:
     Engine *m_engine;
 
     bool m_key_L_last_state = false;
-    bool m_key_P_pressed = false;
-    bool m_key_O_pressed = false;
+    bool m_key_P_last_state = false;
+    bool m_key_O_last_state = false;
 };
