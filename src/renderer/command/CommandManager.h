@@ -23,6 +23,7 @@ public:
         uint32_t imageIndex, uint32_t currentFrame,
         const std::vector<std::pair<const Chunk *, int>> &chunksToRender,
         const std::vector<VkDescriptorSet> &descriptorSets,
+        const glm::vec3 &clearColor,
         VkBuffer skySphereVB, VkBuffer skySphereIB, uint32_t skySphereIndexCount,
         VkBuffer crosshairVertexBuffer,
         VkBuffer debugCubeVB, VkBuffer debugCubeIB, uint32_t debugCubeIndexCount,

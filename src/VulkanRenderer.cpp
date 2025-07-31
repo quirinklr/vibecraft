@@ -7,6 +7,7 @@
 #include "Globals.h"
 #include "generation/TerrainGenerator.h"
 #include <stb_image.h>
+#include <glm/common.hpp>
 
 VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings)
     : m_Window(window), m_Settings(settings)
@@ -51,27 +52,6 @@ VulkanRenderer::~VulkanRenderer()
         vkDestroyCommandPool(m_DeviceContext->getDevice(), m_TransferCommandPool, nullptr);
 }
 
-void VulkanRenderer::createDebugCubeMesh()
-{
-    std::vector<glm::vec3> vertices = {
-        {0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}, {0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}};
-    std::vector<uint32_t> indices = {
-        0, 1, 1, 2, 2, 3, 3, 0,
-        4, 5, 5, 6, 6, 7, 7, 4,
-        0, 4, 1, 5, 2, 6, 3, 7};
-    m_DebugCubeIndexCount = static_cast<uint32_t>(indices.size());
-
-    VkDeviceSize vertexSize = sizeof(vertices[0]) * vertices.size();
-    VkDeviceSize indexSize = sizeof(indices[0]) * indices.size();
-
-    m_DebugCubeVertexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
-        *m_DeviceContext, m_CommandManager->getCommandPool(),
-        vertices.data(), vertexSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-    m_DebugCubeIndexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
-        *m_DeviceContext, m_CommandManager->getCommandPool(),
-        indices.data(), indexSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
-}
-
 void VulkanRenderer::drawFrame(Camera &camera,
                                const glm::vec3 &playerPos,
                                const std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks,
@@ -106,8 +86,8 @@ void VulkanRenderer::drawFrame(Camera &camera,
         vkWaitForFences(m_DeviceContext->getDevice(), 1, &m_SyncPrimitives->getImageInFlight(imageIndex), VK_TRUE, UINT64_MAX);
     m_SyncPrimitives->getImageInFlight(imageIndex) = m_SyncPrimitives->getInFlightFence(m_CurrentFrame);
 
-    updateUniformBuffer(m_CurrentFrame, camera, playerPos, settings);
     updateLightUbo(m_CurrentFrame, gameTicks);
+    glm::vec3 skyColor = updateUniformBuffer(m_CurrentFrame, camera, playerPos, settings);
 
     std::vector<std::pair<const Chunk *, int>> renderChunks;
     renderChunks.reserve(chunks.size());
@@ -131,6 +111,7 @@ void VulkanRenderer::drawFrame(Camera &camera,
 
     m_CommandManager->recordCommandBuffer(
         imageIndex, m_CurrentFrame, renderChunks, m_DescriptorSets,
+        skyColor,
         m_SkySphereVertexBuffer.get(), m_SkySphereIndexBuffer.get(), m_SkySphereIndexCount,
         m_CrosshairVertexBuffer.get(),
         m_DebugCubeVertexBuffer.get(), m_DebugCubeIndexBuffer.get(), m_DebugCubeIndexCount,
@@ -179,6 +160,40 @@ void VulkanRenderer::drawFrame(Camera &camera,
     m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
+glm::vec3 VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos, const Settings &settings)
+{
+    const float eyeHeight = 1.8f * 0.9f;
+    glm::vec3 cameraWorldPos = playerPos + glm::vec3(0.0f, eyeHeight, 0.0f);
+
+    LightUbo lightUbo;
+    memcpy(&lightUbo, m_LightUbosMapped[currentImage], sizeof(LightUbo));
+
+    float sunUpFactor = glm::smoothstep(-0.1f, 0.1f, lightUbo.lightDirection.y);
+
+    glm::vec3 dayColor(0.5f, 0.7f, 1.0f);
+    glm::vec3 nightColor(0.01f, 0.02f, 0.04f);
+    glm::vec3 sunsetColor(1.0f, 0.4f, 0.1f);
+
+    glm::vec3 skyColor = mix(nightColor, dayColor, sunUpFactor);
+
+    float sunsetFactor = (1.0f - sunUpFactor) * glm::smoothstep(0.0f, 0.15f, -lightUbo.lightDirection.y);
+    skyColor = mix(skyColor, sunsetColor, sunsetFactor * 0.7f);
+
+    UniformBufferObject ubo{};
+    ubo.view = camera.getViewMatrix();
+    ubo.proj = camera.getProjectionMatrix();
+    ubo.cameraPos = cameraWorldPos;
+    ubo.skyColor = skyColor;
+    ubo.time = static_cast<float>(glfwGetTime());
+    ubo.isUnderwater = (cameraWorldPos.y < TerrainGenerator::SEA_LEVEL) ? 1 : 0;
+    ubo.flags = settings.rayTracingFlags;
+
+    memcpy(m_UniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+
+    return skyColor;
+}
+
+#pragma region Unchanged Functions
 void VulkanRenderer::enqueueDestroy(VmaBuffer &&buffer)
 {
     if (buffer.get() != VK_NULL_HANDLE)
@@ -212,23 +227,6 @@ void VulkanRenderer::updateLightUbo(uint32_t currentImage, uint32_t gameTicks)
     ubo.lightDirection = glm::normalize(glm::vec3(sin(angle), cos(angle), 0.2f));
 
     memcpy(m_LightUbosMapped[currentImage], &ubo, sizeof(ubo));
-}
-
-void VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos, const Settings &settings)
-{
-    const float eyeHeight = 1.8f * 0.9f;
-    glm::vec3 cameraWorldPos = playerPos + glm::vec3(0.0f, eyeHeight, 0.0f);
-
-    UniformBufferObject ubo{};
-    ubo.view = camera.getViewMatrix();
-    ubo.proj = camera.getProjectionMatrix();
-    ubo.cameraPos = cameraWorldPos;
-    ubo.skyColor = glm::vec3(0.5f, 0.7f, 1.0f);
-    ubo.time = static_cast<float>(glfwGetTime());
-    ubo.isUnderwater = (cameraWorldPos.y < TerrainGenerator::SEA_LEVEL) ? 1 : 0;
-    ubo.flags = settings.rayTracingFlags;
-
-    memcpy(m_UniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }
 
 void VulkanRenderer::createUniformBuffers()
@@ -456,6 +454,27 @@ void VulkanRenderer::createCrosshairVertexBuffer()
     UploadHelpers::copyBuffer(*m_DeviceContext, m_CommandManager->getCommandPool(), stagingBuffer.get(), m_CrosshairVertexBuffer.get(), size);
 }
 
+void VulkanRenderer::createDebugCubeMesh()
+{
+    std::vector<glm::vec3> vertices = {
+        {0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}, {0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}};
+    std::vector<uint32_t> indices = {
+        0, 1, 1, 2, 2, 3, 3, 0,
+        4, 5, 5, 6, 6, 7, 7, 4,
+        0, 4, 1, 5, 2, 6, 3, 7};
+    m_DebugCubeIndexCount = static_cast<uint32_t>(indices.size());
+
+    VkDeviceSize vertexSize = sizeof(vertices[0]) * vertices.size();
+    VkDeviceSize indexSize = sizeof(indices[0]) * indices.size();
+
+    m_DebugCubeVertexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
+        *m_DeviceContext, m_CommandManager->getCommandPool(),
+        vertices.data(), vertexSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    m_DebugCubeIndexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
+        *m_DeviceContext, m_CommandManager->getCommandPool(),
+        indices.data(), indexSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+}
+
 void VulkanRenderer::generateSphereMesh(float radius, int sectors, int stacks,
                                         std::vector<Vertex> &outVertices,
                                         std::vector<uint32_t> &outIndices)
@@ -499,3 +518,4 @@ void VulkanRenderer::generateSphereMesh(float radius, int sectors, int stacks,
         }
     }
 }
+#pragma endregion

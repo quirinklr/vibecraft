@@ -52,7 +52,7 @@ public:
     RingStagingArena *getArena() const { return m_StagingArena.get(); }
 
 private:
-    void updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos, const Settings &settings);
+    glm::vec3 updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos, const Settings &settings);
     void updateLightUbo(uint32_t currentImage, uint32_t gameTicks);
 
     void createUniformBuffers();

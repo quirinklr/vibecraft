@@ -14,40 +14,11 @@ CommandManager::CommandManager(const DeviceContext &deviceContext, const SwapCha
 
 CommandManager::~CommandManager() {}
 
-void CommandManager::createCommandPool()
-{
-    DeviceContext::QueueFamilyIndices queueFamilyIndices = m_DeviceContext.findQueueFamilies(m_DeviceContext.getPhysicalDevice());
-    VkCommandPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
-
-    VkCommandPool pool;
-    if (vkCreateCommandPool(m_DeviceContext.getDevice(), &poolInfo, nullptr, &pool) != VK_SUCCESS)
-    {
-        throw std::runtime_error("failed to create command pool!");
-    }
-    m_CommandPool = VulkanHandle<VkCommandPool, CommandPoolDeleter>(pool, {m_DeviceContext.getDevice()});
-}
-
-void CommandManager::createCommandBuffers()
-{
-    m_CommandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool = m_CommandPool.get();
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = (uint32_t)m_CommandBuffers.size();
-    if (vkAllocateCommandBuffers(m_DeviceContext.getDevice(), &allocInfo, m_CommandBuffers.data()) != VK_SUCCESS)
-    {
-        throw std::runtime_error("failed to allocate command buffers!");
-    }
-}
-
 void CommandManager::recordCommandBuffer(
     uint32_t imageIndex, uint32_t currentFrame,
     const std::vector<std::pair<const Chunk *, int>> &chunksToRender,
     const std::vector<VkDescriptorSet> &descriptorSets,
+    const glm::vec3 &clearColor,
     VkBuffer skySphereVB, VkBuffer skySphereIB, uint32_t skySphereIndexCount,
     VkBuffer crosshairVertexBuffer,
     VkBuffer debugCubeVB, VkBuffer debugCubeIB, uint32_t debugCubeIndexCount,
@@ -61,7 +32,7 @@ void CommandManager::recordCommandBuffer(
     vkBeginCommandBuffer(cb, &beginInfo);
 
     const std::array<VkClearValue, 2> clearValues = {
-        VkClearValue{.color = {{0.0f, 0.0f, 0.0f, 1.0f}}},
+        VkClearValue{.color = {{clearColor.r, clearColor.g, clearColor.b, 1.0f}}},
         VkClearValue{.depthStencil = {1.0f, 0}}};
 
     VkRenderPassBeginInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
@@ -166,3 +137,35 @@ void CommandManager::recordCommandBuffer(
     vkCmdEndRenderPass(cb);
     vkEndCommandBuffer(cb);
 }
+
+#pragma region Unchanged Functions
+void CommandManager::createCommandPool()
+{
+    DeviceContext::QueueFamilyIndices queueFamilyIndices = m_DeviceContext.findQueueFamilies(m_DeviceContext.getPhysicalDevice());
+    VkCommandPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
+
+    VkCommandPool pool;
+    if (vkCreateCommandPool(m_DeviceContext.getDevice(), &poolInfo, nullptr, &pool) != VK_SUCCESS)
+    {
+        throw std::runtime_error("failed to create command pool!");
+    }
+    m_CommandPool = VulkanHandle<VkCommandPool, CommandPoolDeleter>(pool, {m_DeviceContext.getDevice()});
+}
+
+void CommandManager::createCommandBuffers()
+{
+    m_CommandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool = m_CommandPool.get();
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = (uint32_t)m_CommandBuffers.size();
+    if (vkAllocateCommandBuffers(m_DeviceContext.getDevice(), &allocInfo, m_CommandBuffers.data()) != VK_SUCCESS)
+    {
+        throw std::runtime_error("failed to allocate command buffers!");
+    }
+}
+#pragma endregion

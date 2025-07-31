@@ -28,6 +28,7 @@ add_executable(Vibecraft ${VIBECRAFT_SRC})
 target_include_directories(Vibecraft PUBLIC
     ${Vulkan_INCLUDE_DIRS}
     "${GLFW_ROOT_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/libs"
     "${CMAKE_SOURCE_DIR}/libs/noise"
     "${CMAKE_SOURCE_DIR}/libs/vma"
     "${CMAKE_SOURCE_DIR}/libs/stb"
