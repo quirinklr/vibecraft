@@ -126,7 +126,7 @@ void Engine::run()
             static_cast<int>(std::floor(player_pos.z / Chunk::DEPTH))};
 
         m_Renderer.drawFrame(m_player_ptr->get_camera(), player_pos, m_Chunks, playerChunkPos,
-                              m_gameTicks, debug_aabbs, m_showDebugOverlay);
+                             m_gameTicks, debug_aabbs, m_showDebugOverlay);
 
         updateWindowTitle(now, fps_time, frames, m_player_ptr->get_position());
     }
@@ -249,8 +249,12 @@ void Engine::set_block(int x, int y, int z, BlockId id)
         int chunk_x = static_cast<int>(floor(static_cast<float>(nx) / Chunk::WIDTH));
         int chunk_z = static_cast<int>(floor(static_cast<float>(nz) / Chunk::DEPTH));
         auto it = m_Chunks.find({chunk_x, 0, chunk_z});
+
         if (it != m_Chunks.end())
+        {
             it->second->m_is_dirty.store(true);
+            it->second->m_blas_dirty.store(true);
+        }
     };
 
     if (local_x == 0)
@@ -403,11 +407,18 @@ void Engine::createMeshJobs(const glm::ivec3 &playerChunkPos)
             int reqLod = (!m_Settings.lodDistances.empty() && dist <= m_Settings.lodDistances[0]) ? 0 : 1;
 
             bool is_dirty = ch->m_is_dirty.load(std::memory_order_acquire);
+            bool blas_is_dirty = ch->m_blas_dirty.load(std::memory_order_acquire);
 
             if (!ch->hasLOD(reqLod) || is_dirty)
             {
                 pending.emplace_back(pos, reqLod);
+
+                if (ch->hasLOD(reqLod))
+                {
+                    ch->m_blas_dirty.store(true, std::memory_order_release);
+                }
             }
+            
             if (is_dirty && !ch->hasLOD(1 - reqLod))
             {
                 pending.emplace_back(pos, 1 - reqLod);

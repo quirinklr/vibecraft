@@ -35,6 +35,7 @@ void Chunk::setBlock(int x, int y, int z, Block block)
     m_Blocks[y * WIDTH * DEPTH + z * WIDTH + x] = block;
 
     m_is_dirty.store(true, std::memory_order_release);
+    m_blas_dirty.store(true, std::memory_order_release);
 }
 
 Block Chunk::getBlock(int x, int y, int z) const
@@ -174,8 +175,13 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
                 m_Meshes.erase(lodLevel);
             }
         }
+
         if (oldMesh.vertexBuffer != VK_NULL_HANDLE)
+        {
             renderer.enqueueDestroy(oldMesh.vertexBuffer, oldMesh.vertexBufferAllocation);
+            oldMesh.blas.destroy(renderer.getDevice());
+        }
+
         if (oldMesh.indexBuffer != VK_NULL_HANDLE)
             renderer.enqueueDestroy(oldMesh.indexBuffer, oldMesh.indexBufferAllocation);
         m_State.store(State::GPU_READY);
@@ -354,7 +360,7 @@ void Chunk::buildMeshGreedy(int lodLevel,
 
     static thread_local std::vector<uint8_t> solidCache;
     const size_t scSize = static_cast<size_t>(H) * PAD_W * PAD_D;
-    
+
     if (solidCache.size() < scSize)
         solidCache.resize(scSize);
 
@@ -648,7 +654,10 @@ void Chunk::cleanup(VulkanRenderer &renderer)
             renderer.enqueueDestroy(mesh.vertexBuffer, mesh.vertexBufferAllocation);
         if (mesh.indexBuffer != VK_NULL_HANDLE)
             renderer.enqueueDestroy(mesh.indexBuffer, mesh.indexBufferAllocation);
+            
+        mesh.blas.destroy(renderer.getDevice());
     }
+
     for (auto &[lod, mesh] : m_TransparentMeshes)
     {
         if (mesh.vertexBuffer != VK_NULL_HANDLE)
