@@ -11,7 +11,10 @@
 
 #include <algorithm>
 
-Engine::Engine() : m_Window(WIDTH, HEIGHT, "Vibecraft", m_Settings)
+Engine::Engine()
+    : m_Window(WIDTH, HEIGHT, "Vibecraft", m_Settings),
+      m_Renderer(m_Window, m_Settings),
+      m_debugController(this)
 {
     glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
@@ -70,6 +73,13 @@ void Engine::run()
         m_FrameEMA = 0.9 * m_FrameEMA + 0.1 * dt;
         last_time = now;
 
+        m_timeAccumulator += dt;
+        while (m_timeAccumulator >= 1.0f / m_ticksPerSecond)
+        {
+            m_gameTicks = (m_gameTicks + 1) % 24000;
+            m_timeAccumulator -= 1.0f / m_ticksPerSecond;
+        }
+
         glfwPollEvents();
 
         processInput(dt, mouse_enabled, last_cursor_x, last_cursor_y);
@@ -82,7 +92,6 @@ void Engine::run()
         std::vector<AABB> debug_aabbs;
         if (m_Settings.showCollisionBoxes)
         {
-
             debug_aabbs.push_back(m_player_ptr->get_world_aabb());
 
             glm::vec3 p_pos = m_player_ptr->get_position();
@@ -110,34 +119,48 @@ void Engine::run()
             static_cast<int>(std::floor(player_pos.x / Chunk::WIDTH)), 0,
             static_cast<int>(std::floor(player_pos.z / Chunk::DEPTH))};
 
-        m_Renderer.drawFrame(m_player_ptr->get_camera(), player_pos, m_Chunks, playerChunkPos, m_Settings, debug_aabbs);
+        m_Renderer.drawFrame(m_player_ptr->get_camera(), player_pos, m_Chunks, playerChunkPos, m_Settings, m_gameTicks, debug_aabbs);
 
         updateWindowTitle(now, fps_time, frames, m_player_ptr->get_position());
     }
 }
 
+void Engine::advanceTime(int32_t ticks)
+{
+    int64_t new_ticks = (int64_t)m_gameTicks + ticks;
+    new_ticks %= 24000;
+    if (new_ticks < 0)
+    {
+        new_ticks += 24000;
+    }
+    m_gameTicks = (uint32_t)new_ticks;
+}
+
 void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
 {
-    if (glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_ESCAPE) == GLFW_PRESS)
+    GLFWwindow *window = m_Window.getGLFWwindow();
+    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
     {
-        glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
         mouse_enabled = false;
     }
-    if (!mouse_enabled && glfwGetMouseButton(m_Window.getGLFWwindow(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
+    if (!mouse_enabled && glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
     {
-        glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
         mouse_enabled = true;
-        glfwGetCursorPos(m_Window.getGLFWwindow(), &lx, &ly);
+        glfwGetCursorPos(window, &lx, &ly);
     }
 
+    m_debugController.handleInput(window);
+
     static bool fLast = false;
-    bool fNow = glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_F) == GLFW_PRESS;
+    bool fNow = glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS;
     if (fNow && !fLast)
         m_Settings.wireframe = !m_Settings.wireframe;
     fLast = fNow;
 
     static bool cLast = false;
-    bool cNow = glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_C) == GLFW_PRESS;
+    bool cNow = glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS;
     if (cNow && !cLast)
         m_Settings.showCollisionBoxes = !m_Settings.showCollisionBoxes;
     cLast = cNow;
@@ -145,7 +168,7 @@ void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
     if (mouse_enabled)
     {
         double mx, my;
-        glfwGetCursorPos(m_Window.getGLFWwindow(), &mx, &my);
+        glfwGetCursorPos(window, &mx, &my);
         float dx = static_cast<float>(mx - lx);
         float dy = static_cast<float>(my - ly);
         lx = mx;
@@ -155,7 +178,7 @@ void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
     }
 
     static bool was_mouse_pressed = false;
-    bool is_mouse_pressed = glfwGetMouseButton(m_Window.getGLFWwindow(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+    bool is_mouse_pressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
 
     if (is_mouse_pressed && !was_mouse_pressed && mouse_enabled)
     {
@@ -172,14 +195,14 @@ void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
     was_mouse_pressed = is_mouse_pressed;
 
     static bool gLast = false;
-    bool gNow = glfwGetKey(m_Window.getGLFWwindow(), GLFW_KEY_G) == GLFW_PRESS;
+    bool gNow = glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS;
     if (gNow && !gLast)
     {
         m_player_ptr->toggle_flight();
     }
     gLast = gNow;
 
-    m_player_ptr->process_keyboard(m_Window.getGLFWwindow());
+    m_player_ptr->process_keyboard(window);
 }
 
 void Engine::set_block(int x, int y, int z, BlockId id)
@@ -282,7 +305,6 @@ void Engine::unloadDistantChunks(const glm::ivec3 &playerChunkPos)
 
     for (auto &pos : chunksToUnload)
     {
-
         m_Garbage.push_back(std::move(m_Chunks.at(pos)));
         m_Chunks.erase(pos);
     }

@@ -1,4 +1,3 @@
-
 #include "PipelineCache.h"
 #include "../Vertex.h"
 
@@ -10,7 +9,6 @@
 
 namespace
 {
-
     std::vector<char> readBinaryFile(const std::string &filename)
     {
         std::ifstream file(filename, std::ios::ate | std::ios::binary);
@@ -24,8 +22,7 @@ namespace
         return buffer;
     }
 
-    inline VulkanHandle<VkShaderModule, ShaderModuleDeleter>
-    makeShader(VkDevice device, const std::string &path)
+    VulkanHandle<VkShaderModule, ShaderModuleDeleter> makeShader(VkDevice device, const std::string &path)
     {
         auto code = readBinaryFile(path);
         VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
@@ -43,7 +40,10 @@ namespace
                              VkRenderPass renderPass,
                              VkPipelineLayout layout,
                              VkPolygonMode polyMode,
+                             VkCullModeFlags cullMode,
                              bool enableBlending,
+                             bool depthWrite,
+                             bool depthTest,
                              const std::string &vertShaderPath,
                              const std::string &fragShaderPath)
     {
@@ -51,10 +51,8 @@ namespace
         auto frag = makeShader(device, fragShaderPath);
 
         VkPipelineShaderStageCreateInfo stages[2]{
-            {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
-             VK_SHADER_STAGE_VERTEX_BIT, vert.get(), "main"},
-            {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
-             VK_SHADER_STAGE_FRAGMENT_BIT, frag.get(), "main"}};
+            {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vert.get(), "main"},
+            {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, frag.get(), "main"}};
 
         const auto binding = Vertex::getBindingDescription();
         const auto attrs = Vertex::getAttributeDescriptions();
@@ -76,46 +74,32 @@ namespace
         rs.polygonMode = polyMode;
         rs.frontFace = VK_FRONT_FACE_CLOCKWISE;
         rs.lineWidth = 1.0f;
-
-        rs.cullMode = VK_CULL_MODE_BACK_BIT;
+        rs.cullMode = cullMode;
 
         VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
         ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
         VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
-        ds.depthTestEnable = VK_TRUE;
+        ds.depthTestEnable = depthTest ? VK_TRUE : VK_FALSE;
+        ds.depthWriteEnable = depthWrite ? VK_TRUE : VK_FALSE;
         ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 
-        VkPipelineColorBlendAttachmentState opaqueBlendAttachment{};
-        opaqueBlendAttachment.colorWriteMask = 0xf;
-        opaqueBlendAttachment.blendEnable = VK_FALSE;
-
-        VkPipelineColorBlendAttachmentState transparentBlendAttachment{};
-        transparentBlendAttachment.blendEnable = VK_TRUE;
-        transparentBlendAttachment.colorWriteMask = 0xf;
-        transparentBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-        transparentBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        transparentBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
-        transparentBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        transparentBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-        transparentBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+        VkPipelineColorBlendAttachmentState blendAttachment{};
+        blendAttachment.colorWriteMask = 0xf;
+        blendAttachment.blendEnable = enableBlending ? VK_TRUE : VK_FALSE;
+        if (enableBlending)
+        {
+            blendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+            blendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+            blendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+            blendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            blendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+            blendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+        }
 
         VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
         cb.attachmentCount = 1;
-
-        if (enableBlending)
-        {
-            ds.depthWriteEnable = VK_FALSE;
-            cb.pAttachments = &transparentBlendAttachment;
-
-            rs.cullMode = VK_CULL_MODE_NONE;
-        }
-        else
-        {
-            ds.depthWriteEnable = VK_TRUE;
-            cb.pAttachments = &opaqueBlendAttachment;
-            rs.cullMode = VK_CULL_MODE_BACK_BIT;
-        }
+        cb.pAttachments = &blendAttachment;
 
         std::array<VkDynamicState, 2> dyn{VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
         VkPipelineDynamicStateCreateInfo dynS{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
@@ -139,7 +123,7 @@ namespace
 
         VkPipeline pipe{};
         if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &info, nullptr, &pipe) != VK_SUCCESS)
-            throw std::runtime_error("vkCreateGraphicsPipelines failed!");
+            throw std::runtime_error("vkCreateGraphicsPipelines failed for " + vertShaderPath);
 
         return pipe;
     }
@@ -153,7 +137,6 @@ PipelineCache::PipelineCache(const DeviceContext &deviceContext,
       m_DescriptorLayout(descriptorLayout)
 {
     createPipelines();
-    createDebugPipeline();
 }
 
 PipelineCache::~PipelineCache() = default;
@@ -182,20 +165,59 @@ void PipelineCache::createPipelines()
     const std::string waterFrag = "shaders/water.frag.spv";
 
     m_GraphicsPipeline = VulkanHandle<VkPipeline, PipelineDeleter>(
-        buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_FILL, false, defaultVert, defaultFrag), {dev});
+        buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, false, true, true, defaultVert, defaultFrag), {dev});
 
     m_TransparentPipeline = VulkanHandle<VkPipeline, PipelineDeleter>(
-        buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_FILL, true, defaultVert, defaultFrag), {dev});
+        buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, true, false, true, defaultVert, defaultFrag), {dev});
 
     m_WaterPipeline = VulkanHandle<VkPipeline, PipelineDeleter>(
-        buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_FILL, true, waterVert, waterFrag), {dev});
+        buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, true, false, true, waterVert, waterFrag), {dev});
 
     m_WireframePipeline = VulkanHandle<VkPipeline, PipelineDeleter>(
-        buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_LINE, false, defaultVert, defaultFrag), {dev});
+        buildPipeline(dev, rp, m_PipelineLayout.get(), VK_POLYGON_MODE_LINE, VK_CULL_MODE_BACK_BIT, false, true, true, defaultVert, defaultFrag), {dev});
 
+    createSkyPipeline();
+    createDebugPipeline();
     createCrosshairPipeline();
 }
 
+void PipelineCache::createSkyPipeline()
+{
+
+    struct SkyPushConstant
+    {
+        glm::mat4 model;
+        int is_sun;
+    };
+    VkPushConstantRange pcRange{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SkyPushConstant)};
+
+    VkDescriptorSetLayout dsl = m_DescriptorLayout.getDescriptorSetLayout();
+    VkPipelineLayoutCreateInfo plCI{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    plCI.setLayoutCount = 1;
+    plCI.pSetLayouts = &dsl;
+    plCI.pushConstantRangeCount = 1;
+    plCI.pPushConstantRanges = &pcRange;
+
+    VkPipelineLayout layoutRaw{};
+    if (vkCreatePipelineLayout(m_DeviceContext.getDevice(), &plCI, nullptr, &layoutRaw) != VK_SUCCESS)
+        throw std::runtime_error("failed to create sky pipeline layout!");
+    m_SkyPipelineLayout = VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter>(layoutRaw, {m_DeviceContext.getDevice()});
+
+    m_SkyPipeline = VulkanHandle<VkPipeline, PipelineDeleter>(
+        buildPipeline(m_DeviceContext.getDevice(),
+                      m_SwapChainContext.getRenderPass(),
+                      m_SkyPipelineLayout.get(),
+                      VK_POLYGON_MODE_FILL,
+                      VK_CULL_MODE_NONE,
+                      true,
+                      false,
+                      false,
+                      "shaders/sky/sky.vert.spv",
+                      "shaders/sky/sky.frag.spv"),
+        {m_DeviceContext.getDevice()});
+}
+
+#pragma region Unchanged Functions
 void PipelineCache::createDebugPipeline()
 {
     auto vertShader = createShaderModule(readFile("shaders/debug.vert.spv"), m_DeviceContext.getDevice());
@@ -270,7 +292,6 @@ void PipelineCache::createDebugPipeline()
     pipelineInfo.pStages = shaderStages;
     pipelineInfo.pVertexInputState = &vertexInput;
     pipelineInfo.pInputAssemblyState = &inputAssembly;
-
     pipelineInfo.pViewportState = &viewportState;
     pipelineInfo.pRasterizationState = &rasterizer;
     pipelineInfo.pMultisampleState = &multisampling;
@@ -397,3 +418,4 @@ PipelineCache::createShaderModule(const std::vector<char> &code,
 
     return VulkanHandle<VkShaderModule, ShaderModuleDeleter>(mod, {device});
 }
+#pragma endregion

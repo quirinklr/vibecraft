@@ -1,6 +1,17 @@
 #pragma once
 
 #include <vector>
+#include <cstdint>
+
+namespace SettingsEnums
+{
+    enum RayTracingFlags : uint32_t
+    {
+        SHADOWS = 1 << 0,
+        REFLECTIONS = 1 << 1,
+        GI = 1 << 2
+    };
+}
 
 struct Settings
 {
@@ -14,6 +25,7 @@ struct Settings
 
     bool wireframe = false;
     bool showCollisionBoxes = false;
+    uint32_t rayTracingFlags = 0;
 
     int renderDistance = 12;
     std::vector<int> lodDistances = {8, 16, 24};

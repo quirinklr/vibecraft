@@ -20,10 +20,13 @@ public:
     VkPipelineLayout getDebugPipelineLayout() const { return m_DebugPipelineLayout.get(); }
     VkPipeline getTransparentPipeline() const { return m_TransparentPipeline.get(); }
     VkPipeline getWaterPipeline() const { return m_WaterPipeline.get(); }
+    VkPipeline getSkyPipeline() const { return m_SkyPipeline.get(); }
+    VkPipelineLayout getSkyPipelineLayout() const { return m_SkyPipelineLayout.get(); }
 
     void createPipelines();
 
 private:
+    void createSkyPipeline();
     void createCrosshairPipeline();
     void createDebugPipeline();
     void createWaterPipeline();
@@ -45,4 +48,6 @@ private:
     VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter> m_CrosshairPipelineLayout;
     VulkanHandle<VkPipeline, PipelineDeleter> m_CrosshairPipeline;
     VulkanHandle<VkPipeline, PipelineDeleter> m_WaterPipeline;
+    VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter> m_SkyPipelineLayout;
+    VulkanHandle<VkPipeline, PipelineDeleter> m_SkyPipeline;
 };

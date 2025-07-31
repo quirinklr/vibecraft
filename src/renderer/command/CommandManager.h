@@ -13,6 +13,12 @@
 #include "../../Camera.h"
 #include "../RendererConfig.h"
 
+struct SkyPushConstant
+{
+    glm::mat4 model;
+    alignas(4) int is_sun;
+};
+
 class CommandManager
 {
 public:
@@ -23,11 +29,18 @@ public:
         uint32_t imageIndex, uint32_t currentFrame,
         const std::vector<std::pair<const Chunk *, int>> &chunksToRender,
         const std::vector<VkDescriptorSet> &descriptorSets,
+        const glm::vec3 &clearColor,
+
+        const SkyPushConstant &sun_pc,
+        const SkyPushConstant &moon_pc,
+        bool isSunVisible,
+        bool isMoonVisible,
+        VkBuffer skySphereVB, VkBuffer skySphereIB, uint32_t skySphereIndexCount,
         VkBuffer crosshairVertexBuffer,
         VkBuffer debugCubeVB, VkBuffer debugCubeIB, uint32_t debugCubeIndexCount,
         const Settings &settings,
         const std::vector<AABB> &debugAABBs);
-        
+
     VkCommandBuffer getCommandBuffer(uint32_t index) const { return m_CommandBuffers[index]; }
     VkCommandPool getCommandPool() const { return m_CommandPool.get(); }
 

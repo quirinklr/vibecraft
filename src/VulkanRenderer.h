@@ -21,6 +21,7 @@
 
 #include <map>
 #include <memory>
+#include <glm/glm.hpp>
 
 class VulkanRenderer
 {
@@ -37,6 +38,7 @@ public:
                    const std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks,
                    const glm::ivec3 &playerChunkPos,
                    const Settings &settings,
+                   uint32_t gameTicks,
                    const std::vector<AABB> &debugAABBs);
 
     void enqueueDestroy(VmaBuffer &&buffer);
@@ -51,12 +53,21 @@ public:
     RingStagingArena *getArena() const { return m_StagingArena.get(); }
 
 private:
-    void updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos);
+    glm::vec3 updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos, const Settings &settings);
+    void updateLightUbo(uint32_t currentImage, uint32_t gameTicks);
+
     void createUniformBuffers();
+    void createLightUbo();
     void createDescriptorPool();
     void createDescriptorSets();
     void createCrosshairVertexBuffer();
     void createDebugCubeMesh();
+
+    void createSkyResources();
+    VulkanHandle<VkImageView, ImageViewDeleter> createTexture(const char *path, VmaImage &outImage);
+    void generateSphereMesh(float radius, int sectors, int stacks,
+                            std::vector<Vertex> &outVertices,
+                            std::vector<uint32_t> &outIndices);
 
     Window &m_Window;
     const Settings &m_Settings;
@@ -71,12 +82,25 @@ private:
     std::unique_ptr<TextureManager> m_TextureManager;
     std::unique_ptr<RingStagingArena> m_StagingArena;
     VkCommandPool m_TransferCommandPool{VK_NULL_HANDLE};
+
     std::vector<VmaBuffer> m_UniformBuffers;
     std::vector<void *> m_UniformBuffersMapped;
+    std::vector<VmaBuffer> m_LightUbos;
+    std::vector<void *> m_LightUbosMapped;
+
     VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter> m_DescriptorPool;
     std::vector<VkDescriptorSet> m_DescriptorSets;
 
     VmaBuffer m_CrosshairVertexBuffer;
+
+    VmaBuffer m_SkySphereVertexBuffer;
+    VmaBuffer m_SkySphereIndexBuffer;
+    uint32_t m_SkySphereIndexCount = 0;
+    VmaImage m_SunTexture;
+    VulkanHandle<VkImageView, ImageViewDeleter> m_SunTextureView;
+    VmaImage m_MoonTexture;
+    VulkanHandle<VkImageView, ImageViewDeleter> m_MoonTextureView;
+
     VmaBuffer m_DebugCubeVertexBuffer;
     VmaBuffer m_DebugCubeIndexBuffer;
     uint32_t m_DebugCubeIndexCount = 0;

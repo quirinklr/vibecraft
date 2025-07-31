@@ -14,6 +14,145 @@ CommandManager::CommandManager(const DeviceContext &deviceContext, const SwapCha
 
 CommandManager::~CommandManager() {}
 
+void CommandManager::recordCommandBuffer(
+    uint32_t imageIndex, uint32_t currentFrame,
+    const std::vector<std::pair<const Chunk *, int>> &chunksToRender,
+    const std::vector<VkDescriptorSet> &descriptorSets,
+    const glm::vec3 &clearColor,
+    const SkyPushConstant &sun_pc,
+    const SkyPushConstant &moon_pc,
+    bool isSunVisible,
+    bool isMoonVisible,
+    VkBuffer skySphereVB, VkBuffer skySphereIB, uint32_t skySphereIndexCount,
+    VkBuffer crosshairVertexBuffer,
+    VkBuffer debugCubeVB, VkBuffer debugCubeIB, uint32_t debugCubeIndexCount,
+    const Settings &settings,
+    const std::vector<AABB> &debugAABBs)
+{
+    std::scoped_lock lk(gGraphicsQueueMutex);
+    VkCommandBuffer cb = m_CommandBuffers[currentFrame];
+
+    VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    vkBeginCommandBuffer(cb, &beginInfo);
+
+    const std::array<VkClearValue, 2> clearValues = {
+        VkClearValue{.color = {{clearColor.r, clearColor.g, clearColor.b, 1.0f}}},
+        VkClearValue{.depthStencil = {1.0f, 0}}};
+
+    VkRenderPassBeginInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    rp.renderPass = m_SwapChainContext.getRenderPass();
+    rp.framebuffer = m_SwapChainContext.getFramebuffers()[imageIndex].get();
+    rp.renderArea = {{0, 0}, m_SwapChainContext.getSwapChainExtent()};
+    rp.clearValueCount = static_cast<uint32_t>(clearValues.size());
+    rp.pClearValues = clearValues.data();
+
+    vkCmdBeginRenderPass(cb, &rp, VK_SUBPASS_CONTENTS_INLINE);
+
+    VkViewport vp{0, 0,
+                  float(m_SwapChainContext.getSwapChainExtent().width),
+                  float(m_SwapChainContext.getSwapChainExtent().height),
+                  0, 1};
+    VkRect2D sc{{0, 0}, m_SwapChainContext.getSwapChainExtent()};
+    vkCmdSetViewport(cb, 0, 1, &vp);
+    vkCmdSetScissor(cb, 0, 1, &sc);
+
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getSkyPipeline());
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            m_PipelineCache.getSkyPipelineLayout(),
+                            0, 1, &descriptorSets[currentFrame], 0, nullptr);
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cb, 0, 1, &skySphereVB, offsets);
+    vkCmdBindIndexBuffer(cb, skySphereIB, 0, VK_INDEX_TYPE_UINT32);
+
+    if (isSunVisible)
+    {
+        vkCmdPushConstants(cb, m_PipelineCache.getSkyPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SkyPushConstant), &sun_pc);
+        vkCmdDrawIndexed(cb, skySphereIndexCount, 1, 0, 0, 0);
+    }
+
+    if (isMoonVisible)
+    {
+        vkCmdPushConstants(cb, m_PipelineCache.getSkyPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SkyPushConstant), &moon_pc);
+        vkCmdDrawIndexed(cb, skySphereIndexCount, 1, 0, 0, 0);
+    }
+
+    VkPipeline mainPipe = settings.wireframe
+                              ? m_PipelineCache.getWireframePipeline()
+                              : m_PipelineCache.getGraphicsPipeline();
+
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, mainPipe);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            m_PipelineCache.getGraphicsPipelineLayout(),
+                            0, 1, &descriptorSets[currentFrame], 0, nullptr);
+
+    for (const auto &[chunk, lod] : chunksToRender)
+    {
+        const ChunkMesh *mesh = chunk->getMesh(lod);
+        if (!mesh || mesh->indexCount == 0)
+            continue;
+
+        VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
+        VkDeviceSize chunk_offsets[] = {0};
+        vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, chunk_offsets);
+        vkCmdBindIndexBuffer(cb, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdPushConstants(cb, m_PipelineCache.getGraphicsPipelineLayout(),
+                           VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4),
+                           &chunk->getModelMatrix());
+        vkCmdDrawIndexed(cb, mesh->indexCount, 1, 0, 0, 0);
+    }
+
+    if (!settings.wireframe)
+    {
+        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getWaterPipeline());
+        for (const auto &[chunk, lod] : chunksToRender)
+        {
+            const ChunkMesh *mesh = chunk->getTransparentMesh(lod);
+            if (!mesh || mesh->indexCount == 0)
+                continue;
+
+            VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
+            VkDeviceSize chunk_offsets[] = {0};
+            vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, chunk_offsets);
+            vkCmdBindIndexBuffer(cb, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdPushConstants(cb, m_PipelineCache.getGraphicsPipelineLayout(),
+                               VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4),
+                               &chunk->getModelMatrix());
+            vkCmdDrawIndexed(cb, mesh->indexCount, 1, 0, 0, 0);
+        }
+    }
+
+    if (settings.showCollisionBoxes && !debugAABBs.empty())
+    {
+        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getDebugPipeline());
+        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                m_PipelineCache.getDebugPipelineLayout(),
+                                0, 1, &descriptorSets[currentFrame], 0, nullptr);
+        VkBuffer vertexBuffers[] = {debugCubeVB};
+        VkDeviceSize debug_offsets[] = {0};
+        vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, debug_offsets);
+        vkCmdBindIndexBuffer(cb, debugCubeIB, 0, VK_INDEX_TYPE_UINT32);
+
+        for (const auto &aabb : debugAABBs)
+        {
+            glm::mat4 model = glm::translate(glm::mat4(1.0f), aabb.min);
+            model = glm::scale(model, aabb.max - aabb.min);
+            vkCmdPushConstants(cb, m_PipelineCache.getDebugPipelineLayout(),
+                               VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
+            vkCmdDrawIndexed(cb, debugCubeIndexCount, 1, 0, 0, 0);
+        }
+    }
+
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      m_PipelineCache.getCrosshairPipeline());
+    vkCmdSetLineWidth(cb, 2.5f);
+    VkDeviceSize z = 0;
+    vkCmdBindVertexBuffers(cb, 0, 1, &crosshairVertexBuffer, &z);
+    vkCmdDraw(cb, 4, 1, 0, 0);
+
+    vkCmdEndRenderPass(cb);
+    vkEndCommandBuffer(cb);
+}
+
 void CommandManager::createCommandPool()
 {
     DeviceContext::QueueFamilyIndices queueFamilyIndices = m_DeviceContext.findQueueFamilies(m_DeviceContext.getPhysicalDevice());
@@ -42,118 +181,4 @@ void CommandManager::createCommandBuffers()
     {
         throw std::runtime_error("failed to allocate command buffers!");
     }
-}
-
-void CommandManager::recordCommandBuffer(
-    uint32_t imageIndex, uint32_t currentFrame,
-    const std::vector<std::pair<const Chunk *, int>> &chunksToRender,
-    const std::vector<VkDescriptorSet> &descriptorSets,
-    VkBuffer crosshairVertexBuffer,
-    VkBuffer debugCubeVB, VkBuffer debugCubeIB, uint32_t debugCubeIndexCount,
-    const Settings &settings,
-    const std::vector<AABB> &debugAABBs)
-{
-    std::scoped_lock lk(gGraphicsQueueMutex);
-    VkCommandBuffer cb = m_CommandBuffers[currentFrame];
-
-    VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    vkBeginCommandBuffer(cb, &beginInfo);
-
-    const std::array<VkClearValue, 2> clearValues = {
-        VkClearValue{.color = {{0.5f, 0.7f, 1.0f, 1.0f}}},
-        VkClearValue{.depthStencil = {1.0f, 0}}};
-
-    VkRenderPassBeginInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-    rp.renderPass = m_SwapChainContext.getRenderPass();
-    rp.framebuffer = m_SwapChainContext.getFramebuffers()[imageIndex].get();
-    rp.renderArea = {{0, 0}, m_SwapChainContext.getSwapChainExtent()};
-    rp.clearValueCount = static_cast<uint32_t>(clearValues.size());
-    rp.pClearValues = clearValues.data();
-
-    vkCmdBeginRenderPass(cb, &rp, VK_SUBPASS_CONTENTS_INLINE);
-
-    VkViewport vp{0, 0,
-                  float(m_SwapChainContext.getSwapChainExtent().width),
-                  float(m_SwapChainContext.getSwapChainExtent().height),
-                  0, 1};
-    VkRect2D sc{{0, 0}, m_SwapChainContext.getSwapChainExtent()};
-    vkCmdSetViewport(cb, 0, 1, &vp);
-    vkCmdSetScissor(cb, 0, 1, &sc);
-
-    VkPipeline mainPipe = settings.wireframe
-                              ? m_PipelineCache.getWireframePipeline()
-                              : m_PipelineCache.getGraphicsPipeline();
-
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, mainPipe);
-    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            m_PipelineCache.getGraphicsPipelineLayout(),
-                            0, 1, &descriptorSets[currentFrame], 0, nullptr);
-
-    for (const auto &[chunk, lod] : chunksToRender)
-    {
-        const ChunkMesh *mesh = chunk->getMesh(lod);
-        if (!mesh || mesh->indexCount == 0)
-            continue;
-
-        VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, offsets);
-        vkCmdBindIndexBuffer(cb, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-        vkCmdPushConstants(cb, m_PipelineCache.getGraphicsPipelineLayout(),
-                           VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4),
-                           &chunk->getModelMatrix());
-        vkCmdDrawIndexed(cb, mesh->indexCount, 1, 0, 0, 0);
-    }
-
-    if (!settings.wireframe)
-    {
-        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getWaterPipeline());
-
-        for (const auto &[chunk, lod] : chunksToRender)
-        {
-            const ChunkMesh *mesh = chunk->getTransparentMesh(lod);
-            if (!mesh || mesh->indexCount == 0)
-                continue;
-
-            VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
-            VkDeviceSize offsets[] = {0};
-            vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, offsets);
-            vkCmdBindIndexBuffer(cb, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdPushConstants(cb, m_PipelineCache.getGraphicsPipelineLayout(),
-                               VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4),
-                               &chunk->getModelMatrix());
-            vkCmdDrawIndexed(cb, mesh->indexCount, 1, 0, 0, 0);
-        }
-    }
-
-    if (settings.showCollisionBoxes && !debugAABBs.empty())
-    {
-        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getDebugPipeline());
-        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                m_PipelineCache.getDebugPipelineLayout(),
-                                0, 1, &descriptorSets[currentFrame], 0, nullptr);
-        VkBuffer vertexBuffers[] = {debugCubeVB};
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, offsets);
-        vkCmdBindIndexBuffer(cb, debugCubeIB, 0, VK_INDEX_TYPE_UINT32);
-
-        for (const auto &aabb : debugAABBs)
-        {
-            glm::mat4 model = glm::translate(glm::mat4(1.0f), aabb.min);
-            model = glm::scale(model, aabb.max - aabb.min);
-            vkCmdPushConstants(cb, m_PipelineCache.getDebugPipelineLayout(),
-                               VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
-            vkCmdDrawIndexed(cb, debugCubeIndexCount, 1, 0, 0, 0);
-        }
-    }
-
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      m_PipelineCache.getCrosshairPipeline());
-    vkCmdSetLineWidth(cb, 2.5f);
-    VkDeviceSize z = 0;
-    vkCmdBindVertexBuffers(cb, 0, 1, &crosshairVertexBuffer, &z);
-    vkCmdDraw(cb, 4, 1, 0, 0);
-
-    vkCmdEndRenderPass(cb);
-    vkEndCommandBuffer(cb);
 }
