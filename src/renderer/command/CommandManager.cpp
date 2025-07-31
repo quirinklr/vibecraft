@@ -19,7 +19,10 @@ void CommandManager::recordCommandBuffer(
     const std::vector<std::pair<const Chunk *, int>> &chunksToRender,
     const std::vector<VkDescriptorSet> &descriptorSets,
     const glm::vec3 &clearColor,
-    const glm::mat4 &skyRotation,
+    const SkyPushConstant &sun_pc,
+    const SkyPushConstant &moon_pc,
+    bool isSunVisible,
+    bool isMoonVisible,
     VkBuffer skySphereVB, VkBuffer skySphereIB, uint32_t skySphereIndexCount,
     VkBuffer crosshairVertexBuffer,
     VkBuffer debugCubeVB, VkBuffer debugCubeIB, uint32_t debugCubeIndexCount,
@@ -57,11 +60,21 @@ void CommandManager::recordCommandBuffer(
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             m_PipelineCache.getSkyPipelineLayout(),
                             0, 1, &descriptorSets[currentFrame], 0, nullptr);
-    vkCmdPushConstants(cb, m_PipelineCache.getSkyPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &skyRotation);
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cb, 0, 1, &skySphereVB, offsets);
     vkCmdBindIndexBuffer(cb, skySphereIB, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(cb, skySphereIndexCount, 1, 0, 0, 0);
+
+    if (isSunVisible)
+    {
+        vkCmdPushConstants(cb, m_PipelineCache.getSkyPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SkyPushConstant), &sun_pc);
+        vkCmdDrawIndexed(cb, skySphereIndexCount, 1, 0, 0, 0);
+    }
+
+    if (isMoonVisible)
+    {
+        vkCmdPushConstants(cb, m_PipelineCache.getSkyPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SkyPushConstant), &moon_pc);
+        vkCmdDrawIndexed(cb, skySphereIndexCount, 1, 0, 0, 0);
+    }
 
     VkPipeline mainPipe = settings.wireframe
                               ? m_PipelineCache.getWireframePipeline()

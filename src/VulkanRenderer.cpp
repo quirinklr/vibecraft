@@ -63,7 +63,6 @@ void VulkanRenderer::drawFrame(Camera &camera,
     vkWaitForFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(m_CurrentFrame), VK_TRUE, UINT64_MAX);
 
     DeferredFreeQueue::poll();
-
     m_BufferDestroyQueue[m_CurrentFrame].clear();
     m_ImageDestroyQueue[m_CurrentFrame].clear();
 
@@ -74,6 +73,7 @@ void VulkanRenderer::drawFrame(Camera &camera,
                                             m_SyncPrimitives->getImageAvailableSemaphore(m_CurrentFrame),
                                             VK_NULL_HANDLE,
                                             &imageIndex);
+
     if (result == VK_ERROR_OUT_OF_DATE_KHR)
     {
         m_SwapChainContext->recreateSwapChain();
@@ -90,13 +90,47 @@ void VulkanRenderer::drawFrame(Camera &camera,
     glm::vec3 skyColor = updateUniformBuffer(m_CurrentFrame, camera, playerPos, settings);
 
     float time_of_day = (float)gameTicks / 24000.0f;
-    float angle = time_of_day * 2.0f * glm::pi<float>() - glm::half_pi<float>();
-    glm::mat4 skyRotation = glm::rotate(glm::mat4(1.0f), -angle, glm::vec3(1.0f, 0.0f, 0.0f));
+    float sun_angle = time_of_day * 2.0f * glm::pi<float>() - glm::half_pi<float>();
+    float moon_angle = sun_angle + glm::pi<float>();
+
+    glm::mat4 scaleMatrix = glm::scale(glm::mat4(1.0f), glm::vec3(30.0f));
+
+    glm::mat4 invView = glm::inverse(camera.getViewMatrix());
+    glm::vec3 camPos = glm::vec3(invView[3]);
+
+    glm::vec3 sunDir = glm::normalize(glm::vec3(sin(sun_angle), cos(sun_angle), 0.0f));
+    glm::vec3 moonDir = -sunDir;
+
+    auto makeBillboard = [&](const glm::vec3 &dir)
+    {
+        glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+        glm::vec3 right = glm::normalize(glm::cross(dir, up));
+        glm::vec3 realUp = glm::cross(right, dir);
+        glm::mat4 m(1.0f);
+        m[0] = glm::vec4(right, 0.0f);
+        m[1] = glm::vec4(realUp, 0.0f);
+        m[2] = glm::vec4(-dir, 0.0f);
+        return m;
+    };
+
+    float dist = 500.0f;
+    float size = 120.0f;
+    glm::mat4 scl = glm::scale(glm::mat4(1.0f), glm::vec3(size));
+
+    SkyPushConstant sun_pc;
+    sun_pc.model = glm::translate(glm::mat4(1.0f), camPos + sunDir * dist) * makeBillboard(sunDir) * scl;
+    sun_pc.is_sun = 1;
+
+    SkyPushConstant moon_pc;
+    moon_pc.model = glm::translate(glm::mat4(1.0f), camPos + moonDir * dist) * makeBillboard(moonDir) * scl;
+    moon_pc.is_sun = 0;
+
+    bool isSunVisible = sunDir.y > -0.1f;
+    bool isMoonVisible = moonDir.y > -0.1f;
 
     std::vector<std::pair<const Chunk *, int>> renderChunks;
     renderChunks.reserve(chunks.size());
     const Frustum &frustum = camera.getFrustum();
-
     for (auto const &[pos, chunkPtr] : chunks)
     {
         chunkPtr->markReady(*this);
@@ -112,11 +146,13 @@ void VulkanRenderer::drawFrame(Camera &camera,
 
     vkResetFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(m_CurrentFrame));
     vkResetCommandBuffer(m_CommandManager->getCommandBuffer(m_CurrentFrame), 0);
-
     m_CommandManager->recordCommandBuffer(
         imageIndex, m_CurrentFrame, renderChunks, m_DescriptorSets,
         skyColor,
-        skyRotation,
+        sun_pc,
+        moon_pc,
+        isSunVisible,
+        isMoonVisible,
         m_SkySphereVertexBuffer.get(), m_SkySphereIndexBuffer.get(), m_SkySphereIndexCount,
         m_CrosshairVertexBuffer.get(),
         m_DebugCubeVertexBuffer.get(), m_DebugCubeIndexBuffer.get(), m_DebugCubeIndexCount,
@@ -125,7 +161,6 @@ void VulkanRenderer::drawFrame(Camera &camera,
     VkSemaphore waitSemas[]{m_SyncPrimitives->getImageAvailableSemaphore(m_CurrentFrame)};
     VkPipelineStageFlags waitStages[]{VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     VkSemaphore signalSemas[]{m_SyncPrimitives->getRenderFinishedSemaphore(m_CurrentFrame)};
-
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     si.waitSemaphoreCount = 1;
     si.pWaitSemaphores = waitSemas;
@@ -135,7 +170,6 @@ void VulkanRenderer::drawFrame(Camera &camera,
     si.pCommandBuffers = &cb;
     si.signalSemaphoreCount = 1;
     si.pSignalSemaphores = signalSemas;
-
     {
         std::scoped_lock lk(gGraphicsQueueMutex);
         vkQueueSubmit(m_DeviceContext->getGraphicsQueue(), 1, &si, m_SyncPrimitives->getInFlightFence(m_CurrentFrame));
@@ -148,7 +182,6 @@ void VulkanRenderer::drawFrame(Camera &camera,
     pi.swapchainCount = 1;
     pi.pSwapchains = swp;
     pi.pImageIndices = &imageIndex;
-
     {
         std::scoped_lock lk(gGraphicsQueueMutex);
         result = vkQueuePresentKHR(m_DeviceContext->getPresentQueue(), &pi);
@@ -176,7 +209,8 @@ glm::vec3 VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &cam
     float sunUpFactor = glm::smoothstep(-0.25f, 0.25f, lightUbo.lightDirection.y);
 
     glm::vec3 dayColor(0.5f, 0.7f, 1.0f);
-    glm::vec3 nightColor(0.01f, 0.02f, 0.04f);
+
+    glm::vec3 nightColor(0.04f, 0.06f, 0.1f);
     glm::vec3 sunsetColor(1.0f, 0.45f, 0.15f);
 
     glm::vec3 skyColor = glm::mix(nightColor, dayColor, sunUpFactor);
@@ -337,17 +371,22 @@ void VulkanRenderer::createSkyResources()
     m_SunTextureView = createTexture("textures/sun.png", m_SunTexture);
     m_MoonTextureView = createTexture("textures/moon.png", m_MoonTexture);
 
-    std::vector<Vertex> vertices;
-    std::vector<uint32_t> indices;
-    generateSphereMesh(20.0f, 32, 16, vertices, indices);
+    std::vector<Vertex> vertices = {
+        {{-0.5f, -0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
+        {{0.5f, -0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+        {{0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
+        {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}}};
+    std::vector<uint32_t> indices = {0, 1, 2, 2, 3, 0};
     m_SkySphereIndexCount = static_cast<uint32_t>(indices.size());
 
     m_SkySphereVertexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
         *m_DeviceContext, m_CommandManager->getCommandPool(),
-        vertices.data(), sizeof(Vertex) * vertices.size(), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+        vertices.data(), sizeof(Vertex) * vertices.size(),
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
     m_SkySphereIndexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
         *m_DeviceContext, m_CommandManager->getCommandPool(),
-        indices.data(), sizeof(uint32_t) * indices.size(), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+        indices.data(), sizeof(uint32_t) * indices.size(),
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 }
 
 void VulkanRenderer::createDescriptorPool()
@@ -496,6 +535,7 @@ void VulkanRenderer::generateSphereMesh(float radius, int sectors, int stacks,
         for (int j = 0; j <= sectors; ++j)
         {
             float sectorAngle = (float)j * (2.0f * glm::pi<float>() / sectors);
+
             float x = xy * cosf(sectorAngle);
             float y = xy * sinf(sectorAngle);
 

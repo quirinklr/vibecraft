@@ -183,7 +183,13 @@ void PipelineCache::createPipelines()
 
 void PipelineCache::createSkyPipeline()
 {
-    VkPushConstantRange pcRange{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4)};
+
+    struct SkyPushConstant
+    {
+        glm::mat4 model;
+        int is_sun;
+    };
+    VkPushConstantRange pcRange{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SkyPushConstant)};
 
     VkDescriptorSetLayout dsl = m_DescriptorLayout.getDescriptorSetLayout();
     VkPipelineLayoutCreateInfo plCI{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
@@ -202,10 +208,10 @@ void PipelineCache::createSkyPipeline()
                       m_SwapChainContext.getRenderPass(),
                       m_SkyPipelineLayout.get(),
                       VK_POLYGON_MODE_FILL,
-                      VK_CULL_MODE_FRONT_BIT,
+                      VK_CULL_MODE_NONE,
                       true,
                       false,
-                      true,
+                      false,
                       "shaders/sky/sky.vert.spv",
                       "shaders/sky/sky.frag.spv"),
         {m_DeviceContext.getDevice()});
