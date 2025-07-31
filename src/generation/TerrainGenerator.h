@@ -15,6 +15,7 @@ public:
     TerrainGenerator();
     void populateChunk(Chunk &c);
     static constexpr int SEA_LEVEL = 80;
+    int64_t getSeed() const { return 1337; }
 
 private:
     FastNoiseLite m_continent;

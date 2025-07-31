@@ -145,6 +145,12 @@ bool Player::raycast(glm::vec3 &out_block_pos) const
     return false;
 }
 
+void Player::get_orientation(float &yaw, float &pitch) const
+{
+    yaw = m_yaw;
+    pitch = m_pitch;
+}
+
 void Player::process_mouse_movement(float dx, float dy)
 {
     float processed_dy = m_settings.invertMouseY ? dy : -dy;

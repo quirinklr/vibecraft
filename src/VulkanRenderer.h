@@ -18,17 +18,19 @@
 #include "renderer/resources/UploadHelpers.h"
 #include "renderer/RendererConfig.h"
 #include "math/Ivec3Less.h"
+#include "renderer/DebugOverlay.h"
 
 #include <map>
 #include <memory>
 #include <glm/glm.hpp>
 
+class Player;
+class TerrainGenerator;
+
 class VulkanRenderer
 {
-    friend class Chunk;
-
 public:
-    VulkanRenderer(Window &window, const Settings &settings);
+    VulkanRenderer(Window &window, const Settings &settings, Player *player, TerrainGenerator *terrainGen);
     ~VulkanRenderer();
     VulkanRenderer(const VulkanRenderer &) = delete;
     VulkanRenderer &operator=(const VulkanRenderer &) = delete;
@@ -37,9 +39,9 @@ public:
                    const glm::vec3 &playerPos,
                    const std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks,
                    const glm::ivec3 &playerChunkPos,
-                   const Settings &settings,
                    uint32_t gameTicks,
-                   const std::vector<AABB> &debugAABBs);
+                   const std::vector<AABB> &debugAABBs,
+                   bool showDebugOverlay);
 
     void enqueueDestroy(VmaBuffer &&buffer);
     void enqueueDestroy(VmaImage &&image);
@@ -51,9 +53,10 @@ public:
     CommandManager *getCommandManager() const { return m_CommandManager.get(); }
     VkCommandPool getTransferCommandPool() const { return m_TransferCommandPool; }
     RingStagingArena *getArena() const { return m_StagingArena.get(); }
+    DebugOverlay *getDebugOverlay() const { return m_debugOverlay.get(); }
 
 private:
-    glm::vec3 updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos, const Settings &settings);
+    glm::vec3 updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos);
     void updateLightUbo(uint32_t currentImage, uint32_t gameTicks);
 
     void createUniformBuffers();
@@ -68,9 +71,10 @@ private:
     void generateSphereMesh(float radius, int sectors, int stacks,
                             std::vector<Vertex> &outVertices,
                             std::vector<uint32_t> &outIndices);
-
     Window &m_Window;
     const Settings &m_Settings;
+    Player *m_player;
+    TerrainGenerator *m_terrainGen;
 
     std::unique_ptr<InstanceContext> m_InstanceContext;
     std::unique_ptr<DeviceContext> m_DeviceContext;
@@ -82,6 +86,7 @@ private:
     std::unique_ptr<TextureManager> m_TextureManager;
     std::unique_ptr<RingStagingArena> m_StagingArena;
     VkCommandPool m_TransferCommandPool{VK_NULL_HANDLE};
+    std::unique_ptr<DebugOverlay> m_debugOverlay;
 
     std::vector<VmaBuffer> m_UniformBuffers;
     std::vector<void *> m_UniformBuffersMapped;

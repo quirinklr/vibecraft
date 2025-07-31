@@ -13,7 +13,7 @@
 
 Engine::Engine()
     : m_Window(WIDTH, HEIGHT, "Vibecraft", m_Settings),
-      m_Renderer(m_Window, m_Settings),
+      m_Renderer(m_Window, m_Settings, m_player_ptr, &m_TerrainGen),
       m_debugController(this)
 {
     glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
@@ -84,6 +84,12 @@ void Engine::run()
 
         processInput(dt, mouse_enabled, last_cursor_x, last_cursor_y);
 
+        if (m_showDebugOverlay)
+        {
+            float fps = 1.0f / m_FrameEMA;
+            m_Renderer.getDebugOverlay()->update(*m_player_ptr, m_Settings, fps, m_TerrainGen.getSeed());
+        }
+
         for (auto &entity : m_entities)
         {
             entity->update(dt);
@@ -119,7 +125,8 @@ void Engine::run()
             static_cast<int>(std::floor(player_pos.x / Chunk::WIDTH)), 0,
             static_cast<int>(std::floor(player_pos.z / Chunk::DEPTH))};
 
-        m_Renderer.drawFrame(m_player_ptr->get_camera(), player_pos, m_Chunks, playerChunkPos, m_Settings, m_gameTicks, debug_aabbs);
+        m_Renderer.drawFrame(m_player_ptr->get_camera(), player_pos, m_Chunks, playerChunkPos,
+                              m_gameTicks, debug_aabbs, m_showDebugOverlay);
 
         updateWindowTitle(now, fps_time, frames, m_player_ptr->get_position());
     }
@@ -201,6 +208,13 @@ void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
         m_player_ptr->toggle_flight();
     }
     gLast = gNow;
+
+    bool z_now = glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS;
+    if (z_now && !m_key_Z_last_state)
+    {
+        m_showDebugOverlay = !m_showDebugOverlay;
+    }
+    m_key_Z_last_state = z_now;
 
     m_player_ptr->process_keyboard(window);
 }

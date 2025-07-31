@@ -9,8 +9,8 @@
 #include "generation/TerrainGenerator.h"
 #include <stb_image.h>
 
-VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings)
-    : m_Window(window), m_Settings(settings)
+VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings, Player *player, TerrainGenerator *terrainGen)
+    : m_Window(window), m_Settings(settings), m_player(player), m_terrainGen(terrainGen)
 {
     m_InstanceContext = std::make_unique<InstanceContext>(m_Window);
     m_DeviceContext = std::make_unique<DeviceContext>(*m_InstanceContext);
@@ -20,8 +20,7 @@ VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings)
     {
         VkCommandPoolCreateInfo ci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
         ci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        ci.queueFamilyIndex =
-            m_DeviceContext->findQueueFamilies(m_DeviceContext->getPhysicalDevice()).transferFamily.value();
+        ci.queueFamilyIndex = m_DeviceContext->findQueueFamilies(m_DeviceContext->getPhysicalDevice()).transferFamily.value();
         vkCreateCommandPool(m_DeviceContext->getDevice(), &ci, nullptr, &m_TransferCommandPool);
     }
 
@@ -30,8 +29,10 @@ VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings)
     m_PipelineCache = std::make_unique<PipelineCache>(*m_DeviceContext, *m_SwapChainContext, *m_DescriptorLayout);
     m_CommandManager = std::make_unique<CommandManager>(*m_DeviceContext, *m_SwapChainContext, *m_PipelineCache);
     m_SyncPrimitives = std::make_unique<SyncPrimitives>(*m_DeviceContext, *m_SwapChainContext);
-    m_TextureManager = std::make_unique<TextureManager>(*m_DeviceContext, m_CommandManager->getCommandPool());
 
+    m_debugOverlay = std::make_unique<DebugOverlay>(*m_DeviceContext, m_CommandManager->getCommandPool(), m_SwapChainContext->getRenderPass(), m_SwapChainContext->getSwapChainExtent());
+
+    m_TextureManager = std::make_unique<TextureManager>(*m_DeviceContext, m_CommandManager->getCommandPool());
     m_TextureManager->createTextureImage("textures/blocks_atlas.png");
     m_TextureManager->createTextureImageView();
     m_TextureManager->createTextureSampler();
@@ -56,38 +57,46 @@ void VulkanRenderer::drawFrame(Camera &camera,
                                const glm::vec3 &playerPos,
                                const std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks,
                                const glm::ivec3 &playerChunkPos,
-                               const Settings &settings,
                                uint32_t gameTicks,
-                               const std::vector<AABB> &debugAABBs)
+                               const std::vector<AABB> &debugAABBs,
+                               bool showDebugOverlay)
 {
-    vkWaitForFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(m_CurrentFrame), VK_TRUE, UINT64_MAX);
+    vkWaitForFences(this->m_DeviceContext->getDevice(), 1, this->m_SyncPrimitives->getInFlightFencePtr(this->m_CurrentFrame), VK_TRUE, UINT64_MAX);
 
     DeferredFreeQueue::poll();
-    m_BufferDestroyQueue[m_CurrentFrame].clear();
-    m_ImageDestroyQueue[m_CurrentFrame].clear();
+    this->m_BufferDestroyQueue[this->m_CurrentFrame].clear();
+    this->m_ImageDestroyQueue[this->m_CurrentFrame].clear();
 
     uint32_t imageIndex;
-    VkResult result = vkAcquireNextImageKHR(m_DeviceContext->getDevice(),
-                                            m_SwapChainContext->getSwapChain(),
+    VkResult result = vkAcquireNextImageKHR(this->m_DeviceContext->getDevice(),
+                                            this->m_SwapChainContext->getSwapChain(),
                                             UINT64_MAX,
-                                            m_SyncPrimitives->getImageAvailableSemaphore(m_CurrentFrame),
+                                            this->m_SyncPrimitives->getImageAvailableSemaphore(this->m_CurrentFrame),
                                             VK_NULL_HANDLE,
                                             &imageIndex);
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR)
     {
-        m_SwapChainContext->recreateSwapChain();
+        this->m_SwapChainContext->recreateSwapChain();
+        if (this->m_debugOverlay)
+            this->m_debugOverlay->onWindowResize(this->m_SwapChainContext->getSwapChainExtent());
         return;
     }
     if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
         throw std::runtime_error("failed to acquire swap chain image");
 
-    if (m_SyncPrimitives->getImageInFlight(imageIndex) != VK_NULL_HANDLE)
-        vkWaitForFences(m_DeviceContext->getDevice(), 1, &m_SyncPrimitives->getImageInFlight(imageIndex), VK_TRUE, UINT64_MAX);
-    m_SyncPrimitives->getImageInFlight(imageIndex) = m_SyncPrimitives->getInFlightFence(m_CurrentFrame);
+    if (this->m_SyncPrimitives->getImageInFlight(imageIndex) != VK_NULL_HANDLE)
+        vkWaitForFences(this->m_DeviceContext->getDevice(), 1, &this->m_SyncPrimitives->getImageInFlight(imageIndex), VK_TRUE, UINT64_MAX);
+    this->m_SyncPrimitives->getImageInFlight(imageIndex) = this->m_SyncPrimitives->getInFlightFence(this->m_CurrentFrame);
 
-    updateLightUbo(m_CurrentFrame, gameTicks);
-    glm::vec3 skyColor = updateUniformBuffer(m_CurrentFrame, camera, playerPos, settings);
+    updateLightUbo(this->m_CurrentFrame, gameTicks);
+    glm::vec3 skyColor = updateUniformBuffer(this->m_CurrentFrame, camera, playerPos);
+
+    if (showDebugOverlay && this->m_debugOverlay)
+    {
+        float fps = 1.0f / 0.004f; // TODO: fix this
+        this->m_debugOverlay->update(*this->m_player, this->m_Settings, fps, this->m_terrainGen->getSeed());
+    }
 
     float time_of_day = (float)gameTicks / 24000.0f;
     float sun_angle = time_of_day * 2.0f * glm::pi<float>() - glm::half_pi<float>();
@@ -95,7 +104,6 @@ void VulkanRenderer::drawFrame(Camera &camera,
 
     glm::mat4 invView = glm::inverse(camera.getViewMatrix());
     glm::vec3 camPos = glm::vec3(invView[3]);
-
     glm::vec3 sunDir = glm::normalize(glm::vec3(sin(sun_angle), cos(sun_angle), 0.2f));
     glm::vec3 moonDir = glm::normalize(glm::vec3(sin(moon_angle), cos(moon_angle), 0.2f));
 
@@ -104,7 +112,7 @@ void VulkanRenderer::drawFrame(Camera &camera,
         glm::vec3 look = glm::normalize(camPos - objPos);
         glm::vec3 right = glm::normalize(glm::cross(up, look));
         glm::vec3 up2 = glm::cross(look, right);
-        glm::mat4 transform;
+        glm::mat4 transform = glm::mat4(1.0f);
         transform[0] = glm::vec4(right, 0);
         transform[1] = glm::vec4(up2, 0);
         transform[2] = glm::vec4(look, 0);
@@ -121,7 +129,6 @@ void VulkanRenderer::drawFrame(Camera &camera,
     SkyPushConstant sun_pc;
     sun_pc.model = makeBillboardMatrix(sunPos, camPos, glm::vec3(0, 1, 0)) * glm::scale(glm::mat4(1.0f), glm::vec3(size));
     sun_pc.is_sun = 1;
-
     SkyPushConstant moon_pc;
     moon_pc.model = makeBillboardMatrix(moonPos, camPos, glm::vec3(0, 1, 0)) * glm::scale(glm::mat4(1.0f), glm::vec3(size));
     moon_pc.is_sun = 0;
@@ -137,65 +144,67 @@ void VulkanRenderer::drawFrame(Camera &camera,
         chunkPtr->markReady(*this);
         if (!frustum.intersects(chunkPtr->getAABB()))
             continue;
-
         float dist = glm::distance(glm::vec2(pos.x, pos.z), glm::vec2(playerChunkPos.x, playerChunkPos.z));
-        int reqLod = (!settings.lodDistances.empty() && dist <= settings.lodDistances[0]) ? 0 : 1;
+        int reqLod = (!this->m_Settings.lodDistances.empty() && dist <= this->m_Settings.lodDistances[0]) ? 0 : 1;
         int best = chunkPtr->getBestAvailableLOD(reqLod);
         if (best != -1)
             renderChunks.push_back({chunkPtr.get(), best});
     }
 
-    vkResetFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(m_CurrentFrame));
-    vkResetCommandBuffer(m_CommandManager->getCommandBuffer(m_CurrentFrame), 0);
-    m_CommandManager->recordCommandBuffer(
-        imageIndex, m_CurrentFrame, renderChunks, m_DescriptorSets,
-        skyColor, sun_pc, moon_pc, isSunVisible, isMoonVisible,
-        m_SkySphereVertexBuffer.get(), m_SkySphereIndexBuffer.get(), m_SkySphereIndexCount,
-        m_CrosshairVertexBuffer.get(),
-        m_DebugCubeVertexBuffer.get(), m_DebugCubeIndexBuffer.get(), m_DebugCubeIndexCount,
-        settings, debugAABBs);
+    vkResetFences(this->m_DeviceContext->getDevice(), 1, this->m_SyncPrimitives->getInFlightFencePtr(this->m_CurrentFrame));
+    vkResetCommandBuffer(this->m_CommandManager->getCommandBuffer(this->m_CurrentFrame), 0);
 
-    VkSemaphore waitSemas[]{m_SyncPrimitives->getImageAvailableSemaphore(m_CurrentFrame)};
+    this->m_CommandManager->recordCommandBuffer(
+        imageIndex, this->m_CurrentFrame, renderChunks, this->m_DescriptorSets,
+        skyColor, sun_pc, moon_pc, isSunVisible, isMoonVisible,
+        this->m_SkySphereVertexBuffer.get(), this->m_SkySphereIndexBuffer.get(), this->m_SkySphereIndexCount,
+        this->m_CrosshairVertexBuffer.get(),
+        this->m_DebugCubeVertexBuffer.get(), this->m_DebugCubeIndexBuffer.get(), this->m_DebugCubeIndexCount,
+        this->m_Settings, debugAABBs);
+
+    VkSemaphore waitSemas[]{this->m_SyncPrimitives->getImageAvailableSemaphore(this->m_CurrentFrame)};
     VkPipelineStageFlags waitStages[]{VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-    VkSemaphore signalSemas[]{m_SyncPrimitives->getRenderFinishedSemaphore(m_CurrentFrame)};
+    VkSemaphore signalSemas[]{this->m_SyncPrimitives->getRenderFinishedSemaphore(this->m_CurrentFrame)};
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     si.waitSemaphoreCount = 1;
     si.pWaitSemaphores = waitSemas;
     si.pWaitDstStageMask = waitStages;
-    VkCommandBuffer cb = m_CommandManager->getCommandBuffer(m_CurrentFrame);
+    VkCommandBuffer cb = this->m_CommandManager->getCommandBuffer(this->m_CurrentFrame);
     si.commandBufferCount = 1;
     si.pCommandBuffers = &cb;
     si.signalSemaphoreCount = 1;
     si.pSignalSemaphores = signalSemas;
     {
         std::scoped_lock lk(gGraphicsQueueMutex);
-        vkQueueSubmit(m_DeviceContext->getGraphicsQueue(), 1, &si, m_SyncPrimitives->getInFlightFence(m_CurrentFrame));
+        vkQueueSubmit(this->m_DeviceContext->getGraphicsQueue(), 1, &si, this->m_SyncPrimitives->getInFlightFence(this->m_CurrentFrame));
     }
 
     VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
     pi.waitSemaphoreCount = 1;
     pi.pWaitSemaphores = signalSemas;
-    VkSwapchainKHR swp[]{m_SwapChainContext->getSwapChain()};
+    VkSwapchainKHR swp[]{this->m_SwapChainContext->getSwapChain()};
     pi.swapchainCount = 1;
     pi.pSwapchains = swp;
     pi.pImageIndices = &imageIndex;
     {
         std::scoped_lock lk(gGraphicsQueueMutex);
-        result = vkQueuePresentKHR(m_DeviceContext->getPresentQueue(), &pi);
+        result = vkQueuePresentKHR(this->m_DeviceContext->getPresentQueue(), &pi);
     }
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || m_Window.wasWindowResized())
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || this->m_Window.wasWindowResized())
     {
-        m_Window.resetWindowResizedFlag();
-        m_SwapChainContext->recreateSwapChain();
+        this->m_Window.resetWindowResizedFlag();
+        this->m_SwapChainContext->recreateSwapChain();
+        if (this->m_debugOverlay)
+            this->m_debugOverlay->onWindowResize(this->m_SwapChainContext->getSwapChainExtent());
     }
     else if (result != VK_SUCCESS)
         throw std::runtime_error("failed to present swap chain image");
 
-    m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+    this->m_CurrentFrame = (this->m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
-glm::vec3 VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos, const Settings &settings)
+glm::vec3 VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos)
 {
     const float eyeHeight = 1.8f * 0.9f;
     glm::vec3 cameraWorldPos = playerPos + glm::vec3(0.0f, eyeHeight, 0.0f);
@@ -222,14 +231,13 @@ glm::vec3 VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &cam
     ubo.skyColor = skyColor;
     ubo.time = static_cast<float>(glfwGetTime());
     ubo.isUnderwater = (cameraWorldPos.y < TerrainGenerator::SEA_LEVEL) ? 1 : 0;
-    ubo.flags = settings.rayTracingFlags;
+    ubo.flags = m_Settings.rayTracingFlags;
 
     memcpy(m_UniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 
     return skyColor;
 }
 
-#pragma region Unchanged Functions
 void VulkanRenderer::enqueueDestroy(VmaBuffer &&buffer)
 {
     if (buffer.get() != VK_NULL_HANDLE)

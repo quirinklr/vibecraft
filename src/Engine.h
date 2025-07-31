@@ -66,6 +66,8 @@ private:
     VulkanRenderer m_Renderer;
     DebugController m_debugController;
 
+    bool m_showDebugOverlay = false;
+    bool m_key_Z_last_state = false;
     uint32_t m_gameTicks = 6000;
     float m_ticksPerSecond = 20.0f;
     float m_timeAccumulator = 0.0f;
