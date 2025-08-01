@@ -189,7 +189,7 @@ void CommandManager::recordRayTraceCommand(uint32_t currentFrame, VkDescriptorSe
                                            const VkStridedDeviceAddressRegionKHR *missRegion,
                                            const VkStridedDeviceAddressRegionKHR *hitRegion,
                                            const VkStridedDeviceAddressRegionKHR *callRegion,
-                                        const void* pushConstants)
+                                           const void *pushConstants, VkImage shadowImage)
 {
     VkCommandBuffer cb = m_RayTraceCommandBuffers[currentFrame];
     vkResetCommandBuffer(cb, 0);
@@ -226,10 +226,12 @@ void CommandManager::recordRayTraceCommand(uint32_t currentFrame, VkDescriptorSe
     barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
     barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
+    barrier.image = shadowImage;
     barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     barrier.subresourceRange.levelCount = 1;
     barrier.subresourceRange.layerCount = 1;

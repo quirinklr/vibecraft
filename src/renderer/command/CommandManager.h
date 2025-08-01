@@ -50,7 +50,7 @@ public:
                                const VkStridedDeviceAddressRegionKHR *missRegion,
                                const VkStridedDeviceAddressRegionKHR *hitRegion,
                                const VkStridedDeviceAddressRegionKHR *callRegion,
-                               const void *pushConstants);
+                               const void *pushConstants, VkImage shadowImage);
 
     VkCommandBuffer getRayTraceCommandBuffer(uint32_t index) const { return m_RayTraceCommandBuffers[index]; }
 

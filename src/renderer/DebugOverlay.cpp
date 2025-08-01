@@ -92,9 +92,16 @@ void DebugOverlay::createFontTexture()
     VmaAllocationCreateInfo allocInfo{0, VMA_MEMORY_USAGE_GPU_ONLY};
     m_fontImage = VmaImage(m_deviceContext.getAllocator(), imageInfo, allocInfo);
 
-    UploadHelpers::transitionImageLayout(m_deviceContext, m_commandPool, m_fontImage.get(), VK_FORMAT_R8_UNORM, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    UploadHelpers::copyBufferToImage(m_deviceContext, m_commandPool, stagingBuffer.get(), m_fontImage.get(), bitmap_w, bitmap_h);
-    UploadHelpers::transitionImageLayout(m_deviceContext, m_commandPool, m_fontImage.get(), VK_FORMAT_R8_UNORM, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    VkCommandBuffer cmd = UploadHelpers::beginSingleTimeCommands(m_deviceContext, m_commandPool);
+    VkImageSubresourceRange range{};
+    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    range.levelCount = 1;
+    range.layerCount = 1;
+
+    UploadHelpers::transitionImageLayout(cmd, m_fontImage.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, range, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+    UploadHelpers::copyBufferToImage(cmd, stagingBuffer.get(), m_fontImage.get(), bitmap_w, bitmap_h);
+    UploadHelpers::transitionImageLayout(cmd, m_fontImage.get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, range, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+    UploadHelpers::endSingleTimeCommands(m_deviceContext, m_commandPool, cmd);
 
     m_fontImageView = TextureManager::createImageView(m_deviceContext.getDevice(), m_fontImage.get(), VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
 
