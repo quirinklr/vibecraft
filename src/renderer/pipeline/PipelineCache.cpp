@@ -303,11 +303,11 @@ void PipelineCache::createSkyPipeline()
         {m_DeviceContext.getDevice()});
 }
 
-#pragma region Unchanged Functions
 void PipelineCache::createDebugPipeline()
 {
-    auto vertShader = createShaderModule(readFile("shaders/debug.vert.spv"), m_DeviceContext.getDevice());
-    auto fragShader = createShaderModule(readFile("shaders/debug.frag.spv"), m_DeviceContext.getDevice());
+
+    auto vertShader = makeShader(m_DeviceContext.getDevice(), "shaders/debug.vert.spv");
+    auto fragShader = makeShader(m_DeviceContext.getDevice(), "shaders/debug.frag.spv");
 
     VkPipelineShaderStageCreateInfo shaderStages[] = {
         {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vertShader.get(), "main"},
@@ -394,10 +394,10 @@ void PipelineCache::createDebugPipeline()
 
 void PipelineCache::createCrosshairPipeline()
 {
-    auto vertShaderCode = createShaderModule(readFile("shaders/crosshair.vert.spv"),
-                                             m_DeviceContext.getDevice());
-    auto fragShaderCode = createShaderModule(readFile("shaders/crosshair.frag.spv"),
-                                             m_DeviceContext.getDevice());
+
+    auto vertShaderCode = makeShader(m_DeviceContext.getDevice(), "shaders/crosshair.vert.spv");
+    auto fragShaderCode = makeShader(m_DeviceContext.getDevice(), "shaders/crosshair.frag.spv");
+
     VkPipelineShaderStageCreateInfo vertStageInfo{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vertShaderCode.get(), "main"};
     VkPipelineShaderStageCreateInfo fragStageInfo{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, fragShaderCode.get(), "main"};
     VkPipelineShaderStageCreateInfo shaderStages[] = {vertStageInfo, fragStageInfo};
@@ -484,24 +484,3 @@ void PipelineCache::createCrosshairPipeline()
         throw std::runtime_error("failed to create crosshair graphics pipeline!");
     m_CrosshairPipeline = VulkanHandle<VkPipeline, PipelineDeleter>(pipeline, {m_DeviceContext.getDevice()});
 }
-
-std::vector<char> PipelineCache::readFile(const std::string &filename)
-{
-    return readBinaryFile(filename);
-}
-
-VulkanHandle<VkShaderModule, ShaderModuleDeleter>
-PipelineCache::createShaderModule(const std::vector<char> &code,
-                                  VkDevice device)
-{
-    VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-    ci.codeSize = code.size();
-    ci.pCode = reinterpret_cast<const uint32_t *>(code.data());
-
-    VkShaderModule mod{};
-    if (vkCreateShaderModule(device, &ci, nullptr, &mod) != VK_SUCCESS)
-        throw std::runtime_error("failed to create shader module!");
-
-    return VulkanHandle<VkShaderModule, ShaderModuleDeleter>(mod, {device});
-}
-#pragma endregion

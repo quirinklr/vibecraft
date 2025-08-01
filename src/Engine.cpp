@@ -30,10 +30,22 @@ Engine::Engine()
 
 Engine::~Engine()
 {
+    std::cout << "Engine: Destructor started." << std::endl;
+
+    std::cout << "Engine: Shutting down thread pool..." << std::endl;
+    m_Pool.shutdown();
+    std::cout << "Engine: Thread pool shut down." << std::endl;
+
+    std::cout << "Engine: Waiting for GPU to go idle..." << std::endl;
+    vkDeviceWaitIdle(m_Renderer.getDeviceContext()->getDevice());
+    std::cout << "Engine: GPU is idle." << std::endl;
+
     for (auto &[p, c] : m_Chunks)
         c->cleanup(m_Renderer);
     for (auto &c : m_Garbage)
         c->cleanup(m_Renderer);
+
+    std::cout << "Engine: Destructor finished." << std::endl;
 }
 
 Block Engine::get_block(int x, int y, int z)

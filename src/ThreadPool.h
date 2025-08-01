@@ -7,6 +7,7 @@
 #include <thread>
 #include <stop_token>
 #include <mutex>
+#include <iostream>
 
 class ThreadPool
 {
@@ -44,11 +45,27 @@ public:
 
     ~ThreadPool()
     {
+
+        if (!workers.empty())
+        {
+            shutdown();
+        }
+    }
+
+    void shutdown()
+    {
+        std::cout << "ThreadPool: Shutdown initiated." << std::endl;
         {
             std::scoped_lock lock(mtx);
+
+            std::queue<std::function<void(std::stop_token)>> empty;
+            jobs.swap(empty);
             quit = true;
         }
         cv.notify_all();
+
+        workers.clear();
+        std::cout << "ThreadPool: All workers joined. Shutdown complete." << std::endl;
     }
 
     void submit(std::function<void(std::stop_token)> f)
