@@ -14,7 +14,6 @@ public:
     VkSemaphore getRenderFinishedSemaphore(uint32_t index) const { return m_RenderFinishedSemaphores[index].get(); }
     VkFence getInFlightFence(uint32_t index) const { return m_InFlightFences[index].get(); }
     VkFence* getInFlightFencePtr(uint32_t index) { return m_InFlightFences[index].p(); }
-    VkFence& getImageInFlight(uint32_t index) { return m_ImagesInFlight[index]; }
 
 private:
     void createSyncObjects();
@@ -25,5 +24,4 @@ private:
     std::vector<VulkanHandle<VkSemaphore, SemaphoreDeleter>> m_ImageAvailableSemaphores;
     std::vector<VulkanHandle<VkSemaphore, SemaphoreDeleter>> m_RenderFinishedSemaphores;
     std::vector<VulkanHandle<VkFence, FenceDeleter>> m_InFlightFences;
-    std::vector<VkFence> m_ImagesInFlight;
 };

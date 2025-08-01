@@ -113,12 +113,9 @@ void VulkanRenderer::drawFrame(Camera &camera,
             this->m_debugOverlay->onWindowResize(this->m_SwapChainContext->getSwapChainExtent());
         return;
     }
+
     if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
         throw std::runtime_error("failed to acquire swap chain image");
-
-    if (this->m_SyncPrimitives->getImageInFlight(imageIndex) != VK_NULL_HANDLE)
-        vkWaitForFences(this->m_DeviceContext->getDevice(), 1, &this->m_SyncPrimitives->getImageInFlight(imageIndex), VK_TRUE, UINT64_MAX);
-    this->m_SyncPrimitives->getImageInFlight(imageIndex) = this->m_SyncPrimitives->getInFlightFence(this->m_CurrentFrame);
 
     updateLightUbo(this->m_CurrentFrame, gameTicks);
     glm::vec3 skyColor = updateUniformBuffer(this->m_CurrentFrame, camera, playerPos);
@@ -177,7 +174,7 @@ void VulkanRenderer::drawFrame(Camera &camera,
             renderChunks.push_back({chunkPtr.get(), best});
     }
 
-    if (m_DeviceContext->isRayTracingSupported())
+    if (m_DeviceContext->isRayTracingSupported() && m_Settings.rayTracingFlags & SettingsEnums::SHADOWS)
     {
         buildBlas(renderChunks);
         buildTlas(renderChunks);
@@ -900,7 +897,7 @@ void VulkanRenderer::updateDescriptorSets()
 
     VkDescriptorImageInfo shadowImageInfo{};
     shadowImageInfo.sampler = m_TextureManager->getTextureSampler();
-    
+
     if (m_rtShadowImageView.get() != VK_NULL_HANDLE)
     {
         shadowImageInfo.imageView = m_rtShadowImageView.get();

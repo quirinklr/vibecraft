@@ -119,7 +119,6 @@ void Chunk::markReady(VulkanRenderer &renderer)
         if (job.fence != VK_NULL_HANDLE &&
             vkGetFenceStatus(renderer.getDevice(), job.fence) == VK_SUCCESS)
         {
-            vkWaitForFences(renderer.getDevice(), 1, &job.fence, VK_TRUE, UINT64_MAX);
             if (job.cmdBuffer != VK_NULL_HANDLE)
                 vkFreeCommandBuffers(renderer.getDevice(),
                                      renderer.getTransferCommandPool()
@@ -138,7 +137,6 @@ void Chunk::markReady(VulkanRenderer &renderer)
         if (job.fence != VK_NULL_HANDLE &&
             vkGetFenceStatus(renderer.getDevice(), job.fence) == VK_SUCCESS)
         {
-            vkWaitForFences(renderer.getDevice(), 1, &job.fence, VK_TRUE, UINT64_MAX);
             if (job.cmdBuffer != VK_NULL_HANDLE)
                 vkFreeCommandBuffers(renderer.getDevice(),
                                      renderer.getTransferCommandPool()
