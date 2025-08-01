@@ -20,6 +20,7 @@ layout(std140, set = 0, binding = 3) uniform ULight {
 } uboLight;
 
 layout(set = 0, binding = 1) uniform sampler2D texSampler;
+layout(set = 0, binding = 5) uniform sampler2D shadowMap;
 layout(location = 0) out vec4 outColor;
 
 const float TILE_SIZE = 1.0 / 16.0;
@@ -52,7 +53,7 @@ void main() {
         vec3 finalLight = mix(AMBIENT_NIGHT, SUNLIGHT, sunUpFactor);
 
         
-        float computedShadow = 0.5; 
+        float computedShadow = texture(shadowMap, gl_FragCoord.xy / textureSize(shadowMap, 0)).r;
         float shadowFactor = mix(1.0, computedShadow, float((cameraUbo.flags & FLAG_SHADOWS) != 0));
 
         outColor.rgb = textureColor.rgb * finalLight * shadowFactor;

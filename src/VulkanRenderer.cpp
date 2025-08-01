@@ -49,6 +49,8 @@ VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings, Player 
     if (m_DeviceContext->isRayTracingSupported())
     {
         loadRayTracingFunctions();
+        createRayTracingResources();
+        createShaderBindingTable();
     }
 }
 
@@ -165,10 +167,21 @@ void VulkanRenderer::drawFrame(Camera &camera,
     {
         buildBlas(renderChunks);
         buildTlas(renderChunks);
+        updateRtDescriptorSet();
     }
 
     vkResetFences(this->m_DeviceContext->getDevice(), 1, this->m_SyncPrimitives->getInFlightFencePtr(this->m_CurrentFrame));
-    vkResetCommandBuffer(this->m_CommandManager->getCommandBuffer(this->m_CurrentFrame), 0);
+    vkResetCommandBuffer(m_CommandManager->getRayTraceCommandBuffer(m_CurrentFrame), 0);
+
+    RayTracePushConstants pc{};
+    pc.viewInverse = glm::inverse(camera.getViewMatrix());
+    pc.projInverse = glm::inverse(camera.getProjectionMatrix());
+    pc.cameraPos = playerPos + glm::vec3(0.0f, 1.8f * 0.9f, 0.0f);
+    memcpy(&pc.lightDirection, m_LightUbosMapped[m_CurrentFrame], sizeof(glm::vec3));
+
+    this->m_CommandManager->recordRayTraceCommand(
+        m_CurrentFrame, m_rtDescriptorSet,
+        &m_rgenRegion, &m_missRegion, &m_hitRegion, &m_callRegion, &pc);
 
     this->m_CommandManager->recordCommandBuffer(
         imageIndex, this->m_CurrentFrame, renderChunks, this->m_DescriptorSets,
@@ -181,13 +194,19 @@ void VulkanRenderer::drawFrame(Camera &camera,
     VkSemaphore waitSemas[]{this->m_SyncPrimitives->getImageAvailableSemaphore(this->m_CurrentFrame)};
     VkPipelineStageFlags waitStages[]{VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     VkSemaphore signalSemas[]{this->m_SyncPrimitives->getRenderFinishedSemaphore(this->m_CurrentFrame)};
+
+    std::array<VkCommandBuffer, 2> cmdBuffers = {
+        m_CommandManager->getRayTraceCommandBuffer(m_CurrentFrame),
+        m_CommandManager->getCommandBuffer(m_CurrentFrame)};
+
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     si.waitSemaphoreCount = 1;
     si.pWaitSemaphores = waitSemas;
     si.pWaitDstStageMask = waitStages;
+
     VkCommandBuffer cb = this->m_CommandManager->getCommandBuffer(this->m_CurrentFrame);
-    si.commandBufferCount = 1;
-    si.pCommandBuffers = &cb;
+    si.commandBufferCount = static_cast<uint32_t>(cmdBuffers.size());
+    si.pCommandBuffers = cmdBuffers.data();
     si.signalSemaphoreCount = 1;
     si.pSignalSemaphores = signalSemas;
     {
@@ -230,7 +249,131 @@ void VulkanRenderer::loadRayTracingFunctions()
     vkCmdBuildAccelerationStructuresKHR = (PFN_vkCmdBuildAccelerationStructuresKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkCmdBuildAccelerationStructuresKHR");
     vkCreateRayTracingPipelinesKHR = (PFN_vkCreateRayTracingPipelinesKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkCreateRayTracingPipelinesKHR");
     vkGetRayTracingShaderGroupHandlesKHR = (PFN_vkGetRayTracingShaderGroupHandlesKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkGetRayTracingShaderGroupHandlesKHR");
+    vkCmdTraceRaysKHR = (PFN_vkCmdTraceRaysKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkCmdTraceRaysKHR");
     m_rtFunctionsLoaded = true;
+}
+
+void VulkanRenderer::createRayTracingResources()
+{
+    VkExtent2D extent = m_SwapChainContext->getSwapChainExtent();
+
+    VkImageCreateInfo imageInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.format = VK_FORMAT_R32_SFLOAT;
+    imageInfo.extent = {extent.width, extent.height, 1};
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    m_rtShadowImage = VmaImage(m_DeviceContext->getAllocator(), imageInfo, allocInfo);
+
+    m_rtShadowImageView = TextureManager::createImageView(m_DeviceContext->getDevice(), m_rtShadowImage.get(), VK_FORMAT_R32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT);
+
+    std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+    layoutInfo.pBindings = bindings.data();
+
+    VkDescriptorSetLayout layout;
+    vkCreateDescriptorSetLayout(m_DeviceContext->getDevice(), &layoutInfo, nullptr, &layout);
+    m_rtDescriptorSetLayout = VulkanHandle<VkDescriptorSetLayout, DescriptorSetLayoutDeleter>(layout, {m_DeviceContext->getDevice()});
+
+    std::array<VkDescriptorPoolSize, 2> poolSizes{};
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    poolSizes[0].descriptorCount = 1;
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    poolSizes[1].descriptorCount = 1;
+
+    VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    poolInfo.maxSets = 1;
+    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+    poolInfo.pPoolSizes = poolSizes.data();
+
+    VkDescriptorPool pool;
+    vkCreateDescriptorPool(m_DeviceContext->getDevice(), &poolInfo, nullptr, &pool);
+    m_rtDescriptorPool = VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter>(pool, {m_DeviceContext->getDevice()});
+
+    VkDescriptorSetAllocateInfo allocSetInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    allocSetInfo.descriptorPool = m_rtDescriptorPool.get();
+    allocSetInfo.descriptorSetCount = 1;
+    VkDescriptorSetLayout setLayout = m_rtDescriptorSetLayout.get();
+    allocSetInfo.pSetLayouts = &setLayout;
+    vkAllocateDescriptorSets(m_DeviceContext->getDevice(), &allocSetInfo, &m_rtDescriptorSet);
+}
+
+void VulkanRenderer::createShaderBindingTable()
+{
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
+    VkPhysicalDeviceProperties2 props2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    props2.pNext = &rtProps;
+    vkGetPhysicalDeviceProperties2(m_DeviceContext->getPhysicalDevice(), &props2);
+
+    const uint32_t handleSize = rtProps.shaderGroupHandleSize;
+    const uint32_t handleSizeAligned = (handleSize + rtProps.shaderGroupBaseAlignment - 1) & ~(rtProps.shaderGroupBaseAlignment - 1);
+    const uint32_t groupCount = 3;
+    const uint32_t sbtSize = groupCount * handleSizeAligned;
+
+    std::vector<uint8_t> shaderHandleStorage(sbtSize);
+    vkGetRayTracingShaderGroupHandlesKHR(m_DeviceContext->getDevice(), m_PipelineCache->getRayTracingPipeline(), 0, groupCount, sbtSize, shaderHandleStorage.data());
+
+    m_shaderBindingTable = UploadHelpers::createDeviceLocalBufferFromData(
+        *m_DeviceContext, m_CommandManager->getCommandPool(), shaderHandleStorage.data(), sbtSize,
+        VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+
+    VkDeviceAddress sbtAddress = getBufferDeviceAddress(m_shaderBindingTable.get());
+    m_rgenRegion.deviceAddress = sbtAddress;
+    m_rgenRegion.stride = handleSizeAligned;
+    m_rgenRegion.size = handleSizeAligned;
+
+    m_missRegion.deviceAddress = sbtAddress + handleSizeAligned;
+    m_missRegion.stride = handleSizeAligned;
+    m_missRegion.size = handleSizeAligned;
+
+    m_hitRegion.deviceAddress = sbtAddress + 2 * handleSizeAligned;
+    m_hitRegion.stride = handleSizeAligned;
+    m_hitRegion.size = handleSizeAligned;
+}
+
+void VulkanRenderer::updateRtDescriptorSet()
+{
+    VkWriteDescriptorSetAccelerationStructureKHR descriptorASInfo{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
+    descriptorASInfo.accelerationStructureCount = 1;
+    descriptorASInfo.pAccelerationStructures = &m_tlas.handle;
+
+    VkWriteDescriptorSet asWrite{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    asWrite.pNext = &descriptorASInfo;
+    asWrite.dstSet = m_rtDescriptorSet;
+    asWrite.dstBinding = 0;
+    asWrite.descriptorCount = 1;
+    asWrite.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+
+    VkDescriptorImageInfo imageInfo{};
+    imageInfo.imageView = m_rtShadowImageView.get();
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    VkWriteDescriptorSet imageWrite{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    imageWrite.dstSet = m_rtDescriptorSet;
+    imageWrite.dstBinding = 1;
+    imageWrite.descriptorCount = 1;
+    imageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    imageWrite.pImageInfo = &imageInfo;
+
+    std::array<VkWriteDescriptorSet, 2> writes = {asWrite, imageWrite};
+    vkUpdateDescriptorSets(m_DeviceContext->getDevice(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 }
 
 void VulkanRenderer::buildBlas(const std::vector<std::pair<Chunk *, int>> &chunksToBuild)
@@ -649,8 +792,9 @@ void VulkanRenderer::createDescriptorSets()
         VkDescriptorImageInfo sunInfo{m_TextureManager->getTextureSampler(), m_SunTextureView.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorBufferInfo lightUboInfo{m_LightUbos[i].get(), 0, sizeof(LightUbo)};
         VkDescriptorImageInfo moonInfo{m_TextureManager->getTextureSampler(), m_MoonTextureView.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo shadowImageInfo{m_TextureManager->getTextureSampler(), m_rtShadowImageView.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
-        std::array<VkWriteDescriptorSet, 5> writes{};
+        std::array<VkWriteDescriptorSet, 6> writes{};
 
         writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[0].dstSet = m_DescriptorSets[i];
@@ -686,6 +830,13 @@ void VulkanRenderer::createDescriptorSets()
         writes[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         writes[4].descriptorCount = 1;
         writes[4].pImageInfo = &moonInfo;
+
+        writes[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[5].dstSet = m_DescriptorSets[i];
+        writes[5].dstBinding = 5;
+        writes[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[5].descriptorCount = 1;
+        writes[5].pImageInfo = &shadowImageInfo;
 
         vkUpdateDescriptorSets(m_DeviceContext->getDevice(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }

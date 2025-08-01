@@ -19,6 +19,7 @@
 #include "renderer/RendererConfig.h"
 #include "math/Ivec3Less.h"
 #include "renderer/DebugOverlay.h"
+#include "renderer/RayTracingPushConstants.h"
 
 #include <map>
 #include <memory>
@@ -60,6 +61,9 @@ private:
     void updateLightUbo(uint32_t currentImage, uint32_t gameTicks);
     void buildBlas(const std::vector<std::pair<Chunk *, int>> &chunksToRender);
     void buildTlas(const std::vector<std::pair<Chunk *, int>> &chunksToRender);
+    void createRayTracingResources();
+    void createShaderBindingTable();
+    void updateRtDescriptorSet();
 
     void createUniformBuffers();
     void createLightUbo();
@@ -104,9 +108,22 @@ private:
     PFN_vkCmdWriteAccelerationStructuresPropertiesKHR vkCmdWriteAccelerationStructuresPropertiesKHR;
     PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR;
     PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR;
+    PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR;
 
     AccelerationStructure m_tlas;
     VmaBuffer m_tlasInstanceBuffer;
+
+    VmaImage m_rtShadowImage;
+    VulkanHandle<VkImageView, ImageViewDeleter> m_rtShadowImageView;
+    VulkanHandle<VkDescriptorSetLayout, DescriptorSetLayoutDeleter> m_rtDescriptorSetLayout;
+    VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter> m_rtDescriptorPool;
+    VkDescriptorSet m_rtDescriptorSet = VK_NULL_HANDLE;
+
+    VmaBuffer m_shaderBindingTable;
+    VkStridedDeviceAddressRegionKHR m_rgenRegion{};
+    VkStridedDeviceAddressRegionKHR m_missRegion{};
+    VkStridedDeviceAddressRegionKHR m_hitRegion{};
+    VkStridedDeviceAddressRegionKHR m_callRegion{};
 
     std::vector<VmaBuffer> m_UniformBuffers;
     std::vector<void *> m_UniformBuffersMapped;

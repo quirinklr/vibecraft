@@ -172,13 +172,76 @@ void CommandManager::createCommandPool()
 void CommandManager::createCommandBuffers()
 {
     m_CommandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+    m_RayTraceCommandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfo.commandPool = m_CommandPool.get();
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandBufferCount = (uint32_t)m_CommandBuffers.size();
-    if (vkAllocateCommandBuffers(m_DeviceContext.getDevice(), &allocInfo, m_CommandBuffers.data()) != VK_SUCCESS)
-    {
-        throw std::runtime_error("failed to allocate command buffers!");
-    }
+
+    allocInfo.commandBufferCount = (uint32_t)m_RayTraceCommandBuffers.size();
+    vkAllocateCommandBuffers(m_DeviceContext.getDevice(), &allocInfo, m_RayTraceCommandBuffers.data());
+}
+
+void CommandManager::recordRayTraceCommand(uint32_t currentFrame, VkDescriptorSet rtDescriptorSet,
+                                           const VkStridedDeviceAddressRegionKHR *rgenRegion,
+                                           const VkStridedDeviceAddressRegionKHR *missRegion,
+                                           const VkStridedDeviceAddressRegionKHR *hitRegion,
+                                           const VkStridedDeviceAddressRegionKHR *callRegion,
+                                        const void* pushConstants)
+{
+    VkCommandBuffer cb = m_RayTraceCommandBuffers[currentFrame];
+    vkResetCommandBuffer(cb, 0);
+
+    VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    vkBeginCommandBuffer(cb, &beginInfo);
+
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_PipelineCache.getRayTracingPipeline());
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_PipelineCache.getRayTracingPipelineLayout(), 0, 1, &rtDescriptorSet, 0, 0);
+
+    vkCmdPushConstants(
+        cb,
+        m_PipelineCache.getRayTracingPipelineLayout(),
+        VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
+        0,
+        sizeof(RayTracePushConstants),
+        pushConstants);
+
+    VkExtent2D extent = m_SwapChainContext.getSwapChainExtent();
+    auto vkCmdTraceRaysKHR = (PFN_vkCmdTraceRaysKHR)vkGetDeviceProcAddr(m_DeviceContext.getDevice(), "vkCmdTraceRaysKHR");
+
+    vkCmdTraceRaysKHR(
+        cb,
+        rgenRegion,
+        missRegion,
+        hitRegion,
+        callRegion,
+        extent.width,
+        extent.height,
+        1);
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.layerCount = 1;
+
+    vkCmdPipelineBarrier(
+        cb,
+        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier);
+
+    vkEndCommandBuffer(cb);
 }

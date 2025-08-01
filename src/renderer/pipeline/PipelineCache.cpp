@@ -1,5 +1,6 @@
 #include "PipelineCache.h"
 #include "../Vertex.h"
+#include "../RayTracingPushConstants.h"
 
 #include <glm/glm.hpp>
 #include <fstream>
@@ -206,6 +207,14 @@ void PipelineCache::createRayTracingPipeline()
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
 
     pipelineLayoutInfo.setLayoutCount = 0;
+
+    VkPushConstantRange pcRange{};
+    pcRange.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+    pcRange.offset = 0;
+    pcRange.size = sizeof(RayTracePushConstants);
+
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pcRange;
 
     VkPipelineLayout layout;
     if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &layout) != VK_SUCCESS)
