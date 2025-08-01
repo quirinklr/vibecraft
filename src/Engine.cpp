@@ -355,6 +355,7 @@ void Engine::unloadDistantChunks(const glm::ivec3 &playerChunkPos)
 
 void Engine::processGarbage()
 {
+    vkDeviceWaitIdle(m_Renderer.getDeviceContext()->getDevice());
     std::lock_guard lockJobs(m_MeshJobsMutex);
     m_Garbage.erase(
         std::remove_if(m_Garbage.begin(), m_Garbage.end(),
