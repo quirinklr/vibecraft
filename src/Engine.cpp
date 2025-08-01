@@ -290,7 +290,6 @@ void Engine::set_block(int x, int y, int z, BlockId id)
         if (it != m_Chunks.end())
         {
             it->second->m_is_dirty.store(true);
-            it->second->m_blas_dirty.store(true);
         }
     };
 

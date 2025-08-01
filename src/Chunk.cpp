@@ -126,6 +126,8 @@ void Chunk::markReady(VulkanRenderer &renderer)
                                          : renderer.getCommandManager()->getCommandPool(),
                                      1, &job.cmdBuffer);
             vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
+
+            m_blas_dirty.store(true, std::memory_order_release);
             it = m_PendingUploads.erase(it);
         }
         else
