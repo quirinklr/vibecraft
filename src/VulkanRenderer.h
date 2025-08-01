@@ -63,8 +63,7 @@ private:
     glm::vec3 updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos);
     void updateLightUbo(uint32_t currentImage, uint32_t gameTicks);
     void buildBlas(const std::vector<std::pair<Chunk *, int>> &chunksToBuild, VkCommandBuffer cmd);
-    void buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &drawList,
-                        VkCommandBuffer cmd);
+    void buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &drawList, VkCommandBuffer cmd, uint32_t frame);
     void createRayTracingResources();
     void createShaderBindingTable();
     void updateRtDescriptorSet(uint32_t frame);
@@ -159,6 +158,7 @@ private:
     uint32_t m_CurrentFrame{0};
     std::vector<VmaBuffer> m_BufferDestroyQueue[MAX_FRAMES_IN_FLIGHT];
     std::vector<VmaImage> m_ImageDestroyQueue[MAX_FRAMES_IN_FLIGHT];
+    std::vector<VmaBuffer> m_asBuildStagingBuffers[MAX_FRAMES_IN_FLIGHT];
     std::vector<AccelerationStructure> m_AsDestroyQueue[MAX_FRAMES_IN_FLIGHT];
     std::mutex m_GraphicsQueueMutex;
 };

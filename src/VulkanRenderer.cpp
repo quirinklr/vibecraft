@@ -101,7 +101,7 @@ VulkanRenderer::~VulkanRenderer()
     {
 
         m_blasBuildScratchBuffers[i].clear();
-
+        m_asBuildStagingBuffers[i].clear();
         m_BufferDestroyQueue[i].clear();
         m_ImageDestroyQueue[i].clear();
 
@@ -155,9 +155,11 @@ void VulkanRenderer::drawFrame(Camera &camera,
                     m_SyncPrimitives->getInFlightFencePtr(slot),
                     VK_TRUE, UINT64_MAX);
 
+    m_asBuildStagingBuffers[slot].clear();
     m_blasBuildScratchBuffers[slot].clear();
     m_BufferDestroyQueue[slot].clear();
     m_ImageDestroyQueue[slot].clear();
+
     for (auto &as : m_AsDestroyQueue[slot])
         as.destroy(m_DeviceContext->getDevice());
     m_AsDestroyQueue[slot].clear();
@@ -202,7 +204,7 @@ void VulkanRenderer::drawFrame(Camera &camera,
         {
 
             buildBlas(renderChunks, cmd);
-            buildTlasAsync(renderChunks, cmd);
+            buildTlasAsync(renderChunks, cmd, slot);
 
             if (m_tlas.handle == VK_NULL_HANDLE)
             {
@@ -214,7 +216,7 @@ void VulkanRenderer::drawFrame(Camera &camera,
         if (m_Settings.rayTracingFlags & SettingsEnums::SHADOWS)
         {
             buildBlas(renderChunks, cmd);
-            buildTlasAsync(renderChunks, cmd);
+            buildTlasAsync(renderChunks, cmd, slot);
             updateRtDescriptorSet(slot);
 
             RayTracePushConstants pc{};
@@ -626,7 +628,7 @@ void VulkanRenderer::buildBlas(const std::vector<std::pair<Chunk *, int>> &chunk
 }
 
 void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &drawList,
-                                    VkCommandBuffer cmd)
+                                    VkCommandBuffer cmd, uint32_t frame)
 {
     if (!m_rtFunctionsLoaded || !m_DeviceContext->isRayTracingSupported() || cmd == VK_NULL_HANDLE)
         return;
@@ -656,11 +658,18 @@ void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &
             return;
 
         VkDeviceSize sizeBytes = sizeof(instances[0]) * instances.size();
-        m_tlasInstanceBuffer = UploadHelpers::createDeviceLocalBufferFromData(
-            *m_DeviceContext, m_CommandManager->getCommandPool(),
+
+        if (m_tlasInstanceBuffer.get() != VK_NULL_HANDLE)
+        {
+            enqueueDestroy(std::move(m_tlasInstanceBuffer));
+        }
+
+        m_tlasInstanceBuffer = UploadHelpers::createDeviceLocalBufferFromDataWithStaging(
+            *m_DeviceContext, cmd,
             instances.data(), sizeBytes,
             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
+                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+            m_asBuildStagingBuffers[frame]);
 
         VkDeviceAddress instAddr = getBufferDeviceAddress(m_tlasInstanceBuffer.get());
 
@@ -700,13 +709,24 @@ void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &
 
         vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build, &pRange);
 
-        VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-        mb.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-        mb.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
-        vkCmdPipelineBarrier(cmd,
-                             VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                             VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0,
-                             1, &mb, 0, nullptr, 0, nullptr);
+        VkBufferMemoryBarrier barrier = {};
+        barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.buffer = m_tlasInstanceBuffer.get();
+        barrier.offset = 0;
+        barrier.size = VK_WHOLE_SIZE;
+
+        vkCmdPipelineBarrier(
+            cmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+            0,
+            0, nullptr,
+            1, &barrier,
+            0, nullptr);
 
         VkAccelerationStructureDeviceAddressInfoKHR dai{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
         dai.accelerationStructure = m_tlas.handle;

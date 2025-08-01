@@ -53,6 +53,45 @@ void UploadHelpers::copyBuffer(const DeviceContext &dc,
     }
 }
 
+VmaBuffer UploadHelpers::createDeviceLocalBufferFromDataWithStaging(
+    const DeviceContext &dc,
+    VkCommandBuffer cmd,
+    const void *data,
+    VkDeviceSize size,
+    VkBufferUsageFlags usage,
+    std::vector<VmaBuffer> &frameStagingBuffers)
+{
+
+    VmaBuffer stagingBuffer;
+    {
+        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+        allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
+        stagingBuffer = VmaBuffer(dc.getAllocator(), bufferInfo, allocInfo);
+        void *mappedData;
+        vmaMapMemory(dc.getAllocator(), stagingBuffer.getAllocation(), &mappedData);
+        memcpy(mappedData, data, size);
+        vmaUnmapMemory(dc.getAllocator(), stagingBuffer.getAllocation());
+    }
+
+    VmaBuffer deviceLocalBuffer;
+    {
+        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage};
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+        deviceLocalBuffer = VmaBuffer(dc.getAllocator(), bufferInfo, allocInfo);
+    }
+
+    VkBufferCopy copyRegion{};
+    copyRegion.size = size;
+    vkCmdCopyBuffer(cmd, stagingBuffer.get(), deviceLocalBuffer.get(), 1, &copyRegion);
+
+    frameStagingBuffers.push_back(std::move(stagingBuffer));
+
+    return deviceLocalBuffer;
+}
+
 VkCommandBuffer UploadHelpers::beginSingleTimeCommands(const DeviceContext &dc, VkCommandPool pool)
 {
     VkCommandBufferAllocateInfo allocInfo{};
