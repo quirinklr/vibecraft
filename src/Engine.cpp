@@ -216,6 +216,31 @@ void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
     }
     m_key_Z_last_state = z_now;
 
+    static bool lLast = false;
+    bool lNow = glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS;
+    if (lNow && !lLast)
+    {
+
+        if (m_Settings.rayTracingFlags & SettingsEnums::SHADOWS)
+        {
+            m_Settings.rayTracingFlags &= ~SettingsEnums::SHADOWS;
+            std::cout << "Ray traced shadows: OFF\n";
+        }
+        else
+        {
+            if (m_Renderer.getDeviceContext()->isRayTracingSupported())
+            {
+                m_Settings.rayTracingFlags |= SettingsEnums::SHADOWS;
+                std::cout << "Ray traced shadows: ON\n";
+            }
+            else
+            {
+                std::cout << "Ray tracing not supported on this device\n";
+            }
+        }
+    }
+    lLast = lNow;
+
     m_player_ptr->process_keyboard(window);
 }
 
@@ -418,7 +443,7 @@ void Engine::createMeshJobs(const glm::ivec3 &playerChunkPos)
                     ch->m_blas_dirty.store(true, std::memory_order_release);
                 }
             }
-            
+
             if (is_dirty && !ch->hasLOD(1 - reqLod))
             {
                 pending.emplace_back(pos, 1 - reqLod);

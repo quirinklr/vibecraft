@@ -5,6 +5,7 @@
 #include "Camera.h"
 #include "UploadJob.h"
 #include "Chunk.h"
+#include "Globals.h"
 #include "renderer/Vertex.h"
 #include "renderer/core/InstanceContext.h"
 #include "renderer/core/DeviceContext.h"
@@ -23,6 +24,7 @@
 
 #include <map>
 #include <memory>
+#include <mutex>
 #include <glm/glm.hpp>
 
 class Player;
@@ -31,7 +33,7 @@ class TerrainGenerator;
 class VulkanRenderer
 {
 public:
-    VulkanRenderer(Window &window, const Settings &settings, Player *player, TerrainGenerator *terrainGen);
+    VulkanRenderer(Window &window, Settings &settings, Player *player, TerrainGenerator *terrainGen);
     ~VulkanRenderer();
     VulkanRenderer(const VulkanRenderer &) = delete;
     VulkanRenderer &operator=(const VulkanRenderer &) = delete;
@@ -85,7 +87,7 @@ private:
                             std::vector<Vertex> &outVertices,
                             std::vector<uint32_t> &outIndices);
     Window &m_Window;
-    const Settings &m_Settings;
+    Settings &m_Settings;
     Player *m_player;
     TerrainGenerator *m_terrainGen;
 
@@ -158,4 +160,5 @@ private:
     std::vector<VmaBuffer> m_BufferDestroyQueue[MAX_FRAMES_IN_FLIGHT];
     std::vector<VmaImage> m_ImageDestroyQueue[MAX_FRAMES_IN_FLIGHT];
     std::vector<AccelerationStructure> m_AsDestroyQueue[MAX_FRAMES_IN_FLIGHT];
+    std::mutex m_GraphicsQueueMutex;
 };
