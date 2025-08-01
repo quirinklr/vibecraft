@@ -47,6 +47,7 @@ public:
     void enqueueDestroy(VmaBuffer &&buffer);
     void enqueueDestroy(VmaImage &&image);
     void enqueueDestroy(VkBuffer buffer, VmaAllocation allocation);
+    void enqueueDestroy(AccelerationStructure &&as);
 
     VkDevice getDevice() const { return m_DeviceContext->getDevice(); }
     VmaAllocator getAllocator() const { return m_DeviceContext->getAllocator(); }
@@ -152,4 +153,5 @@ private:
     uint32_t m_CurrentFrame{0};
     std::vector<VmaBuffer> m_BufferDestroyQueue[MAX_FRAMES_IN_FLIGHT];
     std::vector<VmaImage> m_ImageDestroyQueue[MAX_FRAMES_IN_FLIGHT];
+    std::vector<AccelerationStructure> m_AsDestroyQueue[MAX_FRAMES_IN_FLIGHT];
 };

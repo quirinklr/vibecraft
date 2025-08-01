@@ -10,9 +10,35 @@ struct AccelerationStructure
     VkAccelerationStructureKHR handle = VK_NULL_HANDLE;
     VkDeviceAddress deviceAddress = 0;
 
+    AccelerationStructure() = default;
+
+    AccelerationStructure(AccelerationStructure &&other) noexcept
+        : buffer(std::move(other.buffer)), handle(other.handle), deviceAddress(other.deviceAddress)
+    {
+        other.handle = VK_NULL_HANDLE;
+        other.deviceAddress = 0;
+    }
+
+    AccelerationStructure &operator=(AccelerationStructure &&other) noexcept
+    {
+        if (this != &other)
+        {
+
+            buffer = std::move(other.buffer);
+            handle = other.handle;
+            deviceAddress = other.deviceAddress;
+
+            other.handle = VK_NULL_HANDLE;
+            other.deviceAddress = 0;
+        }
+        return *this;
+    }
+
+    AccelerationStructure(const AccelerationStructure &) = delete;
+    AccelerationStructure &operator=(const AccelerationStructure &) = delete;
+
     void destroy(VkDevice device)
     {
-
         if (handle)
         {
             auto vkDestroyAccelerationStructureKHR = (PFN_vkDestroyAccelerationStructureKHR)vkGetDeviceProcAddr(device, "vkDestroyAccelerationStructureKHR");

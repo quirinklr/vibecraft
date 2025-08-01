@@ -643,7 +643,7 @@ void Chunk::buildAndStageMesh(VmaAllocator allocator, RingStagingArena &arena,
 
 void Chunk::cleanup(VulkanRenderer &renderer)
 {
-    markReady(renderer);
+
     for (auto &[lod, mesh] : m_Meshes)
     {
         if (mesh.vertexBuffer != VK_NULL_HANDLE)
@@ -651,7 +651,10 @@ void Chunk::cleanup(VulkanRenderer &renderer)
         if (mesh.indexBuffer != VK_NULL_HANDLE)
             renderer.enqueueDestroy(mesh.indexBuffer, mesh.indexBufferAllocation);
 
-        mesh.blas.destroy(renderer.getDevice());
+        if (mesh.blas.handle != VK_NULL_HANDLE)
+        {
+            renderer.enqueueDestroy(std::move(mesh.blas));
+        }
     }
 
     for (auto &[lod, mesh] : m_TransparentMeshes)

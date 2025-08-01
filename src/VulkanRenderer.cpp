@@ -57,6 +57,19 @@ VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings, Player 
 VulkanRenderer::~VulkanRenderer()
 {
     vkDeviceWaitIdle(m_DeviceContext->getDevice());
+
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+    {
+        m_BufferDestroyQueue[i].clear();
+        m_ImageDestroyQueue[i].clear();
+
+        for (auto &as : m_AsDestroyQueue[i])
+        {
+            as.destroy(m_DeviceContext->getDevice());
+        }
+        m_AsDestroyQueue[i].clear();
+    }
+
     m_tlas.destroy(m_DeviceContext->getDevice());
 
     if (m_TransferCommandPool)
@@ -77,6 +90,13 @@ void VulkanRenderer::drawFrame(Camera &camera,
     DeferredFreeQueue::poll();
     this->m_BufferDestroyQueue[this->m_CurrentFrame].clear();
     this->m_ImageDestroyQueue[this->m_CurrentFrame].clear();
+
+    for (auto &as : m_AsDestroyQueue[m_CurrentFrame])
+    {
+        as.destroy(m_DeviceContext->getDevice());
+    }
+
+    m_AsDestroyQueue[m_CurrentFrame].clear();
 
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(this->m_DeviceContext->getDevice(),
@@ -654,6 +674,14 @@ glm::vec3 VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &cam
     return skyColor;
 }
 
+void VulkanRenderer::enqueueDestroy(AccelerationStructure &&as)
+{
+    if (as.handle != VK_NULL_HANDLE)
+    {
+        m_AsDestroyQueue[m_CurrentFrame].push_back(std::move(as));
+    }
+}
+
 void VulkanRenderer::enqueueDestroy(VmaBuffer &&buffer)
 {
     if (buffer.get() != VK_NULL_HANDLE)
@@ -828,19 +856,24 @@ void VulkanRenderer::createDescriptorPool()
 {
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+
     poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 2);
+
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 3);
+
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 4);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
+
     poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
     VkDescriptorPool pool;
     if (vkCreateDescriptorPool(m_DeviceContext->getDevice(), &poolInfo, nullptr, &pool) != VK_SUCCESS)
         throw std::runtime_error("failed to create descriptor pool!");
+
     m_DescriptorPool = VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter>(pool, {m_DeviceContext->getDevice()});
 }
 
@@ -867,8 +900,18 @@ void VulkanRenderer::updateDescriptorSets()
 
     VkDescriptorImageInfo shadowImageInfo{};
     shadowImageInfo.sampler = m_TextureManager->getTextureSampler();
-    shadowImageInfo.imageView = m_rtShadowImageView.get() ? m_rtShadowImageView.get() : m_TextureManager->getTextureImageView();
-    shadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    
+    if (m_rtShadowImageView.get() != VK_NULL_HANDLE)
+    {
+        shadowImageInfo.imageView = m_rtShadowImageView.get();
+        shadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    }
+    else
+    {
+
+        shadowImageInfo.imageView = m_TextureManager->getTextureImageView();
+        shadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    }
 
     std::array<VkWriteDescriptorSet, 6> writes{};
 
