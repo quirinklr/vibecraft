@@ -69,6 +69,8 @@ private:
     void createLightUbo();
     void createDescriptorPool();
     void createDescriptorSets();
+    void updateDescriptorSets();
+
     void createCrosshairVertexBuffer();
     void createDebugCubeMesh();
     void loadRayTracingFunctions();

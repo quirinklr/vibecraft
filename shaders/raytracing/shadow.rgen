@@ -24,18 +24,19 @@ void main()
     
     vec3 origin = pc.cameraPos;
     
+    
     traceRayEXT(topLevelAS,         
                 gl_RayFlagsOpaqueEXT, 
                 0xFF,                 
-                0,                    
-                0,                    
-                0,                    
+                0, 
+                0, 
+                0, 
                 origin,               
                 0.001,                
                 direction,            
                 10000.0,              
-                0);                   
-
+                0); 
+    
     
     imageStore(shadowImage, ivec2(gl_LaunchIDEXT.xy), vec4(shadowPayload, 0, 0, 0));
 }
