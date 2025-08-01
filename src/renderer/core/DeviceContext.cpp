@@ -111,12 +111,14 @@ void DeviceContext::createLogicalDevice()
     features.wideLines = VK_TRUE;
     features.fillModeNonSolid = VK_TRUE;
     features.logicOp = VK_TRUE;
+    features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
 
     VkDeviceCreateInfo ci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     ci.queueCreateInfoCount = static_cast<uint32_t>(qInfos.size());
     ci.pQueueCreateInfos = qInfos.data();
-
-    void **nextFeature = nullptr;
+    ci.pEnabledFeatures = &features;
+    ci.enabledExtensionCount = static_cast<uint32_t>(m_deviceExtensions.size());
+    ci.ppEnabledExtensionNames = m_deviceExtensions.data();
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accelFeatures{};
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR pipelineFeatures{};
@@ -138,10 +140,6 @@ void DeviceContext::createLogicalDevice()
         accelFeatures.pNext = &pipelineFeatures;
     }
 
-    ci.pEnabledFeatures = &features;
-    ci.enabledExtensionCount = static_cast<uint32_t>(m_deviceExtensions.size());
-    ci.ppEnabledExtensionNames = m_deviceExtensions.data();
-
 #ifndef NDEBUG
     if (m_enableValidationLayers)
     {
@@ -152,9 +150,8 @@ void DeviceContext::createLogicalDevice()
 
     VkDevice dev;
     if (vkCreateDevice(m_PhysicalDevice, &ci, nullptr, &dev) != VK_SUCCESS)
-    {
         throw std::runtime_error("failed to create logical device!");
-    }
+
     m_Device = {dev, {}};
 
     vkGetDeviceQueue(dev, idx.graphicsFamily.value(), 0, &m_GraphicsQueue);

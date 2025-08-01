@@ -31,6 +31,7 @@ void CommandManager::recordCommandBuffer(
 {
     std::scoped_lock lk(gGraphicsQueueMutex);
     VkCommandBuffer cb = m_CommandBuffers[currentFrame];
+    vkResetCommandBuffer(cb, 0);
 
     VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     vkBeginCommandBuffer(cb, &beginInfo);
@@ -174,14 +175,17 @@ void CommandManager::createCommandBuffers()
     m_CommandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
     m_RayTraceCommandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
 
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    VkCommandBufferAllocateInfo allocInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     allocInfo.commandPool = m_CommandPool.get();
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = (uint32_t)m_CommandBuffers.size();
 
-    allocInfo.commandBufferCount = (uint32_t)m_RayTraceCommandBuffers.size();
-    vkAllocateCommandBuffers(m_DeviceContext.getDevice(), &allocInfo, m_RayTraceCommandBuffers.data());
+    allocInfo.commandBufferCount = static_cast<uint32_t>(m_CommandBuffers.size());
+    if (vkAllocateCommandBuffers(m_DeviceContext.getDevice(), &allocInfo, m_CommandBuffers.data()) != VK_SUCCESS)
+        throw std::runtime_error("failed to allocate graphics command buffers");
+
+    allocInfo.commandBufferCount = static_cast<uint32_t>(m_RayTraceCommandBuffers.size());
+    if (vkAllocateCommandBuffers(m_DeviceContext.getDevice(), &allocInfo, m_RayTraceCommandBuffers.data()) != VK_SUCCESS)
+        throw std::runtime_error("failed to allocate ray-tracing command buffers");
 }
 
 void CommandManager::recordRayTraceCommand(uint32_t currentFrame, VkDescriptorSet rtDescriptorSet,

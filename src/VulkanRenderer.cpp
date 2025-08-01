@@ -259,9 +259,15 @@ void VulkanRenderer::createRayTracingResources()
 {
     VkExtent2D extent = m_SwapChainContext->getSwapChainExtent();
 
+    VkFormat shadowFormat = VK_FORMAT_R32_SFLOAT;
+    VkFormatProperties props;
+    vkGetPhysicalDeviceFormatProperties(m_DeviceContext->getPhysicalDevice(), shadowFormat, &props);
+    if (!(props.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT))
+        shadowFormat = VK_FORMAT_R8_UNORM;
+
     VkImageCreateInfo imageInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = VK_FORMAT_R32_SFLOAT;
+    imageInfo.format = shadowFormat;
     imageInfo.extent = {extent.width, extent.height, 1};
     imageInfo.mipLevels = 1;
     imageInfo.arrayLayers = 1;
@@ -269,16 +275,20 @@ void VulkanRenderer::createRayTracingResources()
     imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-    m_rtShadowImage = VmaImage(m_DeviceContext->getAllocator(), imageInfo, allocInfo);
+    VmaAllocationCreateInfo allocCI{};
+    allocCI.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    m_rtShadowImage = VmaImage(m_DeviceContext->getAllocator(), imageInfo, allocCI);
+    if (m_rtShadowImage.get() == VK_NULL_HANDLE)
+        throw std::runtime_error("vmaCreateImage failed for rt shadow image");
 
-    m_rtShadowImageView = TextureManager::createImageView(m_DeviceContext->getDevice(), m_rtShadowImage.get(), VK_FORMAT_R32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT);
+    m_rtShadowImageView = TextureManager::createImageView(
+        m_DeviceContext->getDevice(), m_rtShadowImage.get(),
+        shadowFormat, VK_IMAGE_ASPECT_COLOR_BIT);
 
-    VkCommandBuffer cmd = m_CommandManager->getCommandBuffer(0);
-    VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
-    vkBeginCommandBuffer(cmd, &beginInfo);
+    VkCommandBuffer cmd = UploadHelpers::beginSingleTimeCommands(
+        *m_DeviceContext, m_CommandManager->getCommandPool());
 
     VkImageSubresourceRange range{};
     range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -294,13 +304,8 @@ void VulkanRenderer::createRayTracingResources()
         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
 
-    vkEndCommandBuffer(cmd);
-
-    VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-    vkQueueSubmit(m_DeviceContext->getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(m_DeviceContext->getGraphicsQueue());
+    UploadHelpers::endSingleTimeCommands(
+        *m_DeviceContext, m_CommandManager->getCommandPool(), cmd);
 
     std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
     bindings[0].binding = 0;
@@ -318,7 +323,8 @@ void VulkanRenderer::createRayTracingResources()
 
     VkDescriptorSetLayout layout;
     vkCreateDescriptorSetLayout(m_DeviceContext->getDevice(), &layoutInfo, nullptr, &layout);
-    m_rtDescriptorSetLayout = VulkanHandle<VkDescriptorSetLayout, DescriptorSetLayoutDeleter>(layout, {m_DeviceContext->getDevice()});
+    m_rtDescriptorSetLayout = VulkanHandle<VkDescriptorSetLayout, DescriptorSetLayoutDeleter>(
+        layout, {m_DeviceContext->getDevice()});
 
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
@@ -333,14 +339,15 @@ void VulkanRenderer::createRayTracingResources()
 
     VkDescriptorPool pool;
     vkCreateDescriptorPool(m_DeviceContext->getDevice(), &poolInfo, nullptr, &pool);
-    m_rtDescriptorPool = VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter>(pool, {m_DeviceContext->getDevice()});
+    m_rtDescriptorPool = VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter>(
+        pool, {m_DeviceContext->getDevice()});
 
-    VkDescriptorSetAllocateInfo allocSetInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-    allocSetInfo.descriptorPool = m_rtDescriptorPool.get();
-    allocSetInfo.descriptorSetCount = 1;
+    VkDescriptorSetAllocateInfo allocInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    allocInfo.descriptorPool = m_rtDescriptorPool.get();
+    allocInfo.descriptorSetCount = 1;
     VkDescriptorSetLayout setLayout = m_rtDescriptorSetLayout.get();
-    allocSetInfo.pSetLayouts = &setLayout;
-    vkAllocateDescriptorSets(m_DeviceContext->getDevice(), &allocSetInfo, &m_rtDescriptorSet);
+    allocInfo.pSetLayouts = &setLayout;
+    vkAllocateDescriptorSets(m_DeviceContext->getDevice(), &allocInfo, &m_rtDescriptorSet);
 }
 
 void VulkanRenderer::createShaderBindingTable()
@@ -409,97 +416,102 @@ void VulkanRenderer::buildBlas(const std::vector<std::pair<Chunk *, int>> &chunk
     if (!m_rtFunctionsLoaded)
         return;
 
-    std::vector<std::pair<Chunk *, int>> dirtyChunks;
-    for (const auto &pair : chunksToBuild)
-    {
-        if (pair.first->m_blas_dirty.load(std::memory_order_acquire))
-        {
-            dirtyChunks.push_back(pair);
-        }
-    }
+    std::vector<std::pair<Chunk *, int>> dirty;
+    for (const auto &p : chunksToBuild)
+        if (p.first->m_blas_dirty.load(std::memory_order_acquire))
+            dirty.push_back(p);
 
-    if (dirtyChunks.empty())
+    if (dirty.empty())
         return;
 
-    VkCommandBuffer cmd = m_CommandManager->getCommandBuffer(m_CurrentFrame);
+    std::vector<VkAccelerationStructureGeometryTrianglesDataKHR> triData;
+    std::vector<VkAccelerationStructureGeometryKHR> geoms;
+    std::vector<VkAccelerationStructureBuildGeometryInfoKHR> infos;
+    std::vector<VkAccelerationStructureBuildRangeInfoKHR> ranges;
+    std::vector<VmaBuffer> scratch;
 
-    std::vector<VkAccelerationStructureBuildGeometryInfoKHR> buildInfos;
-    std::vector<VkAccelerationStructureBuildRangeInfoKHR> rangeInfos;
-    std::vector<VmaBuffer> scratchBuffers;
+    triData.reserve(dirty.size());
+    geoms.reserve(dirty.size());
+    infos.reserve(dirty.size());
+    ranges.reserve(dirty.size());
+    scratch.reserve(dirty.size());
 
-    for (const auto &pair : dirtyChunks)
+    for (const auto &p : dirty)
     {
-        Chunk *chunk = pair.first;
-        int lod = pair.second;
-
+        Chunk *chunk = p.first;
+        int lod = p.second;
         ChunkMesh *mesh = chunk->getMesh(lod);
         if (!mesh || mesh->indexCount == 0)
             continue;
 
-        VkDeviceAddress vertexAddress = getBufferDeviceAddress(mesh->vertexBuffer);
-        VkDeviceAddress indexAddress = getBufferDeviceAddress(mesh->indexBuffer);
+        VkDeviceAddress vAddr = getBufferDeviceAddress(mesh->vertexBuffer);
+        VkDeviceAddress iAddr = getBufferDeviceAddress(mesh->indexBuffer);
 
-        VkAccelerationStructureGeometryTrianglesDataKHR triangles{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR};
-        triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-        triangles.vertexData.deviceAddress = vertexAddress;
-        triangles.vertexStride = sizeof(Vertex);
-        triangles.maxVertex = mesh->indexCount;
-        triangles.indexType = VK_INDEX_TYPE_UINT32;
-        triangles.indexData.deviceAddress = indexAddress;
-        triangles.transformData = {0};
+        VkAccelerationStructureGeometryTrianglesDataKHR tri{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR};
+        tri.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+        tri.vertexData.deviceAddress = vAddr;
+        tri.vertexStride = sizeof(Vertex);
+        tri.maxVertex = mesh->indexCount;
+        tri.indexType = VK_INDEX_TYPE_UINT32;
+        tri.indexData.deviceAddress = iAddr;
+        tri.transformData.deviceAddress = 0;
+        triData.push_back(tri);
 
-        VkAccelerationStructureGeometryKHR asGeom{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
-        asGeom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-        asGeom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
-        asGeom.geometry.triangles = triangles;
+        VkAccelerationStructureGeometryKHR geom{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
+        geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+        geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+        geom.geometry.triangles = triData.back();
+        geoms.push_back(geom);
 
-        uint32_t numTriangles = mesh->indexCount / 3;
+        uint32_t triCount = mesh->indexCount / 3;
 
-        VkAccelerationStructureBuildGeometryInfoKHR buildInfo{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
-        buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-        buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-        buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-        buildInfo.pGeometries = &asGeom;
-        buildInfo.geometryCount = 1;
+        VkAccelerationStructureBuildGeometryInfoKHR info{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
+        info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+        info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+        info.geometryCount = 1;
+        info.pGeometries = &geoms.back();
 
-        VkAccelerationStructureBuildSizesInfoKHR sizeInfo{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
-        vkGetAccelerationStructureBuildSizesKHR(m_DeviceContext->getDevice(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &numTriangles, &sizeInfo);
+        VkAccelerationStructureBuildSizesInfoKHR size{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+        vkGetAccelerationStructureBuildSizesKHR(m_DeviceContext->getDevice(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &info, &triCount, &size);
 
         mesh->blas.destroy(m_DeviceContext->getDevice());
-        createAccelerationStructure(*m_DeviceContext, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, sizeInfo, mesh->blas);
-        buildInfo.dstAccelerationStructure = mesh->blas.handle;
+        createAccelerationStructure(*m_DeviceContext, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, size, mesh->blas);
+        info.dstAccelerationStructure = mesh->blas.handle;
 
-        VmaBuffer scratchBuffer = createScratchBuffer(sizeInfo.buildScratchSize);
-        buildInfo.scratchData.deviceAddress = getBufferDeviceAddress(scratchBuffer.get());
+        VmaBuffer scratchBuf = createScratchBuffer(size.buildScratchSize);
+        info.scratchData.deviceAddress = getBufferDeviceAddress(scratchBuf.get());
 
-        VkAccelerationStructureBuildRangeInfoKHR rangeInfo;
-        rangeInfo.primitiveCount = numTriangles;
-        rangeInfo.primitiveOffset = 0;
-        rangeInfo.firstVertex = 0;
-        rangeInfo.transformOffset = 0;
+        infos.push_back(info);
+        scratch.push_back(std::move(scratchBuf));
 
-        buildInfos.push_back(buildInfo);
-        rangeInfos.push_back(rangeInfo);
-        scratchBuffers.push_back(std::move(scratchBuffer));
+        VkAccelerationStructureBuildRangeInfoKHR range{};
+        range.primitiveCount = triCount;
+        range.primitiveOffset = 0;
+        range.firstVertex = 0;
+        range.transformOffset = 0;
+        ranges.push_back(range);
 
         chunk->m_blas_dirty.store(false, std::memory_order_release);
     }
 
-    if (!buildInfos.empty())
-    {
-        std::vector<const VkAccelerationStructureBuildRangeInfoKHR *> pRangeInfos;
-        pRangeInfos.reserve(rangeInfos.size());
-        for (const auto &range : rangeInfos)
-        {
-            pRangeInfos.push_back(&range);
-        }
-        vkCmdBuildAccelerationStructuresKHR(cmd, static_cast<uint32_t>(buildInfos.size()), buildInfos.data(), pRangeInfos.data());
+    if (infos.empty())
+        return;
 
-        VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-        barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-        barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0, 1, &barrier, 0, nullptr, 0, nullptr);
-    }
+    std::vector<const VkAccelerationStructureBuildRangeInfoKHR *> pRanges;
+    pRanges.reserve(ranges.size());
+    for (auto &r : ranges)
+        pRanges.push_back(&r);
+
+    VkCommandBuffer cmd = UploadHelpers::beginSingleTimeCommands(*m_DeviceContext, m_CommandManager->getCommandPool());
+    vkCmdBuildAccelerationStructuresKHR(cmd, static_cast<uint32_t>(infos.size()), infos.data(), pRanges.data());
+
+    VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+    barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+
+    UploadHelpers::endSingleTimeCommands(*m_DeviceContext, m_CommandManager->getCommandPool(), cmd);
 }
 
 void VulkanRenderer::buildTlas(const std::vector<std::pair<Chunk *, int>> &chunksToRender)
@@ -508,69 +520,79 @@ void VulkanRenderer::buildTlas(const std::vector<std::pair<Chunk *, int>> &chunk
         return;
 
     std::vector<VkAccelerationStructureInstanceKHR> instances;
-    uint32_t customInstanceId = 0;
-    for (const auto &pair : chunksToRender)
+    uint32_t customId = 0;
+    for (const auto &p : chunksToRender)
     {
-        const Chunk *chunk = pair.first;
-        const ChunkMesh *mesh = chunk->getMesh(pair.second);
-
-        if (!mesh || mesh->blas.handle == VK_NULL_HANDLE)
+        const Chunk *c = p.first;
+        const ChunkMesh *m = c->getMesh(p.second);
+        if (!m || m->blas.handle == VK_NULL_HANDLE)
             continue;
 
-        VkAccelerationStructureInstanceKHR instance{};
-
-        glm::mat4 transposedModel = glm::transpose(chunk->getModelMatrix());
-        memcpy(&instance.transform, &transposedModel, sizeof(VkTransformMatrixKHR));
-        instance.instanceCustomIndex = customInstanceId++;
-        instance.mask = 0xFF;
-        instance.instanceShaderBindingTableRecordOffset = 0;
-        instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-        instance.accelerationStructureReference = mesh->blas.deviceAddress;
-        instances.push_back(instance);
+        VkAccelerationStructureInstanceKHR inst{};
+        glm::mat4 t = glm::transpose(c->getModelMatrix());
+        memcpy(&inst.transform, &t, sizeof(VkTransformMatrixKHR));
+        inst.instanceCustomIndex = customId++;
+        inst.mask = 0xFF;
+        inst.instanceShaderBindingTableRecordOffset = 0;
+        inst.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+        inst.accelerationStructureReference = m->blas.deviceAddress;
+        instances.push_back(inst);
     }
 
     if (instances.empty())
         return;
 
-    VkCommandBuffer cmd = m_CommandManager->getCommandBuffer(m_CurrentFrame);
+    VkDeviceSize instBufSize = sizeof(VkAccelerationStructureInstanceKHR) * instances.size();
+    m_tlasInstanceBuffer = UploadHelpers::createDeviceLocalBufferFromData(
+        *m_DeviceContext, m_CommandManager->getCommandPool(),
+        instances.data(), instBufSize,
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
 
-    VkDeviceSize instanceBufferSize = sizeof(VkAccelerationStructureInstanceKHR) * instances.size();
-    m_tlasInstanceBuffer = UploadHelpers::createDeviceLocalBufferFromData(*m_DeviceContext, m_CommandManager->getCommandPool(), instances.data(), instanceBufferSize, VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
+    VkBufferDeviceAddressInfo addrInfo{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+    addrInfo.buffer = m_tlasInstanceBuffer.get();
+    VkDeviceAddress instAddr = vkGetBufferDeviceAddressKHR(m_DeviceContext->getDevice(), &addrInfo);
 
-    VkBufferDeviceAddressInfo instAddrInfo{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, nullptr, m_tlasInstanceBuffer.get()};
-    VkDeviceAddress instanceAddress = vkGetBufferDeviceAddressKHR(m_DeviceContext->getDevice(), &instAddrInfo);
+    VkAccelerationStructureGeometryInstancesDataKHR instGeom{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR};
+    instGeom.arrayOfPointers = VK_FALSE;
+    instGeom.data.deviceAddress = instAddr;
 
-    VkAccelerationStructureGeometryInstancesDataKHR instancesGeom{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR};
-    instancesGeom.arrayOfPointers = VK_FALSE;
-    instancesGeom.data.deviceAddress = instanceAddress;
+    VkAccelerationStructureGeometryKHR geom{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
+    geom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+    geom.geometry.instances = instGeom;
 
-    VkAccelerationStructureGeometryKHR asGeom{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
-    asGeom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
-    asGeom.geometry.instances = instancesGeom;
+    VkAccelerationStructureBuildGeometryInfoKHR build{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
+    build.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    build.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    build.geometryCount = 1;
+    build.pGeometries = &geom;
 
-    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
-    buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-    buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-    buildInfo.geometryCount = 1;
-    buildInfo.pGeometries = &asGeom;
-
-    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
-    uint32_t numInstances = static_cast<uint32_t>(instances.size());
-    vkGetAccelerationStructureBuildSizesKHR(m_DeviceContext->getDevice(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &numInstances, &sizeInfo);
+    uint32_t primCount = static_cast<uint32_t>(instances.size());
+    VkAccelerationStructureBuildSizesInfoKHR sz{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+    vkGetAccelerationStructureBuildSizesKHR(m_DeviceContext->getDevice(),
+                                            VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                                            &build, &primCount, &sz);
 
     m_tlas.destroy(m_DeviceContext->getDevice());
-    createAccelerationStructure(*m_DeviceContext, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, sizeInfo, m_tlas);
-    buildInfo.dstAccelerationStructure = m_tlas.handle;
+    createAccelerationStructure(*m_DeviceContext, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, sz, m_tlas);
+    build.dstAccelerationStructure = m_tlas.handle;
 
-    VmaBuffer scratchBuffer = createScratchBuffer(sizeInfo.buildScratchSize);
-    buildInfo.scratchData.deviceAddress = getBufferDeviceAddress(scratchBuffer.get());
+    VmaBuffer scratch = createScratchBuffer(sz.buildScratchSize);
+    build.scratchData.deviceAddress = getBufferDeviceAddress(scratch.get());
 
-    VkAccelerationStructureBuildRangeInfoKHR rangeInfo;
-    rangeInfo.primitiveCount = numInstances;
-    const VkAccelerationStructureBuildRangeInfoKHR *pRangeInfo = &rangeInfo;
+    VkAccelerationStructureBuildRangeInfoKHR range{};
+    range.primitiveCount = primCount;
+    const VkAccelerationStructureBuildRangeInfoKHR *pRange = &range;
 
-    vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRangeInfo);
+    VkCommandBuffer cmd = UploadHelpers::beginSingleTimeCommands(*m_DeviceContext, m_CommandManager->getCommandPool());
+    vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build, &pRange);
+    UploadHelpers::endSingleTimeCommands(*m_DeviceContext, m_CommandManager->getCommandPool(), cmd);
+
+    VkAccelerationStructureDeviceAddressInfoKHR daInfo{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
+    daInfo.accelerationStructure = m_tlas.handle;
+    m_tlas.deviceAddress = vkGetAccelerationStructureDeviceAddressKHR(m_DeviceContext->getDevice(), &daInfo);
 }
 
 VkDeviceAddress VulkanRenderer::getBufferDeviceAddress(VkBuffer buffer)
