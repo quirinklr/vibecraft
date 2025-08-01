@@ -25,8 +25,8 @@ public:
                                UploadJob &up);
     static void submitChunkMeshUpload(const DeviceContext &dc, VkCommandPool pool,
                                       UploadJob &up,
-                                      VkBuffer &vb, VmaAllocation &va,
-                                      VkBuffer &ib, VmaAllocation &ia);
+                                      VmaBuffer &vb,
+                                      VmaBuffer &ib);
     static VmaBuffer createDeviceLocalBufferFromData(
         const DeviceContext &dc, VkCommandPool pool,
         const void *data, VkDeviceSize size, VkBufferUsageFlags usage);

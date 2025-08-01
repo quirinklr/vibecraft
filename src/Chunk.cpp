@@ -174,14 +174,11 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
             }
         }
 
-        if (oldMesh.vertexBuffer != VK_NULL_HANDLE)
-        {
-            renderer.enqueueDestroy(oldMesh.vertexBuffer, oldMesh.vertexBufferAllocation);
-            oldMesh.blas.destroy(renderer.getDevice());
-        }
+        if (oldMesh.vertexBuffer.get() != VK_NULL_HANDLE)
+            renderer.enqueueDestroy(std::move(oldMesh.vertexBuffer));
+        if (oldMesh.indexBuffer.get() != VK_NULL_HANDLE)
+            renderer.enqueueDestroy(std::move(oldMesh.indexBuffer));
 
-        if (oldMesh.indexBuffer != VK_NULL_HANDLE)
-            renderer.enqueueDestroy(oldMesh.indexBuffer, oldMesh.indexBufferAllocation);
         m_State.store(State::GPU_READY);
         return true;
     }
@@ -190,7 +187,28 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
 
     ChunkMesh newMesh;
     VkCommandPool pool = renderer.getTransferCommandPool() ? renderer.getTransferCommandPool() : renderer.getCommandManager()->getCommandPool();
-    UploadHelpers::submitChunkMeshUpload(*renderer.getDeviceContext(), pool, job, newMesh.vertexBuffer, newMesh.vertexBufferAllocation, newMesh.indexBuffer, newMesh.indexBufferAllocation);
+
+    UploadHelpers::submitChunkMeshUpload(*renderer.getDeviceContext(), pool, job, newMesh.vertexBuffer, newMesh.indexBuffer);
+
+    if (job.cmdBuffer != VK_NULL_HANDLE)
+    {
+        VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        si.commandBufferCount = 1;
+        si.pCommandBuffers = &job.cmdBuffer;
+
+        VkQueue q = renderer.getDeviceContext()->hasTransferQueue()
+                        ? renderer.getDeviceContext()->getTransferQueue()
+                        : renderer.getDeviceContext()->getGraphicsQueue();
+
+        std::scoped_lock lk(gGraphicsQueueMutex);
+        if (vkQueueSubmit(q, 1, &si, job.fence) != VK_SUCCESS)
+        {
+
+            vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
+
+            throw std::runtime_error("vkQueueSubmit failed in chunk mesh upload!");
+        }
+    }
 
     newMesh.indexCount = static_cast<uint32_t>(job.stagingIbSize / sizeof(uint32_t));
 
@@ -204,13 +222,13 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
         m_Meshes[lodLevel] = std::move(newMesh);
     }
 
-    if (oldMesh.vertexBuffer != VK_NULL_HANDLE)
+    if (oldMesh.vertexBuffer.get() != VK_NULL_HANDLE)
     {
-        renderer.enqueueDestroy(oldMesh.vertexBuffer, oldMesh.vertexBufferAllocation);
+        renderer.enqueueDestroy(std::move(oldMesh.vertexBuffer));
     }
-    if (oldMesh.indexBuffer != VK_NULL_HANDLE)
+    if (oldMesh.indexBuffer.get() != VK_NULL_HANDLE)
     {
-        renderer.enqueueDestroy(oldMesh.indexBuffer, oldMesh.indexBufferAllocation);
+        renderer.enqueueDestroy(std::move(oldMesh.indexBuffer));
     }
 
     {
@@ -220,7 +238,6 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
     m_State.store(State::GPU_READY);
     return true;
 }
-
 bool Chunk::uploadTransparentMesh(VulkanRenderer &renderer, int lodLevel)
 {
     UploadJob job;
@@ -243,10 +260,11 @@ bool Chunk::uploadTransparentMesh(VulkanRenderer &renderer, int lodLevel)
                 m_TransparentMeshes.erase(lodLevel);
             }
         }
-        if (oldMesh.vertexBuffer != VK_NULL_HANDLE)
-            renderer.enqueueDestroy(oldMesh.vertexBuffer, oldMesh.vertexBufferAllocation);
-        if (oldMesh.indexBuffer != VK_NULL_HANDLE)
-            renderer.enqueueDestroy(oldMesh.indexBuffer, oldMesh.indexBufferAllocation);
+        if (oldMesh.vertexBuffer.get() != VK_NULL_HANDLE)
+            renderer.enqueueDestroy(std::move(oldMesh.vertexBuffer));
+        if (oldMesh.indexBuffer.get() != VK_NULL_HANDLE)
+            renderer.enqueueDestroy(std::move(oldMesh.indexBuffer));
+
         m_State.store(State::GPU_READY);
         return true;
     }
@@ -255,7 +273,26 @@ bool Chunk::uploadTransparentMesh(VulkanRenderer &renderer, int lodLevel)
 
     ChunkMesh newMesh;
     VkCommandPool pool = renderer.getTransferCommandPool() ? renderer.getTransferCommandPool() : renderer.getCommandManager()->getCommandPool();
-    UploadHelpers::submitChunkMeshUpload(*renderer.getDeviceContext(), pool, job, newMesh.vertexBuffer, newMesh.vertexBufferAllocation, newMesh.indexBuffer, newMesh.indexBufferAllocation);
+
+    UploadHelpers::submitChunkMeshUpload(*renderer.getDeviceContext(), pool, job, newMesh.vertexBuffer, newMesh.indexBuffer);
+
+    if (job.cmdBuffer != VK_NULL_HANDLE)
+    {
+        VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        si.commandBufferCount = 1;
+        si.pCommandBuffers = &job.cmdBuffer;
+
+        VkQueue q = renderer.getDeviceContext()->hasTransferQueue()
+                        ? renderer.getDeviceContext()->getTransferQueue()
+                        : renderer.getDeviceContext()->getGraphicsQueue();
+
+        std::scoped_lock lk(gGraphicsQueueMutex);
+        if (vkQueueSubmit(q, 1, &si, job.fence) != VK_SUCCESS)
+        {
+            vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
+            throw std::runtime_error("vkQueueSubmit failed in transparent chunk mesh upload!");
+        }
+    }
 
     newMesh.indexCount = static_cast<uint32_t>(job.stagingIbSize / sizeof(uint32_t));
 
@@ -269,13 +306,13 @@ bool Chunk::uploadTransparentMesh(VulkanRenderer &renderer, int lodLevel)
         m_TransparentMeshes[lodLevel] = std::move(newMesh);
     }
 
-    if (oldMesh.vertexBuffer != VK_NULL_HANDLE)
+    if (oldMesh.vertexBuffer.get() != VK_NULL_HANDLE)
     {
-        renderer.enqueueDestroy(oldMesh.vertexBuffer, oldMesh.vertexBufferAllocation);
+        renderer.enqueueDestroy(std::move(oldMesh.vertexBuffer));
     }
-    if (oldMesh.indexBuffer != VK_NULL_HANDLE)
+    if (oldMesh.indexBuffer.get() != VK_NULL_HANDLE)
     {
-        renderer.enqueueDestroy(oldMesh.indexBuffer, oldMesh.indexBufferAllocation);
+        renderer.enqueueDestroy(std::move(oldMesh.indexBuffer));
     }
 
     {
@@ -285,7 +322,6 @@ bool Chunk::uploadTransparentMesh(VulkanRenderer &renderer, int lodLevel)
     m_State.store(State::GPU_READY);
     return true;
 }
-
 void Chunk::buildMeshGreedy(int lodLevel,
                             std::vector<Vertex> &outOpaqueVertices, std::vector<uint32_t> &outOpaqueIndices,
                             std::vector<Vertex> &outTransparentVertices, std::vector<uint32_t> &outTransparentIndices,
@@ -644,10 +680,10 @@ void Chunk::cleanup(VulkanRenderer &renderer)
 
     for (auto &[lod, mesh] : m_Meshes)
     {
-        if (mesh.vertexBuffer != VK_NULL_HANDLE)
-            renderer.enqueueDestroy(mesh.vertexBuffer, mesh.vertexBufferAllocation);
-        if (mesh.indexBuffer != VK_NULL_HANDLE)
-            renderer.enqueueDestroy(mesh.indexBuffer, mesh.indexBufferAllocation);
+        if (mesh.vertexBuffer.get() != VK_NULL_HANDLE)
+            renderer.enqueueDestroy(std::move(mesh.vertexBuffer));
+        if (mesh.indexBuffer.get() != VK_NULL_HANDLE)
+            renderer.enqueueDestroy(std::move(mesh.indexBuffer));
 
         if (mesh.blas.handle != VK_NULL_HANDLE)
         {
@@ -657,11 +693,12 @@ void Chunk::cleanup(VulkanRenderer &renderer)
 
     for (auto &[lod, mesh] : m_TransparentMeshes)
     {
-        if (mesh.vertexBuffer != VK_NULL_HANDLE)
-            renderer.enqueueDestroy(mesh.vertexBuffer, mesh.vertexBufferAllocation);
-        if (mesh.indexBuffer != VK_NULL_HANDLE)
-            renderer.enqueueDestroy(mesh.indexBuffer, mesh.indexBufferAllocation);
+        if (mesh.vertexBuffer.get() != VK_NULL_HANDLE)
+            renderer.enqueueDestroy(std::move(mesh.vertexBuffer));
+        if (mesh.indexBuffer.get() != VK_NULL_HANDLE)
+            renderer.enqueueDestroy(std::move(mesh.indexBuffer));
     }
+
     m_Meshes.clear();
     m_TransparentMeshes.clear();
     m_State.store(State::INITIAL);

@@ -52,10 +52,9 @@ public:
 
 struct ChunkMesh
 {
-    VkBuffer vertexBuffer = VK_NULL_HANDLE;
-    VmaAllocation vertexBufferAllocation = VK_NULL_HANDLE;
-    VkBuffer indexBuffer = VK_NULL_HANDLE;
-    VmaAllocation indexBufferAllocation = VK_NULL_HANDLE;
+    VmaBuffer vertexBuffer;
+    VmaBuffer indexBuffer;
+
     uint32_t indexCount = 0;
     AccelerationStructure blas;
 };

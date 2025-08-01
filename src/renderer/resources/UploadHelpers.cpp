@@ -234,22 +234,21 @@ void UploadHelpers::stageChunkMesh(RingStagingArena &arena,
 void UploadHelpers::submitChunkMeshUpload(const DeviceContext &dc,
                                           VkCommandPool pool,
                                           UploadJob &up,
-                                          VkBuffer &vb, VmaAllocation &va,
-                                          VkBuffer &ib, VmaAllocation &ia)
+                                          VmaBuffer &vb,
+                                          VmaBuffer &ib)
 {
+
     VkBufferCreateInfo b{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     VmaAllocationCreateInfo a{};
     a.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
     b.size = up.stagingVbSize;
-
     b.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
-    vmaCreateBuffer(dc.getAllocator(), &b, &a, &vb, &va, nullptr);
+    vb = VmaBuffer(dc.getAllocator(), b, a);
 
     b.size = up.stagingIbSize;
-
     b.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
-    vmaCreateBuffer(dc.getAllocator(), &b, &a, &ib, &ia, nullptr);
+    ib = VmaBuffer(dc.getAllocator(), b, a);
 
     VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     ai.commandPool = pool;
@@ -269,14 +268,6 @@ void UploadHelpers::submitChunkMeshUpload(const DeviceContext &dc,
 
     VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     vkCreateFence(dc.getDevice(), &fi, nullptr, &up.fence);
-
-    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    si.commandBufferCount = 1;
-    si.pCommandBuffers = &up.cmdBuffer;
-
-    VkQueue q = dc.hasTransferQueue() ? dc.getTransferQueue() : dc.getGraphicsQueue();
-    std::scoped_lock lk(gGraphicsQueueMutex);
-    vkQueueSubmit(q, 1, &si, up.fence);
 }
 
 VmaBuffer UploadHelpers::createDeviceLocalBufferFromData(
