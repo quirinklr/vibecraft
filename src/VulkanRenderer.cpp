@@ -201,7 +201,7 @@ void VulkanRenderer::drawFrame(Camera &camera,
         else if (m_tlas.handle == VK_NULL_HANDLE)
         {
 
-            buildBlas(renderChunks);
+            buildBlas(renderChunks, cmd);
             buildTlasAsync(renderChunks, cmd);
 
             if (m_tlas.handle == VK_NULL_HANDLE)
@@ -213,7 +213,7 @@ void VulkanRenderer::drawFrame(Camera &camera,
 
         if (m_Settings.rayTracingFlags & SettingsEnums::SHADOWS)
         {
-            buildBlas(renderChunks);
+            buildBlas(renderChunks, cmd);
             buildTlasAsync(renderChunks, cmd);
             updateRtDescriptorSet(slot);
 
@@ -504,7 +504,7 @@ void VulkanRenderer::updateRtDescriptorSet(uint32_t frame)
                            static_cast<uint32_t>(w.size()), w.data(), 0, nullptr);
 }
 
-void VulkanRenderer::buildBlas(const std::vector<std::pair<Chunk *, int>> &chunksToBuild)
+void VulkanRenderer::buildBlas(const std::vector<std::pair<Chunk *, int>> &chunksToBuild, VkCommandBuffer cmd)
 {
     if (!m_rtFunctionsLoaded)
         return;
@@ -597,8 +597,6 @@ void VulkanRenderer::buildBlas(const std::vector<std::pair<Chunk *, int>> &chunk
 
         if (!infos.empty())
         {
-            VkCommandBuffer cmd = m_CommandManager->getCommandBuffer(m_CurrentFrame);
-
             if (cmd == VK_NULL_HANDLE)
             {
                 throw std::runtime_error("Invalid command buffer for BLAS build");
@@ -686,7 +684,10 @@ void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &
                                                 VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
                                                 &build, &primCount, &sz);
 
-        m_tlas.destroy(m_DeviceContext->getDevice());
+        if (m_tlas.handle != VK_NULL_HANDLE)
+        {
+            enqueueDestroy(std::move(m_tlas));
+        }
         createAccelerationStructure(*m_DeviceContext, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, sz, m_tlas);
         build.dstAccelerationStructure = m_tlas.handle;
 
@@ -1119,7 +1120,7 @@ void VulkanRenderer::generateSphereMesh(float radius, int sectors, int stacks,
 
     for (int i = 0; i <= stacks; ++i)
     {
-            float stackAngle = glm::pi<float>() / 2.0f - (float)i * (glm::pi<float>() / stacks);
+        float stackAngle = glm::pi<float>() / 2.0f - (float)i * (glm::pi<float>() / stacks);
         float xy = radius * cosf(stackAngle);
         float z = radius * sinf(stackAngle);
 

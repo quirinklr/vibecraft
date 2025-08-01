@@ -62,7 +62,7 @@ public:
 private:
     glm::vec3 updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos);
     void updateLightUbo(uint32_t currentImage, uint32_t gameTicks);
-    void buildBlas(const std::vector<std::pair<Chunk *, int>> &chunksToRender);
+    void buildBlas(const std::vector<std::pair<Chunk *, int>> &chunksToBuild, VkCommandBuffer cmd);
     void buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &drawList,
                         VkCommandBuffer cmd);
     void createRayTracingResources();
