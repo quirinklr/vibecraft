@@ -61,10 +61,11 @@ private:
     glm::vec3 updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos);
     void updateLightUbo(uint32_t currentImage, uint32_t gameTicks);
     void buildBlas(const std::vector<std::pair<Chunk *, int>> &chunksToRender);
-    void buildTlas(const std::vector<std::pair<Chunk *, int>> &chunksToRender);
+    void buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &drawList,
+                        VkCommandBuffer cmd);
     void createRayTracingResources();
     void createShaderBindingTable();
-    void updateRtDescriptorSet();
+    void updateRtDescriptorSet(uint32_t frame);
 
     void createUniformBuffers();
     void createLightUbo();
@@ -97,6 +98,9 @@ private:
     std::unique_ptr<SyncPrimitives> m_SyncPrimitives;
     std::unique_ptr<TextureManager> m_TextureManager;
     std::unique_ptr<RingStagingArena> m_StagingArena;
+    std::vector<VmaBuffer> m_blasBuildScratchBuffers[MAX_FRAMES_IN_FLIGHT];
+    std::vector<VkDescriptorSet> m_rtDescriptorSets;
+
     VkCommandPool m_TransferCommandPool{VK_NULL_HANDLE};
     std::unique_ptr<DebugOverlay> m_debugOverlay;
 
