@@ -45,14 +45,12 @@ public:
 
     VkCommandBuffer getCommandBuffer(uint32_t index) const { return m_CommandBuffers[index]; }
     VkCommandPool getCommandPool() const { return m_CommandPool.get(); }
-    void recordRayTraceCommand(uint32_t currentFrame, VkDescriptorSet rtDescriptorSet,
+    void recordRayTraceCommand(VkCommandBuffer cb, uint32_t currentFrame, VkDescriptorSet rtDescriptorSet,
                                const VkStridedDeviceAddressRegionKHR *rgenRegion,
                                const VkStridedDeviceAddressRegionKHR *missRegion,
                                const VkStridedDeviceAddressRegionKHR *hitRegion,
                                const VkStridedDeviceAddressRegionKHR *callRegion,
                                const void *pushConstants, VkImage shadowImage);
-
-    VkCommandBuffer getRayTraceCommandBuffer(uint32_t index) const { return m_RayTraceCommandBuffers[index]; }
 
 private:
     void createCommandPool();
@@ -64,5 +62,4 @@ private:
 
     VulkanHandle<VkCommandPool, CommandPoolDeleter> m_CommandPool;
     std::vector<VkCommandBuffer> m_CommandBuffers;
-    std::vector<VkCommandBuffer> m_RayTraceCommandBuffers;
 };

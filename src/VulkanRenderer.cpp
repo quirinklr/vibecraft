@@ -71,6 +71,7 @@ void VulkanRenderer::drawFrame(Camera &camera,
                                const std::vector<AABB> &debugAABBs,
                                bool showDebugOverlay)
 {
+
     vkWaitForFences(this->m_DeviceContext->getDevice(), 1, this->m_SyncPrimitives->getInFlightFencePtr(this->m_CurrentFrame), VK_TRUE, UINT64_MAX);
 
     DeferredFreeQueue::poll();
@@ -111,12 +112,10 @@ void VulkanRenderer::drawFrame(Camera &camera,
     float time_of_day = (float)gameTicks / 24000.0f;
     float sun_angle = time_of_day * 2.0f * glm::pi<float>() - glm::half_pi<float>();
     float moon_angle = sun_angle + glm::pi<float>();
-
     glm::mat4 invView = glm::inverse(camera.getViewMatrix());
     glm::vec3 camPos = glm::vec3(invView[3]);
     glm::vec3 sunDir = glm::normalize(glm::vec3(sin(sun_angle), cos(sun_angle), 0.2f));
     glm::vec3 moonDir = glm::normalize(glm::vec3(sin(moon_angle), cos(moon_angle), 0.2f));
-
     auto makeBillboardMatrix = [&](const glm::vec3 &objPos, const glm::vec3 &camPos, const glm::vec3 &up)
     {
         glm::vec3 look = glm::normalize(camPos - objPos);
@@ -129,28 +128,22 @@ void VulkanRenderer::drawFrame(Camera &camera,
         transform[3] = glm::vec4(objPos, 1);
         return transform;
     };
-
     float distance = 400.0f;
     float size = 50.0f;
-
     glm::vec3 sunPos = camPos + sunDir * distance;
     glm::vec3 moonPos = camPos + moonDir * distance;
-
     SkyPushConstant sun_pc;
     sun_pc.model = makeBillboardMatrix(sunPos, camPos, glm::vec3(0, 1, 0)) * glm::scale(glm::mat4(1.0f), glm::vec3(size));
     sun_pc.is_sun = 1;
     SkyPushConstant moon_pc;
     moon_pc.model = makeBillboardMatrix(moonPos, camPos, glm::vec3(0, 1, 0)) * glm::scale(glm::mat4(1.0f), glm::vec3(size));
     moon_pc.is_sun = 0;
-
     bool isSunVisible = sunDir.y > -0.1f;
     bool isMoonVisible = moonDir.y > -0.1f;
 
     std::vector<std::pair<Chunk *, int>> renderChunks;
     renderChunks.reserve(chunks.size());
-
     const Frustum &frustum = camera.getFrustum();
-
     for (auto &[pos, chunkPtr] : chunks)
     {
         chunkPtr->markReady(*this);
@@ -170,22 +163,29 @@ void VulkanRenderer::drawFrame(Camera &camera,
         updateRtDescriptorSet();
     }
 
-    vkResetFences(this->m_DeviceContext->getDevice(), 1, this->m_SyncPrimitives->getInFlightFencePtr(this->m_CurrentFrame));
-    vkResetCommandBuffer(m_CommandManager->getRayTraceCommandBuffer(m_CurrentFrame), 0);
+    VkCommandBuffer commandBuffer = m_CommandManager->getCommandBuffer(m_CurrentFrame);
 
-    RayTracePushConstants pc{};
-    pc.viewInverse = glm::inverse(camera.getViewMatrix());
-    pc.projInverse = glm::inverse(camera.getProjectionMatrix());
-    pc.cameraPos = playerPos + glm::vec3(0.0f, 1.8f * 0.9f, 0.0f);
-    memcpy(&pc.lightDirection, m_LightUbosMapped[m_CurrentFrame], sizeof(glm::vec3));
+    vkResetCommandBuffer(commandBuffer, 0);
+    VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    vkBeginCommandBuffer(commandBuffer, &beginInfo);
 
-    this->m_CommandManager->recordRayTraceCommand(
-        m_CurrentFrame, m_rtDescriptorSet,
-        &m_rgenRegion, &m_missRegion, &m_hitRegion, &m_callRegion,
-        &pc,
-        m_rtShadowImage.get());
+    if (m_DeviceContext->isRayTracingSupported() && (m_Settings.rayTracingFlags & SettingsEnums::SHADOWS))
+    {
+        RayTracePushConstants pc{};
+        pc.viewInverse = glm::inverse(camera.getViewMatrix());
+        pc.projInverse = glm::inverse(camera.getProjectionMatrix());
+        pc.cameraPos = playerPos + glm::vec3(0.0f, 1.8f * 0.9f, 0.0f);
+        memcpy(&pc.lightDirection, m_LightUbosMapped[m_CurrentFrame], sizeof(glm::vec3));
 
-    this->m_CommandManager->recordCommandBuffer(
+        m_CommandManager->recordRayTraceCommand(
+            commandBuffer,
+            m_CurrentFrame, m_rtDescriptorSet,
+            &m_rgenRegion, &m_missRegion, &m_hitRegion, &m_callRegion,
+            &pc,
+            m_rtShadowImage.get());
+    }
+
+    m_CommandManager->recordCommandBuffer(
         imageIndex, this->m_CurrentFrame, renderChunks, this->m_DescriptorSets,
         skyColor, sun_pc, moon_pc, isSunVisible, isMoonVisible,
         this->m_SkySphereVertexBuffer.get(), this->m_SkySphereIndexBuffer.get(), this->m_SkySphereIndexCount,
@@ -193,27 +193,29 @@ void VulkanRenderer::drawFrame(Camera &camera,
         this->m_DebugCubeVertexBuffer.get(), this->m_DebugCubeIndexBuffer.get(), this->m_DebugCubeIndexCount,
         this->m_Settings, debugAABBs);
 
+    vkEndCommandBuffer(commandBuffer);
+
     VkSemaphore waitSemas[]{this->m_SyncPrimitives->getImageAvailableSemaphore(this->m_CurrentFrame)};
     VkPipelineStageFlags waitStages[]{VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     VkSemaphore signalSemas[]{this->m_SyncPrimitives->getRenderFinishedSemaphore(this->m_CurrentFrame)};
-
-    std::array<VkCommandBuffer, 2> cmdBuffers = {
-        m_CommandManager->getRayTraceCommandBuffer(m_CurrentFrame),
-        m_CommandManager->getCommandBuffer(m_CurrentFrame)};
 
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     si.waitSemaphoreCount = 1;
     si.pWaitSemaphores = waitSemas;
     si.pWaitDstStageMask = waitStages;
-
-    VkCommandBuffer cb = this->m_CommandManager->getCommandBuffer(this->m_CurrentFrame);
-    si.commandBufferCount = static_cast<uint32_t>(cmdBuffers.size());
-    si.pCommandBuffers = cmdBuffers.data();
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &commandBuffer;
     si.signalSemaphoreCount = 1;
     si.pSignalSemaphores = signalSemas;
+
     {
         std::scoped_lock lk(gGraphicsQueueMutex);
-        vkQueueSubmit(this->m_DeviceContext->getGraphicsQueue(), 1, &si, this->m_SyncPrimitives->getInFlightFence(this->m_CurrentFrame));
+
+        vkResetFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(m_CurrentFrame));
+        if (vkQueueSubmit(this->m_DeviceContext->getGraphicsQueue(), 1, &si, this->m_SyncPrimitives->getInFlightFence(this->m_CurrentFrame)) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to submit draw command buffer!");
+        }
     }
 
     VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};

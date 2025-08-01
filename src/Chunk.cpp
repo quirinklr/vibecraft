@@ -194,9 +194,7 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
     VkCommandPool pool = renderer.getTransferCommandPool() ? renderer.getTransferCommandPool() : renderer.getCommandManager()->getCommandPool();
     UploadHelpers::submitChunkMeshUpload(*renderer.getDeviceContext(), pool, job, newMesh.vertexBuffer, newMesh.vertexBufferAllocation, newMesh.indexBuffer, newMesh.indexBufferAllocation);
 
-    VmaAllocationInfo ibInfo;
-    vmaGetAllocationInfo(renderer.getAllocator(), newMesh.indexBufferAllocation, &ibInfo);
-    newMesh.indexCount = static_cast<uint32_t>(ibInfo.size / sizeof(uint32_t));
+    newMesh.indexCount = static_cast<uint32_t>(job.stagingIbSize / sizeof(uint32_t));
 
     ChunkMesh oldMesh;
     {
@@ -261,9 +259,7 @@ bool Chunk::uploadTransparentMesh(VulkanRenderer &renderer, int lodLevel)
     VkCommandPool pool = renderer.getTransferCommandPool() ? renderer.getTransferCommandPool() : renderer.getCommandManager()->getCommandPool();
     UploadHelpers::submitChunkMeshUpload(*renderer.getDeviceContext(), pool, job, newMesh.vertexBuffer, newMesh.vertexBufferAllocation, newMesh.indexBuffer, newMesh.indexBufferAllocation);
 
-    VmaAllocationInfo ibInfo;
-    vmaGetAllocationInfo(renderer.getAllocator(), newMesh.indexBufferAllocation, &ibInfo);
-    newMesh.indexCount = static_cast<uint32_t>(ibInfo.size / sizeof(uint32_t));
+    newMesh.indexCount = static_cast<uint32_t>(job.stagingIbSize / sizeof(uint32_t));
 
     ChunkMesh oldMesh;
     {

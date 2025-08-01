@@ -29,12 +29,8 @@ void CommandManager::recordCommandBuffer(
     const Settings &settings,
     const std::vector<AABB> &debugAABBs)
 {
-    std::scoped_lock lk(gGraphicsQueueMutex);
-    VkCommandBuffer cb = m_CommandBuffers[currentFrame];
-    vkResetCommandBuffer(cb, 0);
 
-    VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    vkBeginCommandBuffer(cb, &beginInfo);
+    VkCommandBuffer cb = m_CommandBuffers[currentFrame];
 
     const std::array<VkClearValue, 2> clearValues = {
         VkClearValue{.color = {{clearColor.r, clearColor.g, clearColor.b, 1.0f}}},
@@ -151,7 +147,6 @@ void CommandManager::recordCommandBuffer(
     vkCmdDraw(cb, 4, 1, 0, 0);
 
     vkCmdEndRenderPass(cb);
-    vkEndCommandBuffer(cb);
 }
 
 void CommandManager::createCommandPool()
@@ -173,7 +168,6 @@ void CommandManager::createCommandPool()
 void CommandManager::createCommandBuffers()
 {
     m_CommandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
-    m_RayTraceCommandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
 
     VkCommandBufferAllocateInfo allocInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     allocInfo.commandPool = m_CommandPool.get();
@@ -182,25 +176,15 @@ void CommandManager::createCommandBuffers()
     allocInfo.commandBufferCount = static_cast<uint32_t>(m_CommandBuffers.size());
     if (vkAllocateCommandBuffers(m_DeviceContext.getDevice(), &allocInfo, m_CommandBuffers.data()) != VK_SUCCESS)
         throw std::runtime_error("failed to allocate graphics command buffers");
-
-    allocInfo.commandBufferCount = static_cast<uint32_t>(m_RayTraceCommandBuffers.size());
-    if (vkAllocateCommandBuffers(m_DeviceContext.getDevice(), &allocInfo, m_RayTraceCommandBuffers.data()) != VK_SUCCESS)
-        throw std::runtime_error("failed to allocate ray-tracing command buffers");
 }
 
-void CommandManager::recordRayTraceCommand(uint32_t currentFrame, VkDescriptorSet rtDescriptorSet,
+void CommandManager::recordRayTraceCommand(VkCommandBuffer cb, uint32_t currentFrame, VkDescriptorSet rtDescriptorSet,
                                            const VkStridedDeviceAddressRegionKHR *rgenRegion,
                                            const VkStridedDeviceAddressRegionKHR *missRegion,
                                            const VkStridedDeviceAddressRegionKHR *hitRegion,
                                            const VkStridedDeviceAddressRegionKHR *callRegion,
                                            const void *pushConstants, VkImage shadowImage)
 {
-    VkCommandBuffer cb = m_RayTraceCommandBuffers[currentFrame];
-    vkResetCommandBuffer(cb, 0);
-
-    VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    vkBeginCommandBuffer(cb, &beginInfo);
-
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_PipelineCache.getRayTracingPipeline());
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_PipelineCache.getRayTracingPipelineLayout(), 0, 1, &rtDescriptorSet, 0, 0);
 
@@ -248,6 +232,4 @@ void CommandManager::recordRayTraceCommand(uint32_t currentFrame, VkDescriptorSe
         0, nullptr,
         0, nullptr,
         1, &barrier);
-
-    vkEndCommandBuffer(cb);
 }
