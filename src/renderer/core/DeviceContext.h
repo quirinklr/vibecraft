@@ -19,6 +19,7 @@ public:
     VkQueue getTransferQueue() const { return m_TransferQueue; }
     bool hasTransferQueue() const { return m_TransferQueue != VK_NULL_HANDLE; }
     bool isRayTracingSupported() const { return m_rayTracingSupported; }
+    uint32_t getScratchAlignment() const { return m_asScratchAlignment; }
 
     struct QueueFamilyIndices
     {
@@ -47,6 +48,7 @@ private:
     VkQueue m_TransferQueue{VK_NULL_HANDLE};
 
     bool m_rayTracingSupported = false;
+    uint32_t m_asScratchAlignment = 256;
     std::vector<const char *> m_deviceExtensions{VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
     const std::vector<const char *> m_rayTracingExtensions = {

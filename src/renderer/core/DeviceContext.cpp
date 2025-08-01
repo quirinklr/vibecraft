@@ -8,6 +8,15 @@ DeviceContext::DeviceContext(const InstanceContext &instanceContext)
 {
     pickPhysicalDevice();
     checkRayTracingSupport();
+    
+    {
+        VkPhysicalDeviceAccelerationStructurePropertiesKHR asProps{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR};
+        VkPhysicalDeviceProperties2 props2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+        props2.pNext = &asProps;
+        vkGetPhysicalDeviceProperties2(m_PhysicalDevice, &props2);
+        m_asScratchAlignment = asProps.minAccelerationStructureScratchOffsetAlignment;
+    }
+
     createLogicalDevice();
 
     VmaAllocatorCreateInfo allocatorInfo = {};

@@ -160,5 +160,4 @@ private:
     std::vector<VmaImage> m_ImageDestroyQueue[MAX_FRAMES_IN_FLIGHT];
     std::vector<VmaBuffer> m_asBuildStagingBuffers[MAX_FRAMES_IN_FLIGHT];
     std::vector<AccelerationStructure> m_AsDestroyQueue[MAX_FRAMES_IN_FLIGHT];
-    std::mutex m_GraphicsQueueMutex;
 };

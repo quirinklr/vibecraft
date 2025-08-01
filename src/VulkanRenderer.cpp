@@ -117,11 +117,6 @@ VulkanRenderer::~VulkanRenderer()
         vkDestroyCommandPool(m_DeviceContext->getDevice(), m_TransferCommandPool, nullptr);
         m_TransferCommandPool = VK_NULL_HANDLE;
     }
-
-    if (m_DeviceContext && m_DeviceContext->getDevice() != VK_NULL_HANDLE)
-    {
-        vkDeviceWaitIdle(m_DeviceContext->getDevice());
-    }
 }
 
 void VulkanRenderer::drawFrame(Camera &camera,
@@ -133,6 +128,14 @@ void VulkanRenderer::drawFrame(Camera &camera,
                                bool showDebugOverlay)
 {
     const uint32_t slot = m_CurrentFrame;
+
+    vkWaitForFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(slot), VK_TRUE, UINT64_MAX);
+
+    VkResult deviceStatus = vkGetFenceStatus(m_DeviceContext->getDevice(), m_SyncPrimitives->getInFlightFence(slot));
+    if (deviceStatus == VK_ERROR_DEVICE_LOST)
+    {
+        throw std::runtime_error("Vulkan device lost detected after fence wait!");
+    }
 
     uint32_t imageIndex;
     VkResult res = vkAcquireNextImageKHR(
@@ -149,26 +152,27 @@ void VulkanRenderer::drawFrame(Camera &camera,
         return;
     }
     if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR)
+    {
         throw std::runtime_error("failed to acquire swap chain image");
-
-    vkWaitForFences(m_DeviceContext->getDevice(), 1,
-                    m_SyncPrimitives->getInFlightFencePtr(slot),
-                    VK_TRUE, UINT64_MAX);
+    }
 
     m_asBuildStagingBuffers[slot].clear();
     m_blasBuildScratchBuffers[slot].clear();
     m_BufferDestroyQueue[slot].clear();
     m_ImageDestroyQueue[slot].clear();
-
     for (auto &as : m_AsDestroyQueue[slot])
+    {
         as.destroy(m_DeviceContext->getDevice());
+    }
     m_AsDestroyQueue[slot].clear();
 
     updateLightUbo(slot, gameTicks);
     glm::vec3 skyColor = updateUniformBuffer(slot, camera, playerPos);
     updateDescriptorSets();
     if (showDebugOverlay && m_debugOverlay)
+    {
         m_debugOverlay->update(*m_player, m_Settings, 250.f, m_terrainGen->getSeed());
+    }
 
     std::vector<std::pair<Chunk *, int>> renderChunks;
     renderChunks.reserve(chunks.size());
@@ -178,11 +182,14 @@ void VulkanRenderer::drawFrame(Camera &camera,
         ch->markReady(*this);
         if (!fr.intersects(ch->getAABB()))
             continue;
+
         float d = glm::distance(glm::vec2(pos), glm::vec2(playerChunkPos));
         int req = (!m_Settings.lodDistances.empty() && d <= m_Settings.lodDistances[0]) ? 0 : 1;
         int best = ch->getBestAvailableLOD(req);
         if (best != -1)
+        {
             renderChunks.emplace_back(ch.get(), best);
+        }
     }
 
     VkCommandBuffer cmd = m_CommandManager->getCommandBuffer(slot);
@@ -190,45 +197,51 @@ void VulkanRenderer::drawFrame(Camera &camera,
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     vkBeginCommandBuffer(cmd, &bi);
 
-    if (m_DeviceContext->isRayTracingSupported() &&
-        (m_Settings.rayTracingFlags & SettingsEnums::SHADOWS))
+    if (m_DeviceContext->isRayTracingSupported() && (m_Settings.rayTracingFlags & SettingsEnums::SHADOWS))
     {
-
-        VkPipeline rtPipeline = m_PipelineCache->getRayTracingPipeline();
-        if (rtPipeline == VK_NULL_HANDLE)
+        try
         {
-            std::cerr << "Ray tracing pipeline not available, disabling shadows\n";
-            m_Settings.rayTracingFlags &= ~SettingsEnums::SHADOWS;
-        }
-        else if (m_tlas.handle == VK_NULL_HANDLE)
-        {
-
             buildBlas(renderChunks, cmd);
             buildTlasAsync(renderChunks, cmd, slot);
 
-            if (m_tlas.handle == VK_NULL_HANDLE)
+            if (m_tlas.handle != VK_NULL_HANDLE)
             {
-                std::cerr << "Failed to create TLAS, disabling shadows\n";
-                m_Settings.rayTracingFlags &= ~SettingsEnums::SHADOWS;
+                updateRtDescriptorSet(slot);
+
+                RayTracePushConstants pc{};
+                pc.viewInverse = glm::inverse(camera.getViewMatrix());
+                pc.projInverse = glm::inverse(camera.getProjectionMatrix());
+                pc.cameraPos = playerPos + glm::vec3(0, 1.8f * 0.9f, 0);
+                memcpy(&pc.lightDirection, m_LightUbosMapped[slot], sizeof(glm::vec3));
+
+                m_CommandManager->recordRayTraceCommand(
+                    cmd, slot, m_rtDescriptorSets[slot],
+                    &m_rgenRegion, &m_missRegion, &m_hitRegion, &m_callRegion,
+                    &pc, m_rtShadowImage.get());
+
+                VkMemoryBarrier memoryBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+                memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+                memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+                vkCmdPipelineBarrier(
+                    cmd,
+                    VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                    0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
+            }
+            else
+            {
+                if (m_Settings.rayTracingFlags & SettingsEnums::SHADOWS)
+                {
+                    m_Settings.rayTracingFlags &= ~SettingsEnums::SHADOWS;
+                }
             }
         }
-
-        if (m_Settings.rayTracingFlags & SettingsEnums::SHADOWS)
+        catch (const std::exception &e)
         {
-            buildBlas(renderChunks, cmd);
-            buildTlasAsync(renderChunks, cmd, slot);
-            updateRtDescriptorSet(slot);
-
-            RayTracePushConstants pc{};
-            pc.viewInverse = glm::inverse(camera.getViewMatrix());
-            pc.projInverse = glm::inverse(camera.getProjectionMatrix());
-            pc.cameraPos = playerPos + glm::vec3(0, 1.8f * 0.9f, 0);
-            memcpy(&pc.lightDirection, m_LightUbosMapped[slot], sizeof(glm::vec3));
-
-            m_CommandManager->recordRayTraceCommand(
-                cmd, slot, m_rtDescriptorSets[slot],
-                &m_rgenRegion, &m_missRegion, &m_hitRegion, &m_callRegion,
-                &pc, m_rtShadowImage.get());
+            std::cerr << "Exception during ray tracing setup: " << e.what() << ", disabling shadows.\n";
+            m_Settings.rayTracingFlags &= ~SettingsEnums::SHADOWS;
+            m_tlas.handle = VK_NULL_HANDLE;
         }
     }
 
@@ -247,11 +260,7 @@ void VulkanRenderer::drawFrame(Camera &camera,
         glm::vec3 look = glm::normalize(cam - objPos);
         glm::vec3 right = glm::normalize(glm::cross(up, look));
         glm::vec3 up2 = glm::cross(look, right);
-        glm::mat4 M(1.0f);
-        M[0] = glm::vec4(right, 0);
-        M[1] = glm::vec4(up2, 0);
-        M[2] = glm::vec4(look, 0);
-        M[3] = glm::vec4(objPos, 1);
+        glm::mat4 M(glm::vec4(right, 0), glm::vec4(up2, 0), glm::vec4(look, 0), glm::vec4(objPos, 1));
         return M;
     };
 
@@ -273,9 +282,7 @@ void VulkanRenderer::drawFrame(Camera &camera,
 
     m_CommandManager->recordCommandBuffer(
         imageIndex, slot, renderChunks, m_DescriptorSets,
-        skyColor,
-
-        sun_pc, moon_pc, isSunVisible, isMoonVisible,
+        skyColor, sun_pc, moon_pc, isSunVisible, isMoonVisible,
         m_SkySphereVertexBuffer.get(), m_SkySphereIndexBuffer.get(), m_SkySphereIndexCount,
         m_CrosshairVertexBuffer.get(),
         m_DebugCubeVertexBuffer.get(), m_DebugCubeIndexBuffer.get(), m_DebugCubeIndexCount,
@@ -283,38 +290,38 @@ void VulkanRenderer::drawFrame(Camera &camera,
 
     vkEndCommandBuffer(cmd);
 
-    VkSemaphore wait = m_SyncPrimitives->getImageAvailableSemaphore(slot);
-    VkSemaphore signal = m_SyncPrimitives->getRenderFinishedSemaphore(slot);
-    VkPipelineStageFlags stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkSemaphore waitSemaphores[] = {m_SyncPrimitives->getImageAvailableSemaphore(slot)};
+    VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    VkSemaphore signalSemaphores[] = {m_SyncPrimitives->getRenderFinishedSemaphore(slot)};
 
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     si.waitSemaphoreCount = 1;
-    si.pWaitSemaphores = &wait;
-    si.pWaitDstStageMask = &stage;
+    si.pWaitSemaphores = waitSemaphores;
+    si.pWaitDstStageMask = waitStages;
     si.commandBufferCount = 1;
     si.pCommandBuffers = &cmd;
     si.signalSemaphoreCount = 1;
-    si.pSignalSemaphores = &signal;
+    si.pSignalSemaphores = signalSemaphores;
 
     {
-        std::scoped_lock lk(m_GraphicsQueueMutex);
-        vkResetFences(m_DeviceContext->getDevice(), 1,
-                      m_SyncPrimitives->getInFlightFencePtr(slot));
-        if (vkQueueSubmit(m_DeviceContext->getGraphicsQueue(), 1, &si,
-                          m_SyncPrimitives->getInFlightFence(slot)) != VK_SUCCESS)
+        std::scoped_lock lk(gGraphicsQueueMutex);
+        vkResetFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(slot));
+        if (vkQueueSubmit(m_DeviceContext->getGraphicsQueue(), 1, &si, m_SyncPrimitives->getInFlightFence(slot)) != VK_SUCCESS)
+        {
             throw std::runtime_error("vkQueueSubmit failed");
+        }
     }
 
-    VkSwapchainKHR swp = m_SwapChainContext->getSwapChain();
+    VkSwapchainKHR swapChains[] = {m_SwapChainContext->getSwapChain()};
     VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
     pi.waitSemaphoreCount = 1;
-    pi.pWaitSemaphores = &signal;
+    pi.pWaitSemaphores = signalSemaphores;
     pi.swapchainCount = 1;
-    pi.pSwapchains = &swp;
+    pi.pSwapchains = swapChains;
     pi.pImageIndices = &imageIndex;
 
     {
-        std::scoped_lock lk(m_GraphicsQueueMutex);
+        std::scoped_lock lk(gGraphicsQueueMutex);
         res = vkQueuePresentKHR(m_DeviceContext->getPresentQueue(), &pi);
     }
 
@@ -324,6 +331,14 @@ void VulkanRenderer::drawFrame(Camera &camera,
         m_SwapChainContext->recreateSwapChain();
         if (m_debugOverlay)
             m_debugOverlay->onWindowResize(m_SwapChainContext->getSwapChainExtent());
+    }
+    else if (res == VK_ERROR_DEVICE_LOST)
+    {
+        throw std::runtime_error("Vulkan device lost during present");
+    }
+    else if (res != VK_SUCCESS)
+    {
+        throw std::runtime_error("Failed to present swap chain image");
     }
 
     m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
@@ -345,13 +360,10 @@ void VulkanRenderer::loadRayTracingFunctions()
 
 void VulkanRenderer::createRayTracingResources()
 {
-
     VkExtent2D extent = m_SwapChainContext->getSwapChainExtent();
-
     VkFormat shadowFormat = VK_FORMAT_R32_SFLOAT;
     VkFormatProperties props;
-    vkGetPhysicalDeviceFormatProperties(
-        m_DeviceContext->getPhysicalDevice(), shadowFormat, &props);
+    vkGetPhysicalDeviceFormatProperties(m_DeviceContext->getPhysicalDevice(), shadowFormat, &props);
     if (!(props.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT))
         shadowFormat = VK_FORMAT_R8_UNORM;
 
@@ -508,129 +520,142 @@ void VulkanRenderer::updateRtDescriptorSet(uint32_t frame)
 
 void VulkanRenderer::buildBlas(const std::vector<std::pair<Chunk *, int>> &chunksToBuild, VkCommandBuffer cmd)
 {
-    if (!m_rtFunctionsLoaded)
+    if (!m_rtFunctionsLoaded || cmd == VK_NULL_HANDLE)
+    {
         return;
+    }
 
     std::vector<std::pair<Chunk *, int>> dirty;
     dirty.reserve(chunksToBuild.size());
     for (const auto &p : chunksToBuild)
-        if (p.first->m_blas_dirty.load(std::memory_order_acquire))
-            dirty.emplace_back(p);
-
-    if (dirty.empty())
-        return;
-
-    try
     {
-        std::vector<VkAccelerationStructureBuildGeometryInfoKHR> buildInfos;
-        std::vector<VkAccelerationStructureGeometryKHR> geometries;
-        std::vector<VkAccelerationStructureGeometryTrianglesDataKHR> triangles;
-        std::vector<uint32_t> triangleCounts;
-        std::vector<ChunkMesh *> targetMeshes;
-
-        buildInfos.reserve(dirty.size());
-        geometries.reserve(dirty.size());
-        triangles.reserve(dirty.size());
-        triangleCounts.reserve(dirty.size());
-        targetMeshes.reserve(dirty.size());
-
-        for (auto &p : dirty)
+        if (p.first->m_blas_dirty.load(std::memory_order_acquire) && p.first->getState() == Chunk::State::GPU_READY)
         {
-            Chunk *chunk = p.first;
-            int lod = p.second;
-            ChunkMesh *mesh = chunk->getMesh(lod);
-
-            if (!mesh || mesh->indexCount == 0 || mesh->vertexCount == 0 || mesh->vertexBuffer.get() == VK_NULL_HANDLE || mesh->indexBuffer.get() == VK_NULL_HANDLE)
-            {
-                chunk->m_blas_dirty.store(false, std::memory_order_release);
-                continue;
-            }
-
-            if (mesh->blas.handle != VK_NULL_HANDLE)
-                enqueueDestroy(std::move(mesh->blas));
-
-            VkDeviceAddress vAddr = getBufferDeviceAddress(mesh->vertexBuffer.get());
-            VkDeviceAddress iAddr = getBufferDeviceAddress(mesh->indexBuffer.get());
-
-            triangles.push_back({VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
-                                 nullptr,
-                                 VK_FORMAT_R32G32B32_SFLOAT,
-                                 {.deviceAddress = vAddr},
-                                 sizeof(Vertex),
-                                 mesh->vertexCount > 0 ? mesh->vertexCount - 1 : 0,
-                                 VK_INDEX_TYPE_UINT32,
-                                 {.deviceAddress = iAddr},
-                                 0});
-
-            geometries.push_back({VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
-                                  nullptr,
-                                  VK_GEOMETRY_TYPE_TRIANGLES_KHR,
-                                  {.triangles = {}},
-                                  VK_GEOMETRY_OPAQUE_BIT_KHR});
-
-            buildInfos.push_back({VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
-                                  nullptr,
-                                  VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
-                                  VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
-                                  VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
-                                  0,
-                                  0,
-                                  1,
-                                  nullptr,
-                                  {}});
-
-            triangleCounts.push_back(mesh->indexCount / 3);
-            targetMeshes.push_back(mesh);
-        }
-
-        if (buildInfos.empty())
-            return;
-
-        std::vector<VkAccelerationStructureBuildSizesInfoKHR> sizeInfos(buildInfos.size(), {VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR});
-        std::vector<const VkAccelerationStructureBuildRangeInfoKHR *> rangesPtrs(buildInfos.size());
-        std::vector<VkAccelerationStructureBuildRangeInfoKHR> ranges(buildInfos.size());
-
-        for (size_t i = 0; i < buildInfos.size(); ++i)
-        {
-            geometries[i].geometry.triangles = triangles[i];
-            buildInfos[i].pGeometries = &geometries[i];
-
-            vkGetAccelerationStructureBuildSizesKHR(m_DeviceContext->getDevice(),
-                                                    VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-                                                    &buildInfos[i], &triangleCounts[i], &sizeInfos[i]);
-
-            createAccelerationStructure(*m_DeviceContext, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, sizeInfos[i], targetMeshes[i]->blas);
-            buildInfos[i].dstAccelerationStructure = targetMeshes[i]->blas.handle;
-
-            VmaBuffer scratch = createScratchBuffer(sizeInfos[i].buildScratchSize);
-            buildInfos[i].scratchData.deviceAddress = getBufferDeviceAddress(scratch.get());
-            m_blasBuildScratchBuffers[m_CurrentFrame].push_back(std::move(scratch));
-
-            ranges[i].primitiveCount = triangleCounts[i];
-            rangesPtrs[i] = &ranges[i];
-        }
-
-        vkCmdBuildAccelerationStructuresKHR(cmd, static_cast<uint32_t>(buildInfos.size()),
-                                            buildInfos.data(), rangesPtrs.data());
-
-        VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-        barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-        barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
-
-        vkCmdPipelineBarrier(cmd,
-                             VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                             VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                             0, 1, &barrier, 0, nullptr, 0, nullptr);
-
-        for (auto &p : dirty)
-        {
-            p.first->m_blas_dirty.store(false, std::memory_order_release);
+            dirty.emplace_back(p);
         }
     }
-    catch (const std::exception &e)
+
+    if (dirty.empty())
     {
-        std::cerr << "Error in buildBlas: " << e.what() << std::endl;
-        m_Settings.rayTracingFlags &= ~SettingsEnums::SHADOWS;
+        return;
+    }
+
+    const size_t MAX_BLAS_PER_FRAME = 32;
+    if (dirty.size() > MAX_BLAS_PER_FRAME)
+    {
+        dirty.resize(MAX_BLAS_PER_FRAME);
+    }
+
+    std::vector<VkAccelerationStructureBuildGeometryInfoKHR> buildInfos;
+    std::vector<VkAccelerationStructureGeometryKHR> geometries;
+    std::vector<VkAccelerationStructureGeometryTrianglesDataKHR> triangles;
+    std::vector<uint32_t> triangleCounts;
+    std::vector<ChunkMesh *> targetMeshes;
+
+    buildInfos.reserve(dirty.size());
+    geometries.reserve(dirty.size());
+    triangles.reserve(dirty.size());
+    triangleCounts.reserve(dirty.size());
+    targetMeshes.reserve(dirty.size());
+
+    for (auto &p : dirty)
+    {
+        Chunk *chunk = p.first;
+        int lod = p.second;
+        ChunkMesh *mesh = chunk->getMesh(lod);
+
+        if (!mesh || mesh->indexCount == 0 || mesh->vertexCount == 0 || mesh->vertexBuffer.get() == VK_NULL_HANDLE || mesh->indexBuffer.get() == VK_NULL_HANDLE)
+        {
+            chunk->m_blas_dirty.store(false, std::memory_order_release);
+            continue;
+        }
+
+        if (mesh->blas.handle != VK_NULL_HANDLE)
+            enqueueDestroy(std::move(mesh->blas));
+
+        VkDeviceAddress vAddr = getBufferDeviceAddress(mesh->vertexBuffer.get());
+        VkDeviceAddress iAddr = getBufferDeviceAddress(mesh->indexBuffer.get());
+
+        if (vAddr == 0 || iAddr == 0)
+        {
+            std::cout << "[WARNING] buildBlas: Skipping chunk at (" << chunk->getPos().x << ", " << chunk->getPos().z
+                      << ") due to null buffer device address. The mesh might still be uploading." << std::endl;
+            continue;
+        }
+
+        triangles.push_back({VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
+                             nullptr,
+                             VK_FORMAT_R32G32B32_SFLOAT,
+                             {.deviceAddress = vAddr},
+                             sizeof(Vertex),
+                             mesh->vertexCount > 0 ? mesh->vertexCount - 1 : 0,
+                             VK_INDEX_TYPE_UINT32,
+                             {.deviceAddress = iAddr},
+                             0});
+
+        geometries.push_back({VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+                              nullptr,
+                              VK_GEOMETRY_TYPE_TRIANGLES_KHR,
+                              {.triangles = {}},
+                              VK_GEOMETRY_OPAQUE_BIT_KHR});
+
+        buildInfos.push_back({VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+                              nullptr,
+                              VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+                              VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+                              VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+                              0,
+                              0,
+                              1,
+                              nullptr,
+                              {}});
+
+        triangleCounts.push_back(mesh->indexCount / 3);
+        targetMeshes.push_back(mesh);
+    }
+
+    if (buildInfos.empty())
+        return;
+
+    std::vector<VkAccelerationStructureBuildSizesInfoKHR> sizeInfos(buildInfos.size(), {VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR});
+    std::vector<const VkAccelerationStructureBuildRangeInfoKHR *> rangesPtrs(buildInfos.size());
+    std::vector<VkAccelerationStructureBuildRangeInfoKHR> ranges(buildInfos.size());
+
+    for (size_t i = 0; i < buildInfos.size(); ++i)
+    {
+        geometries[i].geometry.triangles = triangles[i];
+        buildInfos[i].pGeometries = &geometries[i];
+
+        vkGetAccelerationStructureBuildSizesKHR(m_DeviceContext->getDevice(),
+                                                VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                                                &buildInfos[i], &triangleCounts[i], &sizeInfos[i]);
+
+        createAccelerationStructure(*m_DeviceContext, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, sizeInfos[i], targetMeshes[i]->blas);
+        buildInfos[i].dstAccelerationStructure = targetMeshes[i]->blas.handle;
+
+        VmaBuffer scratch = createScratchBuffer(sizeInfos[i].buildScratchSize);
+        buildInfos[i].scratchData.deviceAddress = getBufferDeviceAddress(scratch.get());
+        m_blasBuildScratchBuffers[m_CurrentFrame].push_back(std::move(scratch));
+
+        ranges[i].primitiveCount = triangleCounts[i];
+        rangesPtrs[i] = &ranges[i];
+    }
+
+    vkCmdBuildAccelerationStructuresKHR(cmd, static_cast<uint32_t>(buildInfos.size()),
+                                        buildInfos.data(), rangesPtrs.data());
+
+    VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+    barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                         0, 1, &barrier, 0, nullptr, 0, nullptr);
+
+    for (auto &p : dirty)
+    {
+        p.first->m_blas_dirty.store(false, std::memory_order_release);
     }
 }
 
@@ -642,7 +667,6 @@ void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &
 
     try
     {
-
         std::vector<VkAccelerationStructureInstanceKHR> instances;
         instances.reserve(drawList.size());
 
@@ -650,7 +674,8 @@ void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &
         {
             const Chunk *c = p.first;
             const ChunkMesh *m = c->getMesh(p.second);
-            if (!m || m->blas.handle == VK_NULL_HANDLE)
+
+            if (!m || m->blas.handle == VK_NULL_HANDLE || c->m_blas_dirty.load(std::memory_order_acquire))
                 continue;
 
             VkAccelerationStructureInstanceKHR inst{};
@@ -661,8 +686,16 @@ void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &
             inst.accelerationStructureReference = m->blas.deviceAddress;
             instances.push_back(inst);
         }
+
         if (instances.empty())
+        {
+            if (m_tlas.handle != VK_NULL_HANDLE)
+            {
+                enqueueDestroy(std::move(m_tlas));
+                m_tlas.handle = VK_NULL_HANDLE;
+            }
             return;
+        }
 
         VkDeviceSize sizeBytes = sizeof(instances[0]) * instances.size();
 
@@ -748,6 +781,11 @@ void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &
 
 VkDeviceAddress VulkanRenderer::getBufferDeviceAddress(VkBuffer buffer)
 {
+
+    if (buffer == VK_NULL_HANDLE)
+    {
+        return 0;
+    }
     VkBufferDeviceAddressInfoKHR info{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
     info.buffer = buffer;
     return vkGetBufferDeviceAddressKHR(m_DeviceContext->getDevice(), &info);
@@ -755,11 +793,19 @@ VkDeviceAddress VulkanRenderer::getBufferDeviceAddress(VkBuffer buffer)
 
 VmaBuffer VulkanRenderer::createScratchBuffer(VkDeviceSize size)
 {
+    VkDeviceSize align = m_DeviceContext->getScratchAlignment();
+    size = (size + align - 1) & ~(align - 1);
+
     VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     bufferInfo.size = size;
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                       VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
     VmaAllocationCreateInfo allocInfo{};
+    allocInfo.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
     return VmaBuffer(m_DeviceContext->getAllocator(), bufferInfo, allocInfo);
 }
 
@@ -960,7 +1006,6 @@ void VulkanRenderer::createSkyResources()
     m_MoonTextureView = createTexture("textures/moon.png", m_MoonTexture);
 
     std::vector<Vertex> vertices = {
-
         {{-0.5f, -0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
         {{0.5f, -0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
         {{0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
@@ -982,18 +1027,14 @@ void VulkanRenderer::createDescriptorPool()
 {
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-
     poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 2);
-
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-
     poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 4);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-
     poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
     VkDescriptorPool pool;
@@ -1026,7 +1067,6 @@ void VulkanRenderer::updateDescriptorSets()
 
     VkDescriptorImageInfo shadowImageInfo{};
     shadowImageInfo.sampler = m_TextureManager->getTextureSampler();
-
     if (m_rtShadowImageView.get() != VK_NULL_HANDLE)
     {
         shadowImageInfo.imageView = m_rtShadowImageView.get();
@@ -1034,7 +1074,6 @@ void VulkanRenderer::updateDescriptorSets()
     }
     else
     {
-
         shadowImageInfo.imageView = m_TextureManager->getTextureImageView();
         shadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     }

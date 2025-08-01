@@ -8,6 +8,7 @@
 #include <array>
 #include "renderer/resources/UploadHelpers.h"
 #include <chrono>
+#include <iostream>
 
 using hrc = std::chrono::high_resolution_clock;
 using milli = std::chrono::duration<double, std::milli>;
@@ -121,12 +122,16 @@ void Chunk::markReady(VulkanRenderer &renderer)
         {
             if (job.cmdBuffer != VK_NULL_HANDLE)
                 vkFreeCommandBuffers(renderer.getDevice(),
-                                     renderer.getTransferCommandPool()
-                                         ? renderer.getTransferCommandPool()
-                                         : renderer.getCommandManager()->getCommandPool(),
+                                     renderer.getCommandManager()->getCommandPool(),
                                      1, &job.cmdBuffer);
-            vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
 
+            if (job.fence != VK_NULL_HANDLE)
+            {
+                vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
+                job.fence = VK_NULL_HANDLE;
+            }
+
+            m_State.store(State::GPU_READY, std::memory_order_release);
             m_blas_dirty.store(true, std::memory_order_release);
             it = m_PendingUploads.erase(it);
         }
@@ -141,11 +146,16 @@ void Chunk::markReady(VulkanRenderer &renderer)
         {
             if (job.cmdBuffer != VK_NULL_HANDLE)
                 vkFreeCommandBuffers(renderer.getDevice(),
-                                     renderer.getTransferCommandPool()
-                                         ? renderer.getTransferCommandPool()
-                                         : renderer.getCommandManager()->getCommandPool(),
+                                     renderer.getCommandManager()->getCommandPool(),
                                      1, &job.cmdBuffer);
-            vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
+
+            if (job.fence != VK_NULL_HANDLE)
+            {
+                vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
+                job.fence = VK_NULL_HANDLE;
+            }
+
+            m_State.store(State::GPU_READY, std::memory_order_release);
             it = m_PendingTransparentUploads.erase(it);
         }
         else
@@ -159,7 +169,9 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
     {
         std::scoped_lock lock(m_PendingMutex);
         if (!m_PendingUploads.count(lodLevel))
+        {
             return false;
+        }
         job = std::move(m_PendingUploads.at(lodLevel));
         m_PendingUploads.erase(lodLevel);
     }
@@ -177,9 +189,13 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
         }
 
         if (oldMesh.vertexBuffer.get() != VK_NULL_HANDLE)
+        {
             renderer.enqueueDestroy(std::move(oldMesh.vertexBuffer));
+        }
         if (oldMesh.indexBuffer.get() != VK_NULL_HANDLE)
+        {
             renderer.enqueueDestroy(std::move(oldMesh.indexBuffer));
+        }
 
         m_State.store(State::GPU_READY);
         return true;
@@ -188,7 +204,7 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
     m_State.store(State::UPLOADING);
 
     ChunkMesh newMesh;
-    VkCommandPool pool = renderer.getTransferCommandPool() ? renderer.getTransferCommandPool() : renderer.getCommandManager()->getCommandPool();
+    VkCommandPool pool = renderer.getCommandManager()->getCommandPool();
 
     UploadHelpers::submitChunkMeshUpload(*renderer.getDeviceContext(), pool, job, newMesh.vertexBuffer, newMesh.indexBuffer);
 
@@ -198,9 +214,7 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
         si.commandBufferCount = 1;
         si.pCommandBuffers = &job.cmdBuffer;
 
-        VkQueue q = renderer.getDeviceContext()->hasTransferQueue()
-                        ? renderer.getDeviceContext()->getTransferQueue()
-                        : renderer.getDeviceContext()->getGraphicsQueue();
+        VkQueue q = renderer.getDeviceContext()->getGraphicsQueue();
 
         std::scoped_lock lk(gGraphicsQueueMutex);
 
@@ -208,18 +222,37 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
 
         if (result != VK_SUCCESS)
         {
+            if (job.fence != VK_NULL_HANDLE)
+            {
+                vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
+                job.fence = VK_NULL_HANDLE;
+            }
 
-            vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
+            if (result == VK_ERROR_DEVICE_LOST)
+            {
+                throw std::runtime_error("Vulkan device lost during chunk mesh upload queue submit. This is often caused by an error in a previous frame's rendering commands.");
+            }
 
             std::string error_message = "vkQueueSubmit failed in chunk mesh upload! Vulkan Error Code: " + std::to_string(result);
             throw std::runtime_error(error_message);
         }
     }
+    else
+    {
+        if (job.fence == VK_NULL_HANDLE)
+        {
+            VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+            vkCreateFence(renderer.getDevice(), &fi, nullptr, &job.fence);
+        }
+
+        if (job.fence != VK_NULL_HANDLE)
+        {
+            vkQueueSubmit(renderer.getDeviceContext()->getGraphicsQueue(), 0, nullptr, job.fence);
+        }
+    }
 
     newMesh.indexCount = static_cast<uint32_t>(job.stagingIbSize / sizeof(uint32_t));
-
     newMesh.vertexCount = static_cast<uint32_t>(job.stagingVbSize / sizeof(Vertex));
-    newMesh.indexCount = static_cast<uint32_t>(job.stagingIbSize / sizeof(uint32_t));
 
     ChunkMesh oldMesh;
     {
@@ -244,9 +277,10 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
         std::scoped_lock lock(m_PendingMutex);
         m_PendingUploads[lodLevel] = std::move(job);
     }
-    m_State.store(State::GPU_READY);
+
     return true;
 }
+
 bool Chunk::uploadTransparentMesh(VulkanRenderer &renderer, int lodLevel)
 {
     UploadJob job;
@@ -281,7 +315,7 @@ bool Chunk::uploadTransparentMesh(VulkanRenderer &renderer, int lodLevel)
     m_State.store(State::UPLOADING);
 
     ChunkMesh newMesh;
-    VkCommandPool pool = renderer.getTransferCommandPool() ? renderer.getTransferCommandPool() : renderer.getCommandManager()->getCommandPool();
+    VkCommandPool pool = renderer.getCommandManager()->getCommandPool();
 
     UploadHelpers::submitChunkMeshUpload(*renderer.getDeviceContext(), pool, job, newMesh.vertexBuffer, newMesh.indexBuffer);
 
@@ -291,9 +325,7 @@ bool Chunk::uploadTransparentMesh(VulkanRenderer &renderer, int lodLevel)
         si.commandBufferCount = 1;
         si.pCommandBuffers = &job.cmdBuffer;
 
-        VkQueue q = renderer.getDeviceContext()->hasTransferQueue()
-                        ? renderer.getDeviceContext()->getTransferQueue()
-                        : renderer.getDeviceContext()->getGraphicsQueue();
+        VkQueue q = renderer.getDeviceContext()->getGraphicsQueue();
 
         std::scoped_lock lk(gGraphicsQueueMutex);
 
@@ -301,10 +333,18 @@ bool Chunk::uploadTransparentMesh(VulkanRenderer &renderer, int lodLevel)
 
         if (result != VK_SUCCESS)
         {
+            if (job.fence != VK_NULL_HANDLE)
+            {
+                vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
+                job.fence = VK_NULL_HANDLE;
+            }
 
-            vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
+            if (result == VK_ERROR_DEVICE_LOST)
+            {
+                throw std::runtime_error("Vulkan device lost during transparent chunk mesh upload. This is likely caused by an error in a previous frame's rendering commands (e.g., ray tracing).");
+            }
 
-            std::string error_message = "vkQueueSubmit failed in chunk mesh upload! Vulkan Error Code: " + std::to_string(result);
+            std::string error_message = "vkQueueSubmit failed in chunk transparent mesh upload! Vulkan Error Code: " + std::to_string(result);
             throw std::runtime_error(error_message);
         }
     }
@@ -334,9 +374,10 @@ bool Chunk::uploadTransparentMesh(VulkanRenderer &renderer, int lodLevel)
         std::scoped_lock lock(m_PendingMutex);
         m_PendingTransparentUploads[lodLevel] = std::move(job);
     }
-    m_State.store(State::GPU_READY);
+
     return true;
 }
+
 void Chunk::buildMeshGreedy(int lodLevel,
                             std::vector<Vertex> &outOpaqueVertices, std::vector<uint32_t> &outOpaqueIndices,
                             std::vector<Vertex> &outTransparentVertices, std::vector<uint32_t> &outTransparentIndices,
@@ -712,6 +753,37 @@ void Chunk::cleanup(VulkanRenderer &renderer)
             renderer.enqueueDestroy(std::move(mesh.vertexBuffer));
         if (mesh.indexBuffer.get() != VK_NULL_HANDLE)
             renderer.enqueueDestroy(std::move(mesh.indexBuffer));
+    }
+
+    {
+        std::scoped_lock lock(m_PendingMutex);
+        for (auto &[lod, job] : m_PendingUploads)
+        {
+            if (job.fence != VK_NULL_HANDLE)
+            {
+                vkWaitForFences(renderer.getDevice(), 1, &job.fence, VK_TRUE, 1'000'000'000);
+                vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
+            }
+            if (job.cmdBuffer != VK_NULL_HANDLE)
+            {
+                vkFreeCommandBuffers(renderer.getDevice(), renderer.getCommandManager()->getCommandPool(), 1, &job.cmdBuffer);
+            }
+        }
+        m_PendingUploads.clear();
+
+        for (auto &[lod, job] : m_PendingTransparentUploads)
+        {
+            if (job.fence != VK_NULL_HANDLE)
+            {
+                vkWaitForFences(renderer.getDevice(), 1, &job.fence, VK_TRUE, 1'000'000'000);
+                vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
+            }
+            if (job.cmdBuffer != VK_NULL_HANDLE)
+            {
+                vkFreeCommandBuffers(renderer.getDevice(), renderer.getCommandManager()->getCommandPool(), 1, &job.cmdBuffer);
+            }
+        }
+        m_PendingTransparentUploads.clear();
     }
 
     m_Meshes.clear();

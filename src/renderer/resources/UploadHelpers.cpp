@@ -1,6 +1,7 @@
 #include "UploadHelpers.h"
 #include <stdexcept>
 #include <Globals.h>
+#include <iostream>
 
 void UploadHelpers::copyBuffer(const DeviceContext &dc,
                                VkCommandPool pool,
@@ -30,8 +31,7 @@ void UploadHelpers::copyBuffer(const DeviceContext &dc,
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &cmd;
 
-    VkQueue queue = dc.hasTransferQueue() ? dc.getTransferQueue()
-                                          : dc.getGraphicsQueue();
+    VkQueue queue = dc.getGraphicsQueue();
 
     if (outFence)
     {
@@ -64,7 +64,11 @@ VmaBuffer UploadHelpers::createDeviceLocalBufferFromDataWithStaging(
 
     VmaBuffer stagingBuffer;
     {
-        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0,
+                                      size,
+                                      VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                          usage |
+                                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT};
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
         allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
@@ -77,7 +81,11 @@ VmaBuffer UploadHelpers::createDeviceLocalBufferFromDataWithStaging(
 
     VmaBuffer deviceLocalBuffer;
     {
-        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage};
+        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0,
+                                      size,
+                                      VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                          usage |
+                                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT};
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
         deviceLocalBuffer = VmaBuffer(dc.getAllocator(), bufferInfo, allocInfo);
@@ -237,6 +245,50 @@ void UploadHelpers::submitChunkMeshUpload(const DeviceContext &dc,
                                           VmaBuffer &vb,
                                           VmaBuffer &ib)
 {
+    std::cout << "[DEBUG] submitChunkMeshUpload: Starting upload process" << std::endl;
+    std::cout << "[DEBUG] submitChunkMeshUpload: stagingVB=" << up.stagingVB
+              << ", stagingIB=" << up.stagingIB
+              << ", vbSize=" << up.stagingVbSize
+              << ", ibSize=" << up.stagingIbSize << std::endl;
+
+    up.cmdBuffer = VK_NULL_HANDLE;
+    up.fence = VK_NULL_HANDLE;
+
+    if (up.stagingVbSize == 0 || up.stagingIbSize == 0)
+    {
+        std::cout << "[WARNING] submitChunkMeshUpload: Zero sized buffer detected, creating empty buffers" << std::endl;
+
+        VkBufferCreateInfo b{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        VmaAllocationCreateInfo a{};
+        a.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+        if (up.stagingVbSize > 0)
+        {
+            b.size = up.stagingVbSize;
+            b.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+            vb = VmaBuffer(dc.getAllocator(), b, a);
+        }
+
+        if (up.stagingIbSize > 0)
+        {
+            b.size = up.stagingIbSize;
+            b.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+            ib = VmaBuffer(dc.getAllocator(), b, a);
+        }
+
+        VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        VkResult fenceResult = vkCreateFence(dc.getDevice(), &fi, nullptr, &up.fence);
+        if (fenceResult != VK_SUCCESS)
+        {
+            std::cout << "[ERROR] submitChunkMeshUpload: Failed to create fence for empty job, result: " << fenceResult << std::endl;
+        }
+        else
+        {
+            std::cout << "[DEBUG] submitChunkMeshUpload: Created fence for empty job: " << up.fence << std::endl;
+        }
+
+        return;
+    }
 
     VkBufferCreateInfo b{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     VmaAllocationCreateInfo a{};
@@ -244,30 +296,66 @@ void UploadHelpers::submitChunkMeshUpload(const DeviceContext &dc,
 
     b.size = up.stagingVbSize;
     b.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+    std::cout << "[DEBUG] submitChunkMeshUpload: Creating vertex buffer with size " << b.size << std::endl;
     vb = VmaBuffer(dc.getAllocator(), b, a);
 
     b.size = up.stagingIbSize;
     b.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+    std::cout << "[DEBUG] submitChunkMeshUpload: Creating index buffer with size " << b.size << std::endl;
     ib = VmaBuffer(dc.getAllocator(), b, a);
 
     VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     ai.commandPool = pool;
     ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     ai.commandBufferCount = 1;
-    vkAllocateCommandBuffers(dc.getDevice(), &ai, &up.cmdBuffer);
+    std::cout << "[DEBUG] submitChunkMeshUpload: Allocating command buffer from pool " << pool << std::endl;
+
+    VkResult allocResult = vkAllocateCommandBuffers(dc.getDevice(), &ai, &up.cmdBuffer);
+    if (allocResult != VK_SUCCESS)
+    {
+        std::cout << "[ERROR] submitChunkMeshUpload: Failed to allocate command buffer, result: " << allocResult << std::endl;
+        throw std::runtime_error("Failed to allocate command buffer");
+    }
+    std::cout << "[DEBUG] submitChunkMeshUpload: Command buffer allocated: " << up.cmdBuffer << std::endl;
 
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(up.cmdBuffer, &bi);
+    std::cout << "[DEBUG] submitChunkMeshUpload: Beginning command buffer recording" << std::endl;
+    VkResult beginResult = vkBeginCommandBuffer(up.cmdBuffer, &bi);
+    if (beginResult != VK_SUCCESS)
+    {
+        std::cout << "[ERROR] submitChunkMeshUpload: Failed to begin command buffer, result: " << beginResult << std::endl;
+        throw std::runtime_error("Failed to begin command buffer");
+    }
 
     VkBufferCopy c1{up.stagingVbOffset, 0, up.stagingVbSize};
+    std::cout << "[DEBUG] submitChunkMeshUpload: Copying vertex buffer - offset: " << up.stagingVbOffset
+              << ", size: " << up.stagingVbSize << std::endl;
     vkCmdCopyBuffer(up.cmdBuffer, up.stagingVB, vb, 1, &c1);
+
     VkBufferCopy c2{up.stagingIbOffset, 0, up.stagingIbSize};
+    std::cout << "[DEBUG] submitChunkMeshUpload: Copying index buffer - offset: " << up.stagingIbOffset
+              << ", size: " << up.stagingIbSize << std::endl;
     vkCmdCopyBuffer(up.cmdBuffer, up.stagingIB, ib, 1, &c2);
-    vkEndCommandBuffer(up.cmdBuffer);
+
+    std::cout << "[DEBUG] submitChunkMeshUpload: Ending command buffer recording" << std::endl;
+    VkResult endResult = vkEndCommandBuffer(up.cmdBuffer);
+    if (endResult != VK_SUCCESS)
+    {
+        std::cout << "[ERROR] submitChunkMeshUpload: Failed to end command buffer, result: " << endResult << std::endl;
+        throw std::runtime_error("Failed to end command buffer");
+    }
 
     VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    vkCreateFence(dc.getDevice(), &fi, nullptr, &up.fence);
+    std::cout << "[DEBUG] submitChunkMeshUpload: Creating fence" << std::endl;
+    VkResult fenceResult = vkCreateFence(dc.getDevice(), &fi, nullptr, &up.fence);
+    if (fenceResult != VK_SUCCESS)
+    {
+        std::cout << "[ERROR] submitChunkMeshUpload: Failed to create fence, result: " << fenceResult << std::endl;
+        throw std::runtime_error("Failed to create fence");
+    }
+    std::cout << "[DEBUG] submitChunkMeshUpload: Fence created: " << up.fence << std::endl;
+    std::cout << "[DEBUG] submitChunkMeshUpload: Completed successfully" << std::endl;
 }
 
 VmaBuffer UploadHelpers::createDeviceLocalBufferFromData(
@@ -277,7 +365,11 @@ VmaBuffer UploadHelpers::createDeviceLocalBufferFromData(
 
     VmaBuffer stagingBuffer;
     {
-        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0,
+                                      size,
+                                      VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                          usage |
+                                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT};
         VmaAllocationCreateInfo allocInfo{VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VMA_MEMORY_USAGE_CPU_ONLY};
         stagingBuffer = VmaBuffer(dc.getAllocator(), bufferInfo, allocInfo);
         void *mappedData;
@@ -288,7 +380,11 @@ VmaBuffer UploadHelpers::createDeviceLocalBufferFromData(
 
     VmaBuffer deviceLocalBuffer;
     {
-        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage};
+        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0,
+                                      size,
+                                      VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                          usage |
+                                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT};
         VmaAllocationCreateInfo allocInfo{0, VMA_MEMORY_USAGE_GPU_ONLY};
         deviceLocalBuffer = VmaBuffer(dc.getAllocator(), bufferInfo, allocInfo);
     }
