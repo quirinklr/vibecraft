@@ -201,15 +201,22 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
                         : renderer.getDeviceContext()->getGraphicsQueue();
 
         std::scoped_lock lk(gGraphicsQueueMutex);
-        if (vkQueueSubmit(q, 1, &si, job.fence) != VK_SUCCESS)
+
+        VkResult result = vkQueueSubmit(q, 1, &si, job.fence);
+
+        if (result != VK_SUCCESS)
         {
 
             vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
 
-            throw std::runtime_error("vkQueueSubmit failed in chunk mesh upload!");
+            std::string error_message = "vkQueueSubmit failed in chunk mesh upload! Vulkan Error Code: " + std::to_string(result);
+            throw std::runtime_error(error_message);
         }
     }
 
+    newMesh.indexCount = static_cast<uint32_t>(job.stagingIbSize / sizeof(uint32_t));
+
+    newMesh.vertexCount = static_cast<uint32_t>(job.stagingVbSize / sizeof(Vertex));
     newMesh.indexCount = static_cast<uint32_t>(job.stagingIbSize / sizeof(uint32_t));
 
     ChunkMesh oldMesh;
@@ -287,10 +294,16 @@ bool Chunk::uploadTransparentMesh(VulkanRenderer &renderer, int lodLevel)
                         : renderer.getDeviceContext()->getGraphicsQueue();
 
         std::scoped_lock lk(gGraphicsQueueMutex);
-        if (vkQueueSubmit(q, 1, &si, job.fence) != VK_SUCCESS)
+
+        VkResult result = vkQueueSubmit(q, 1, &si, job.fence);
+
+        if (result != VK_SUCCESS)
         {
+
             vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
-            throw std::runtime_error("vkQueueSubmit failed in transparent chunk mesh upload!");
+
+            std::string error_message = "vkQueueSubmit failed in chunk mesh upload! Vulkan Error Code: " + std::to_string(result);
+            throw std::runtime_error(error_message);
         }
     }
 

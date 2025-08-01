@@ -538,21 +538,35 @@ void VulkanRenderer::buildBlas(const std::vector<std::pair<Chunk *, int>> &chunk
             Chunk *chunk = p.first;
             int lod = p.second;
             ChunkMesh *mesh = chunk->getMesh(lod);
-            if (!mesh || mesh->indexCount == 0)
+
+            if (!mesh || mesh->indexCount == 0 || mesh->vertexBuffer.get() == VK_NULL_HANDLE || mesh->indexBuffer.get() == VK_NULL_HANDLE)
+            {
+
+                chunk->m_blas_dirty.store(false, std::memory_order_release);
                 continue;
+            }
 
             if (mesh->blas.handle != VK_NULL_HANDLE)
                 enqueueDestroy(std::move(mesh->blas));
 
-            VkDeviceAddress vAddr = getBufferDeviceAddress(mesh->vertexBuffer);
-            VkDeviceAddress iAddr = getBufferDeviceAddress(mesh->indexBuffer);
+            VkDeviceAddress vAddr = getBufferDeviceAddress(mesh->vertexBuffer.get());
+            VkDeviceAddress iAddr = getBufferDeviceAddress(mesh->indexBuffer.get());
 
             VkAccelerationStructureGeometryTrianglesDataKHR tri{};
             tri.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
             tri.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
             tri.vertexData.deviceAddress = vAddr;
             tri.vertexStride = sizeof(Vertex);
-            tri.maxVertex = mesh->indexCount;
+
+            if (mesh->vertexCount > 0)
+            {
+                tri.maxVertex = mesh->vertexCount - 1;
+            }
+            else
+            {
+                tri.maxVertex = 0;
+            }
+
             tri.indexType = VK_INDEX_TYPE_UINT32;
             tri.indexData.deviceAddress = iAddr;
             tris.push_back(tri);
