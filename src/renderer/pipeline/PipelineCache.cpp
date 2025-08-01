@@ -195,7 +195,7 @@ void PipelineCache::createRayTracingPipeline()
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
     bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+    bindings[0].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
 
     bindings[1].binding = 1;
     bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -203,10 +203,18 @@ void PipelineCache::createRayTracingPipeline()
     bindings[1].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
 
     VkDescriptorSetLayoutCreateInfo setLayoutInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    setLayoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+    setLayoutInfo.pBindings = bindings.data();
+
+    VkDescriptorSetLayout rtDescriptorSetLayout;
+    if (vkCreateDescriptorSetLayout(device, &setLayoutInfo, nullptr, &rtDescriptorSetLayout) != VK_SUCCESS)
+    {
+        throw std::runtime_error("Failed to create ray tracing descriptor set layout!");
+    }
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-
-    pipelineLayoutInfo.setLayoutCount = 0;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &rtDescriptorSetLayout;
 
     VkPushConstantRange pcRange{};
     pcRange.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
@@ -254,7 +262,9 @@ void PipelineCache::createRayTracingPipeline()
     {
         throw std::runtime_error("Failed to create ray tracing pipeline!");
     }
+
     m_RayTracingPipeline = VulkanHandle<VkPipeline, PipelineDeleter>(rtPipeline, {device});
+    vkDestroyDescriptorSetLayout(device, rtDescriptorSetLayout, nullptr);
 }
 
 void PipelineCache::createSkyPipeline()
