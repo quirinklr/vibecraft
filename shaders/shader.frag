@@ -36,27 +36,13 @@ void main() {
         discard;
     }
     
-    if (cameraUbo.isUnderwater == 1) {
-        vec3 fogColor = vec3(0.1, 0.2, 0.3); 
-        float fogDensity = 0.02; 
+    
+    float computedShadow = texture(shadowMap, gl_FragCoord.xy / textureSize(shadowMap, 0)).r;
+    float shadowFactor = mix(1.0, computedShadow, float((cameraUbo.flags & FLAG_SHADOWS) != 0));
 
-        float dist = distance(cameraUbo.cameraPos, fragWorldPos);
-        float fogFactor = 1.0 / exp(dist * dist * fogDensity); 
-        fogFactor = clamp(fogFactor, 0.0, 1.0);
+    
+    outColor = vec4(vec3(shadowFactor), 1.0); 
 
-        outColor = mix(vec4(fogColor, 1.0), textureColor, fogFactor);
-
-    } else {
-        
-        
-        float sunUpFactor = smoothstep(-0.15, 0.1, uboLight.lightDirection.y);
-        vec3 finalLight = mix(AMBIENT_NIGHT, SUNLIGHT, sunUpFactor);
-
-        
-        float computedShadow = texture(shadowMap, gl_FragCoord.xy / textureSize(shadowMap, 0)).r;
-        float shadowFactor = mix(1.0, computedShadow, float((cameraUbo.flags & FLAG_SHADOWS) != 0));
-
-        outColor.rgb = textureColor.rgb * finalLight * shadowFactor;
-        outColor.a = textureColor.a;
-    }
+    
+    
 }
