@@ -998,6 +998,7 @@ glm::vec3 VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &cam
     ubo.time = static_cast<float>(glfwGetTime());
     ubo.isUnderwater = (cameraWorldPos.y < TerrainGenerator::SEA_LEVEL) ? 1 : 0;
     ubo.flags = m_Settings.rayTracingFlags;
+    ubo.seaLevel = TerrainGenerator::SEA_LEVEL;
 
     memcpy(m_UniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 

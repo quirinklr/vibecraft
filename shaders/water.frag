@@ -11,6 +11,7 @@ layout(std140, set = 0, binding = 0) uniform CameraUbo {
     float time;
     int isUnderwater;
     uint flags;
+    float seaLevel;
 } cameraUbo;
 
 
@@ -25,8 +26,10 @@ const float TILE_SIZE = 1.0 / 16.0;
 
 const vec3 AMBIENT_NIGHT = vec3(0.05, 0.1, 0.15);
 const vec3 SUNLIGHT = vec3(0.8, 0.9, 1.0);
+const vec3 FOG_COLOR = vec3(0.05, 0.18, 0.25);
 
 void main() {
+    
     if (cameraUbo.isUnderwater == 1 && fragWorldPos.y > cameraUbo.cameraPos.y) {
         discard;
     }
@@ -34,28 +37,40 @@ void main() {
     vec2 uv = tileOrigin + fract(localUV) * TILE_SIZE;
     vec4 textureColor = texture(texSampler, uv);
     
-    vec3 fogColor = vec3(0.00, 0.08, 0.25);
-
-    vec3 viewVec = normalize(cameraUbo.cameraPos - fragWorldPos);
-    vec3 normalVec = vec3(0.0, 1.0, 0.0);
-    float angleFactor = 1.0 - dot(viewVec, normalVec);
-    angleFactor = pow(angleFactor, 2.0);
-    
-    float dist = distance(cameraUbo.cameraPos, fragWorldPos);
-    float distanceFactor = 1.0 - exp(-dist * 0.1);
-    
-    float fogAmount = max(angleFactor, distanceFactor);
-    float fogFactor = 1.0 - clamp(fogAmount, 0.0, 1.0); 
-    
-    float surfaceFogFactor = pow(fogFactor, 0.5); 
-    
-    
     
     float sunUpFactor = smoothstep(-0.15, 0.1, uboLight.lightDirection.y);
     vec3 blockLight = mix(AMBIENT_NIGHT, SUNLIGHT, sunUpFactor);
+    vec3 litTextureColor = textureColor.rgb * blockLight;
 
-    vec3 finalRgb = mix(fogColor, textureColor.rgb * blockLight, surfaceFogFactor);
-    float finalAlpha = mix(0.8, textureColor.a, fogFactor); 
+    
+    float fogFactor;
+
+    if (cameraUbo.isUnderwater == 1) {
+        
+        float dist = distance(cameraUbo.cameraPos, fragWorldPos);
+        float fogDensity = 0.15; 
+        fogFactor = exp(-dist * fogDensity);
+
+    } else {
+        
+        float waterDepth = cameraUbo.seaLevel - fragWorldPos.y;
+        float fogDensity = 0.5;
+        
+        
+        vec3 viewVec = normalize(cameraUbo.cameraPos - fragWorldPos);
+        vec3 normalVec = vec3(0.0, 1.0, 0.0);
+        float fresnel = 0.2 + 0.8 * pow(1.0 - dot(normalVec, viewVec), 5.0);
+        
+        
+        fogFactor = exp(-waterDepth * fogDensity);
+        fogFactor = mix(fogFactor, 0.0, fresnel * 0.5);
+    }
+
+    fogFactor = clamp(fogFactor, 0.0, 1.0);
+
+    vec3 finalRgb = mix(FOG_COLOR, litTextureColor, fogFactor);
+    
+    float finalAlpha = mix(0.9, textureColor.a, fogFactor); 
 
     outColor = vec4(finalRgb, finalAlpha);
 }

@@ -15,4 +15,5 @@ struct UniformBufferObject
     alignas(4) float time;
     alignas(4) int isUnderwater;
     alignas(4) uint32_t flags;
+    alignas(4) float seaLevel;
 };
