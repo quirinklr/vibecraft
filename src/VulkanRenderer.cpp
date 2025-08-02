@@ -347,6 +347,23 @@ void VulkanRenderer::drawFrame(Camera &camera,
     m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
+void VulkanRenderer::recreateRayTracingShadowImage()
+{
+    if (!m_DeviceContext->isRayTracingSupported())
+        return;
+
+    if (m_rtShadowImage.get() != VK_NULL_HANDLE)
+        enqueueDestroy(std::move(m_rtShadowImage));
+
+    if (m_rtShadowImageView.get() != VK_NULL_HANDLE)
+        m_rtShadowImageView = {};
+
+    createRayTracingResources();
+
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        updateRtDescriptorSet(i);
+}
+
 void VulkanRenderer::loadRayTracingFunctions()
 {
     vkGetBufferDeviceAddressKHR = (PFN_vkGetBufferDeviceAddressKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkGetBufferDeviceAddressKHR");
@@ -549,6 +566,8 @@ void VulkanRenderer::buildBlas(const std::vector<std::pair<Chunk *, int>> &chunk
         return;
     }
 
+    m_tlasIsDirty = true;
+
     const size_t MAX_BLAS_PER_FRAME = 32;
     if (dirty.size() > MAX_BLAS_PER_FRAME)
     {
@@ -677,28 +696,16 @@ void VulkanRenderer::buildBlas(const std::vector<std::pair<Chunk *, int>> &chunk
         p.first->m_blas_dirty.store(false, std::memory_order_release);
 }
 
-void VulkanRenderer::recreateRayTracingShadowImage()
-{
-    if (!m_DeviceContext->isRayTracingSupported())
-        return;
-
-    if (m_rtShadowImage.get() != VK_NULL_HANDLE)
-        enqueueDestroy(std::move(m_rtShadowImage));
-
-    if (m_rtShadowImageView.get() != VK_NULL_HANDLE)
-        m_rtShadowImageView = {};
-
-    createRayTracingResources();
-
-    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
-        updateRtDescriptorSet(i);
-}
-
 void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &drawList,
                                     VkCommandBuffer cmd, uint32_t frame)
 {
     if (!m_rtFunctionsLoaded || !m_DeviceContext->isRayTracingSupported() || cmd == VK_NULL_HANDLE)
         return;
+
+    if (!m_tlasIsDirty)
+    {
+        return;
+    }
 
     try
     {
@@ -729,6 +736,7 @@ void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &
                 enqueueDestroy(std::move(m_tlas));
                 m_tlas.handle = VK_NULL_HANDLE;
             }
+            m_tlasIsDirty = false;
             return;
         }
 
@@ -782,7 +790,7 @@ void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &
         VkAccelerationStructureBuildRangeInfoKHR range{.primitiveCount = primCount};
         const VkAccelerationStructureBuildRangeInfoKHR *pRange = &range;
 
-        vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build, &pRange);
+            vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build, &pRange);
 
         VkMemoryBarrier tlasBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
         tlasBarrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
@@ -817,6 +825,8 @@ void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &
         VkAccelerationStructureDeviceAddressInfoKHR dai{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
         dai.accelerationStructure = m_tlas.handle;
         m_tlas.deviceAddress = vkGetAccelerationStructureDeviceAddressKHR(m_DeviceContext->getDevice(), &dai);
+
+        m_tlasIsDirty = false;
     }
     catch (const std::exception &e)
     {

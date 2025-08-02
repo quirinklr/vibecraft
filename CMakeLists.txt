@@ -1,5 +1,32 @@
 cmake_minimum_required(VERSION 3.10)
 project(VibecraftProject VERSION 1.1 LANGUAGES CXX)
+
+
+# --- Set Compiler Flags for Different Build Types ---
+# This ensures that our Release builds are actually optimized.
+
+# --- For MSVC (Visual Studio) ---
+if(MSVC)
+    # /O2: Standard optimization for speed.
+    # /Ob2: Allow aggressive inline function expansion.
+    # /Oi: Generate intrinsic functions for speed.
+    # /Ot: Favor fast code.
+    # /Oy: Omit frame pointers for faster function calls (on x86).
+    # /GL: Enable Whole Program Optimization (Link-Time Code Generation).
+    # /D NDEBUG: Define the NDEBUG macro to disable asserts and other debug code.
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Ob2 /Oi /Ot /DNDEBUG")
+    set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG") # Link-Time Code Generation
+
+# --- For GCC and Clang ---
+else()
+    # -O3: The highest level of optimization.
+    # -DNDEBUG: Define the NDEBUG macro.
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -DNDEBUG")
+    # -flto: Enable Link-Time Optimization.
+    set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} -flto")
+endif()
+# --- End Compiler Flags ---
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

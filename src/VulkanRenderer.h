@@ -107,6 +107,7 @@ private:
     std::unique_ptr<DebugOverlay> m_debugOverlay;
 
     bool m_rtFunctionsLoaded = false;
+    bool m_tlasIsDirty = true;
 
     PFN_vkGetBufferDeviceAddressKHR vkGetBufferDeviceAddressKHR;
     PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR;

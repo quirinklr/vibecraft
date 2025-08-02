@@ -210,6 +210,7 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
     UploadHelpers::submitChunkMeshUpload(*renderer.getDeviceContext(), pool, job,
                                          newMesh.vertexBuffer,
                                          newMesh.indexBuffer);
+
     if (job.cmdBuffer != VK_NULL_HANDLE)
     {
         VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
@@ -237,19 +238,6 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
 
             std::string error_message = "vkQueueSubmit failed in chunk mesh upload! Vulkan Error Code: " + std::to_string(result);
             throw std::runtime_error(error_message);
-        }
-    }
-    else
-    {
-        if (job.fence == VK_NULL_HANDLE)
-        {
-            VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-            vkCreateFence(renderer.getDevice(), &fi, nullptr, &job.fence);
-        }
-
-        if (job.fence != VK_NULL_HANDLE)
-        {
-            vkQueueSubmit(renderer.getDeviceContext()->getGraphicsQueue(), 0, nullptr, job.fence);
         }
     }
 
