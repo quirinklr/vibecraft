@@ -2,9 +2,7 @@
 #extension GL_EXT_ray_tracing : enable
 
 layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
-layout(set = 0, binding = 1, r32f) uniform image2D imageOut; 
-
-
+layout(set = 0, binding = 1, r32f) uniform image2D imageOut;
 
 layout(push_constant) uniform PushConstants {
     mat4 viewInverse;
@@ -13,9 +11,7 @@ layout(push_constant) uniform PushConstants {
     vec3 lightDirection;
 };
 
-
 layout(location = 0) rayPayloadEXT vec3 hitValue;
-
 
 vec3 generateDir(uvec2 pixel, uvec2 size) {
     vec2 ndc = (vec2(pixel) + vec2(0.5)) / vec2(size);
@@ -58,5 +54,5 @@ void main() {
     );
 
     
-    imageStore(imageOut, ivec2(pixel), vec4(hitValue.r, 0.0, 0.0, 1.0));
+    imageStore(imageOut, ivec2(pixel), vec4(hitValue, 1.0));
 }

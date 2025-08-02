@@ -1,0 +1,106 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\Block.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\Camera.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\Chunk.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\DebugController.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\Engine.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\Entity.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\Globals.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\Player.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\VulkanRenderer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\VulkanWrappersDeferredFree.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\Window.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\generation\DesertBiome.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\generation\OceanBiome.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\generation\PlainsBiome.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\generation\TerrainGenerator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\math\Frustum.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\renderer\DebugOverlay.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\renderer\Vertex.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\renderer\alloc\AllocImpl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\renderer\alloc\StbImpl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\renderer\command\CommandManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\renderer\command\SyncPrimitives.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\renderer\core\DeviceContext.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\renderer\core\InstanceContext.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\renderer\pipeline\DescriptorLayout.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\renderer\pipeline\PipelineCache.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\renderer\resources\RingStagingArena.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\renderer\resources\TextureManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\renderer\resources\UploadHelpers.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\src\renderer\swapchain\SwapChainContext.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\quiri\Documents\C++ Projects\Minecraft\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{8DBE19C6-5F1D-3DD8-B3DD-A5A907A07CB7}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
