@@ -18,6 +18,8 @@ public:
     VkQueue getPresentQueue() const { return m_PresentQueue; }
     VkQueue getTransferQueue() const { return m_TransferQueue; }
     bool hasTransferQueue() const { return m_TransferQueue != VK_NULL_HANDLE; }
+    bool isRayTracingSupported() const { return m_rayTracingSupported; }
+    uint32_t getScratchAlignment() const { return m_asScratchAlignment; }
 
     struct QueueFamilyIndices
     {
@@ -34,6 +36,7 @@ private:
     void createLogicalDevice();
     bool isDeviceSuitable(VkPhysicalDevice device);
     bool checkDeviceExtensionSupport(VkPhysicalDevice device);
+    void checkRayTracingSupport();
 
     const InstanceContext &m_InstanceContext;
     VkPhysicalDevice m_PhysicalDevice{VK_NULL_HANDLE};
@@ -44,10 +47,19 @@ private:
     VkQueue m_PresentQueue{VK_NULL_HANDLE};
     VkQueue m_TransferQueue{VK_NULL_HANDLE};
 
-    mutable std::mutex m_CbFreeMtx;
-    mutable std::vector<std::tuple<VkCommandPool, VkCommandBuffer, VkFence>> m_CbDeferred;
+    bool m_rayTracingSupported = false;
+    uint32_t m_asScratchAlignment = 256;
+    std::vector<const char *> m_deviceExtensions{VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
-    const std::vector<const char *> m_DeviceExtensions{VK_KHR_SWAPCHAIN_EXTENSION_NAME};
-    const std::vector<const char *> m_ValidationLayers{"VK_LAYER_KHRONOS_validation"};
-    const bool m_EnableValidationLayers = true;
+    const std::vector<const char *> m_rayTracingExtensions = {
+        VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+        VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+        VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+        VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
+        VK_KHR_SPIRV_1_4_EXTENSION_NAME,
+        VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME};
+
+    const std::vector<const char *> m_validationLayers{"VK_LAYER_KHRONOS_validation"};
+    const bool m_enableValidationLayers = true;
 };

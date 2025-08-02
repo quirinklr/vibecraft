@@ -1,5 +1,6 @@
 #include "VulkanRenderer.h"
 #include <stdexcept>
+#include <iostream>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/constants.hpp>
 #include <glm/common.hpp>
@@ -8,30 +9,50 @@
 #include "Globals.h"
 #include "generation/TerrainGenerator.h"
 #include <stb_image.h>
+#include <numeric>
+#include "renderer/RayTracingPushConstants.h"
 
-VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings)
-    : m_Window(window), m_Settings(settings)
+VulkanRenderer::VulkanRenderer(Window &window,
+                               Settings &settings,
+                               Player *player,
+                               TerrainGenerator *terrainGen)
+    : m_Window(window), m_Settings(settings), m_player(player), m_terrainGen(terrainGen)
 {
+
     m_InstanceContext = std::make_unique<InstanceContext>(m_Window);
     m_DeviceContext = std::make_unique<DeviceContext>(*m_InstanceContext);
+
     VkDeviceSize arenaSize = 64ull * 1024 * 1024;
     m_StagingArena = std::make_unique<RingStagingArena>(*m_DeviceContext, arenaSize);
+
     if (m_DeviceContext->hasTransferQueue())
     {
         VkCommandPoolCreateInfo ci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
         ci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        ci.queueFamilyIndex =
-            m_DeviceContext->findQueueFamilies(m_DeviceContext->getPhysicalDevice()).transferFamily.value();
+        ci.queueFamilyIndex = m_DeviceContext->findQueueFamilies(
+                                                 m_DeviceContext->getPhysicalDevice())
+                                  .transferFamily.value();
         vkCreateCommandPool(m_DeviceContext->getDevice(), &ci, nullptr, &m_TransferCommandPool);
     }
 
-    m_SwapChainContext = std::make_unique<SwapChainContext>(m_Window, m_Settings, *m_InstanceContext, *m_DeviceContext);
+    m_SwapChainContext = std::make_unique<SwapChainContext>(
+        m_Window, m_Settings, *m_InstanceContext, *m_DeviceContext);
     m_DescriptorLayout = std::make_unique<DescriptorLayout>(*m_DeviceContext);
-    m_PipelineCache = std::make_unique<PipelineCache>(*m_DeviceContext, *m_SwapChainContext, *m_DescriptorLayout);
-    m_CommandManager = std::make_unique<CommandManager>(*m_DeviceContext, *m_SwapChainContext, *m_PipelineCache);
-    m_SyncPrimitives = std::make_unique<SyncPrimitives>(*m_DeviceContext, *m_SwapChainContext);
-    m_TextureManager = std::make_unique<TextureManager>(*m_DeviceContext, m_CommandManager->getCommandPool());
+    m_PipelineCache = std::make_unique<PipelineCache>(
+        *m_DeviceContext, *m_SwapChainContext, *m_DescriptorLayout);
+    m_CommandManager = std::make_unique<CommandManager>(
+        *m_DeviceContext, *m_SwapChainContext, *m_PipelineCache);
+    m_SyncPrimitives = std::make_unique<SyncPrimitives>(
+        *m_DeviceContext, *m_SwapChainContext);
 
+    m_debugOverlay = std::make_unique<DebugOverlay>(
+        *m_DeviceContext,
+        m_CommandManager->getCommandPool());
+
+    m_debugOverlay->recreate(m_SwapChainContext->getRenderPass(), m_SwapChainContext->getSwapChainExtent());
+
+    m_TextureManager = std::make_unique<TextureManager>(
+        *m_DeviceContext, m_CommandManager->getCommandPool());
     m_TextureManager->createTextureImage("textures/blocks_atlas.png");
     m_TextureManager->createTextureImageView();
     m_TextureManager->createTextureSampler();
@@ -43,162 +64,829 @@ VulkanRenderer::VulkanRenderer(Window &window, const Settings &settings)
     createDescriptorSets();
     createCrosshairVertexBuffer();
     createDebugCubeMesh();
+
+    if (m_DeviceContext->isRayTracingSupported())
+    {
+        loadRayTracingFunctions();
+        createRayTracingResources();
+
+        m_rtDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+
+        VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        ai.descriptorPool = m_rtDescriptorPool.get();
+        ai.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+        std::vector<VkDescriptorSetLayout> layouts(
+            MAX_FRAMES_IN_FLIGHT, m_rtDescriptorSetLayout.get());
+        ai.pSetLayouts = layouts.data();
+
+        if (vkAllocateDescriptorSets(m_DeviceContext->getDevice(),
+                                     &ai, m_rtDescriptorSets.data()) != VK_SUCCESS)
+            throw std::runtime_error("failed to allocate RT descriptor sets");
+
+        createShaderBindingTable();
+    }
 }
 
 VulkanRenderer::~VulkanRenderer()
 {
-    vkDeviceWaitIdle(m_DeviceContext->getDevice());
-    if (m_TransferCommandPool)
+
+    if (m_DeviceContext && m_DeviceContext->getDevice() != VK_NULL_HANDLE)
+    {
+        vkDeviceWaitIdle(m_DeviceContext->getDevice());
+    }
+
+    m_tlas.destroy(m_DeviceContext->getDevice());
+
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+    {
+
+        m_blasBuildScratchBuffers[i].clear();
+        m_asBuildStagingBuffers[i].clear();
+        m_BufferDestroyQueue[i].clear();
+        m_ImageDestroyQueue[i].clear();
+
+        for (auto &as : m_AsDestroyQueue[i])
+        {
+            as.destroy(m_DeviceContext->getDevice());
+        }
+        m_AsDestroyQueue[i].clear();
+    }
+
+    if (m_TransferCommandPool != VK_NULL_HANDLE && m_DeviceContext)
+    {
         vkDestroyCommandPool(m_DeviceContext->getDevice(), m_TransferCommandPool, nullptr);
+        m_TransferCommandPool = VK_NULL_HANDLE;
+    }
 }
 
-void VulkanRenderer::drawFrame(Camera &camera,
+bool VulkanRenderer::drawFrame(Camera &camera,
                                const glm::vec3 &playerPos,
-                               const std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks,
+                               std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks,
                                const glm::ivec3 &playerChunkPos,
-                               const Settings &settings,
                                uint32_t gameTicks,
-                               const std::vector<AABB> &debugAABBs)
+                               const std::vector<AABB> &debugAABBs,
+                               bool showDebugOverlay)
 {
-    vkWaitForFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(m_CurrentFrame), VK_TRUE, UINT64_MAX);
+    const uint32_t slot = m_CurrentFrame;
 
-    DeferredFreeQueue::poll();
-    m_BufferDestroyQueue[m_CurrentFrame].clear();
-    m_ImageDestroyQueue[m_CurrentFrame].clear();
+    vkWaitForFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(slot), VK_TRUE, UINT64_MAX);
+
+    VkResult deviceStatus = vkGetFenceStatus(m_DeviceContext->getDevice(), m_SyncPrimitives->getInFlightFence(slot));
+    if (deviceStatus == VK_ERROR_DEVICE_LOST)
+    {
+        throw std::runtime_error("Vulkan device lost detected after fence wait!");
+    }
 
     uint32_t imageIndex;
-    VkResult result = vkAcquireNextImageKHR(m_DeviceContext->getDevice(),
-                                            m_SwapChainContext->getSwapChain(),
-                                            UINT64_MAX,
-                                            m_SyncPrimitives->getImageAvailableSemaphore(m_CurrentFrame),
-                                            VK_NULL_HANDLE,
-                                            &imageIndex);
+    VkResult res = vkAcquireNextImageKHR(
+        m_DeviceContext->getDevice(), m_SwapChainContext->getSwapChain(),
+        UINT64_MAX,
+        m_SyncPrimitives->getImageAvailableSemaphore(slot),
+        VK_NULL_HANDLE, &imageIndex);
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR)
+    if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || m_Window.wasWindowResized())
     {
+        m_Window.resetWindowResizedFlag();
         m_SwapChainContext->recreateSwapChain();
-        return;
+        if (m_debugOverlay)
+            m_debugOverlay->recreate(m_SwapChainContext->getRenderPass(), m_SwapChainContext->getSwapChainExtent());
+
+        recreateRayTracingShadowImage();
+        return false;
     }
-    if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
+
+    else if (res != VK_SUCCESS)
+    {
         throw std::runtime_error("failed to acquire swap chain image");
+    }
 
-    if (m_SyncPrimitives->getImageInFlight(imageIndex) != VK_NULL_HANDLE)
-        vkWaitForFences(m_DeviceContext->getDevice(), 1, &m_SyncPrimitives->getImageInFlight(imageIndex), VK_TRUE, UINT64_MAX);
-    m_SyncPrimitives->getImageInFlight(imageIndex) = m_SyncPrimitives->getInFlightFence(m_CurrentFrame);
+    vkResetFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(slot));
 
-    updateLightUbo(m_CurrentFrame, gameTicks);
-    glm::vec3 skyColor = updateUniformBuffer(m_CurrentFrame, camera, playerPos, settings);
+    m_asBuildStagingBuffers[slot].clear();
+    m_blasBuildScratchBuffers[slot].clear();
+    m_BufferDestroyQueue[slot].clear();
+    m_ImageDestroyQueue[slot].clear();
+    for (auto &as : m_AsDestroyQueue[slot])
+    {
+        as.destroy(m_DeviceContext->getDevice());
+    }
+    m_AsDestroyQueue[slot].clear();
 
-    float time_of_day = (float)gameTicks / 24000.0f;
+    updateLightUbo(slot, gameTicks);
+    glm::vec3 skyColor = updateUniformBuffer(slot, camera, playerPos);
+    updateDescriptorSets();
+    if (showDebugOverlay && m_debugOverlay)
+    {
+
+        m_debugOverlay->update(*m_player, m_Settings, 0.f, m_terrainGen->getSeed());
+    }
+
+    std::vector<std::pair<Chunk *, int>> renderChunks;
+    renderChunks.reserve(chunks.size());
+    const Frustum &fr = camera.getFrustum();
+    for (auto &[pos, ch] : chunks)
+    {
+        ch->markReady(*this);
+        if (!fr.intersects(ch->getAABB()))
+            continue;
+
+        float d = glm::distance(glm::vec2(pos.x, pos.z), glm::vec2(playerChunkPos.x, playerChunkPos.z));
+        int req = (!m_Settings.lodDistances.empty() && d <= m_Settings.lodDistances[0]) ? 0 : 1;
+        int best = ch->getBestAvailableLOD(req);
+        if (best != -1)
+        {
+            renderChunks.emplace_back(ch.get(), best);
+        }
+    }
+
+    VkCommandBuffer cmd = m_CommandManager->getCommandBuffer(slot);
+    vkResetCommandBuffer(cmd, 0);
+    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    vkBeginCommandBuffer(cmd, &bi);
+
+    if (m_DeviceContext->isRayTracingSupported() && (m_Settings.rayTracingFlags & SettingsEnums::SHADOWS))
+    {
+        try
+        {
+            buildBlas(renderChunks, cmd);
+            buildTlasAsync(renderChunks, cmd, slot);
+
+            if (m_tlas.handle != VK_NULL_HANDLE)
+            {
+                updateRtDescriptorSet(slot);
+
+                RayTracePushConstants pc{};
+                pc.viewInverse = glm::inverse(camera.getViewMatrix());
+                pc.projInverse = glm::inverse(camera.getProjectionMatrix());
+                pc.cameraPos = playerPos + glm::vec3(0, 1.8f * 0.9f, 0);
+                memcpy(&pc.lightDirection, m_LightUbosMapped[slot], sizeof(glm::vec3));
+
+                m_CommandManager->recordRayTraceCommand(
+                    cmd, slot, m_rtDescriptorSets[slot],
+                    &m_rgenRegion, &m_missRegion, &m_hitRegion, &m_callRegion,
+                    &pc, m_rtShadowImage.get());
+
+                VkMemoryBarrier memoryBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+                memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+                memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+                vkCmdPipelineBarrier(
+                    cmd,
+                    VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                    0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
+            }
+            else
+            {
+                if (m_Settings.rayTracingFlags & SettingsEnums::SHADOWS)
+                {
+                    m_Settings.rayTracingFlags &= ~SettingsEnums::SHADOWS;
+                }
+            }
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << "Exception during ray tracing setup: " << e.what() << ", disabling shadows.\n";
+            m_Settings.rayTracingFlags &= ~SettingsEnums::SHADOWS;
+            m_tlas.handle = VK_NULL_HANDLE;
+        }
+    }
+
+    float time_of_day = static_cast<float>(gameTicks) / 24000.0f;
     float sun_angle = time_of_day * 2.0f * glm::pi<float>() - glm::half_pi<float>();
     float moon_angle = sun_angle + glm::pi<float>();
-
-    glm::mat4 scaleMatrix = glm::scale(glm::mat4(1.0f), glm::vec3(30.0f));
 
     glm::mat4 invView = glm::inverse(camera.getViewMatrix());
     glm::vec3 camPos = glm::vec3(invView[3]);
 
-    glm::vec3 sunDir = glm::normalize(glm::vec3(sin(sun_angle), cos(sun_angle), 0.0f));
-    glm::vec3 moonDir = -sunDir;
+    glm::vec3 sunDir = glm::normalize(glm::vec3(sin(sun_angle), cos(sun_angle), 0.2f));
+    glm::vec3 moonDir = glm::normalize(glm::vec3(sin(moon_angle), cos(moon_angle), 0.2f));
 
-    auto makeBillboard = [&](const glm::vec3 &dir)
+    auto makeBillboard = [&](const glm::vec3 &objPos, const glm::vec3 &cam, const glm::vec3 &up)
     {
-        glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
-        glm::vec3 right = glm::normalize(glm::cross(dir, up));
-        glm::vec3 realUp = glm::cross(right, dir);
-        glm::mat4 m(1.0f);
-        m[0] = glm::vec4(right, 0.0f);
-        m[1] = glm::vec4(realUp, 0.0f);
-        m[2] = glm::vec4(-dir, 0.0f);
-        return m;
+        glm::vec3 look = glm::normalize(cam - objPos);
+        glm::vec3 right = glm::normalize(glm::cross(up, look));
+        glm::vec3 up2 = glm::cross(look, right);
+        glm::mat4 M(glm::vec4(right, 0), glm::vec4(up2, 0), glm::vec4(look, 0), glm::vec4(objPos, 1));
+        return M;
     };
 
-    float dist = 500.0f;
-    float size = 120.0f;
-    glm::mat4 scl = glm::scale(glm::mat4(1.0f), glm::vec3(size));
+    constexpr float DIST = 400.f;
+    constexpr float SIZE = 50.f;
+    glm::vec3 sunPos = camPos + sunDir * DIST;
+    glm::vec3 moonPos = camPos + moonDir * DIST;
 
     SkyPushConstant sun_pc;
-    sun_pc.model = glm::translate(glm::mat4(1.0f), camPos + sunDir * dist) * makeBillboard(sunDir) * scl;
+    sun_pc.model = makeBillboard(sunPos, camPos, {0, 1, 0}) * glm::scale(glm::mat4(1.f), glm::vec3(SIZE));
     sun_pc.is_sun = 1;
 
     SkyPushConstant moon_pc;
-    moon_pc.model = glm::translate(glm::mat4(1.0f), camPos + moonDir * dist) * makeBillboard(moonDir) * scl;
+    moon_pc.model = makeBillboard(moonPos, camPos, {0, 1, 0}) * glm::scale(glm::mat4(1.f), glm::vec3(SIZE));
     moon_pc.is_sun = 0;
 
     bool isSunVisible = sunDir.y > -0.1f;
     bool isMoonVisible = moonDir.y > -0.1f;
 
-    std::vector<std::pair<const Chunk *, int>> renderChunks;
-    renderChunks.reserve(chunks.size());
-    const Frustum &frustum = camera.getFrustum();
-    for (auto const &[pos, chunkPtr] : chunks)
-    {
-        chunkPtr->markReady(*this);
-        if (!frustum.intersects(chunkPtr->getAABB()))
-            continue;
-
-        float dist = glm::distance(glm::vec2(pos.x, pos.z), glm::vec2(playerChunkPos.x, playerChunkPos.z));
-        int reqLod = (!settings.lodDistances.empty() && dist <= settings.lodDistances[0]) ? 0 : 1;
-        int best = chunkPtr->getBestAvailableLOD(reqLod);
-        if (best != -1)
-            renderChunks.push_back({chunkPtr.get(), best});
-    }
-
-    vkResetFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(m_CurrentFrame));
-    vkResetCommandBuffer(m_CommandManager->getCommandBuffer(m_CurrentFrame), 0);
     m_CommandManager->recordCommandBuffer(
-        imageIndex, m_CurrentFrame, renderChunks, m_DescriptorSets,
-        skyColor,
-        sun_pc,
-        moon_pc,
-        isSunVisible,
-        isMoonVisible,
+        imageIndex, slot, renderChunks, m_DescriptorSets,
+        skyColor, sun_pc, moon_pc, isSunVisible, isMoonVisible,
         m_SkySphereVertexBuffer.get(), m_SkySphereIndexBuffer.get(), m_SkySphereIndexCount,
         m_CrosshairVertexBuffer.get(),
         m_DebugCubeVertexBuffer.get(), m_DebugCubeIndexBuffer.get(), m_DebugCubeIndexCount,
-        settings, debugAABBs);
+        m_Settings, debugAABBs);
 
-    VkSemaphore waitSemas[]{m_SyncPrimitives->getImageAvailableSemaphore(m_CurrentFrame)};
-    VkPipelineStageFlags waitStages[]{VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-    VkSemaphore signalSemas[]{m_SyncPrimitives->getRenderFinishedSemaphore(m_CurrentFrame)};
+    if (showDebugOverlay && m_debugOverlay)
+    {
+        m_debugOverlay->draw(cmd);
+    }
+
+    vkEndCommandBuffer(cmd);
+
+    VkSemaphore waitSemaphores[] = {m_SyncPrimitives->getImageAvailableSemaphore(slot)};
+    VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    VkSemaphore signalSemaphores[] = {m_SyncPrimitives->getRenderFinishedSemaphore(slot)};
+
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     si.waitSemaphoreCount = 1;
-    si.pWaitSemaphores = waitSemas;
+    si.pWaitSemaphores = waitSemaphores;
     si.pWaitDstStageMask = waitStages;
-    VkCommandBuffer cb = m_CommandManager->getCommandBuffer(m_CurrentFrame);
     si.commandBufferCount = 1;
-    si.pCommandBuffers = &cb;
+    si.pCommandBuffers = &cmd;
     si.signalSemaphoreCount = 1;
-    si.pSignalSemaphores = signalSemas;
+    si.pSignalSemaphores = signalSemaphores;
+
     {
         std::scoped_lock lk(gGraphicsQueueMutex);
-        vkQueueSubmit(m_DeviceContext->getGraphicsQueue(), 1, &si, m_SyncPrimitives->getInFlightFence(m_CurrentFrame));
+
+        if (vkQueueSubmit(m_DeviceContext->getGraphicsQueue(), 1, &si, m_SyncPrimitives->getInFlightFence(slot)) != VK_SUCCESS)
+        {
+            throw std::runtime_error("vkQueueSubmit failed");
+        }
     }
 
+    VkSwapchainKHR swapChains[] = {m_SwapChainContext->getSwapChain()};
     VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
     pi.waitSemaphoreCount = 1;
-    pi.pWaitSemaphores = signalSemas;
-    VkSwapchainKHR swp[]{m_SwapChainContext->getSwapChain()};
+    pi.pWaitSemaphores = signalSemaphores;
     pi.swapchainCount = 1;
-    pi.pSwapchains = swp;
+    pi.pSwapchains = swapChains;
     pi.pImageIndices = &imageIndex;
+
     {
         std::scoped_lock lk(gGraphicsQueueMutex);
-        result = vkQueuePresentKHR(m_DeviceContext->getPresentQueue(), &pi);
+        res = vkQueuePresentKHR(m_DeviceContext->getPresentQueue(), &pi);
     }
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || m_Window.wasWindowResized())
+    if (res == VK_ERROR_DEVICE_LOST)
     {
-        m_Window.resetWindowResizedFlag();
-        m_SwapChainContext->recreateSwapChain();
+        throw std::runtime_error("Vulkan device lost during present");
     }
-    else if (result != VK_SUCCESS)
-        throw std::runtime_error("failed to present swap chain image");
+    else if (res != VK_SUCCESS && res != VK_ERROR_OUT_OF_DATE_KHR && res != VK_SUBOPTIMAL_KHR)
+    {
+        throw std::runtime_error("Failed to present swap chain image");
+    }
 
     m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+    return true;
 }
 
-glm::vec3 VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos, const Settings &settings)
+void VulkanRenderer::recreateRayTracingShadowImage()
+{
+    if (!m_DeviceContext->isRayTracingSupported())
+        return;
+
+    vkDeviceWaitIdle(m_DeviceContext->getDevice());
+
+    m_rtShadowImageView = {};
+    m_rtShadowImage = {};
+    m_rtDescriptorSets.clear();
+    m_rtDescriptorPool = {};
+    m_rtDescriptorSetLayout = {};
+
+    createRayTracingResources();
+
+    m_rtDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+    VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    ai.descriptorPool = m_rtDescriptorPool.get();
+    ai.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, m_rtDescriptorSetLayout.get());
+    ai.pSetLayouts = layouts.data();
+
+    if (vkAllocateDescriptorSets(m_DeviceContext->getDevice(), &ai, m_rtDescriptorSets.data()) != VK_SUCCESS)
+    {
+        throw std::runtime_error("failed to re-allocate RT descriptor sets after resize");
+    }
+
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+    {
+        updateRtDescriptorSet(i);
+    }
+
+    m_tlasIsDirty = true;
+}
+
+void VulkanRenderer::loadRayTracingFunctions()
+{
+    vkGetBufferDeviceAddressKHR = (PFN_vkGetBufferDeviceAddressKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkGetBufferDeviceAddressKHR");
+    vkCreateAccelerationStructureKHR = (PFN_vkCreateAccelerationStructureKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkCreateAccelerationStructureKHR");
+    vkDestroyAccelerationStructureKHR = (PFN_vkDestroyAccelerationStructureKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkDestroyAccelerationStructureKHR");
+    vkGetAccelerationStructureBuildSizesKHR = (PFN_vkGetAccelerationStructureBuildSizesKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkGetAccelerationStructureBuildSizesKHR");
+    vkGetAccelerationStructureDeviceAddressKHR = (PFN_vkGetAccelerationStructureDeviceAddressKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkGetAccelerationStructureDeviceAddressKHR");
+    vkCmdBuildAccelerationStructuresKHR = (PFN_vkCmdBuildAccelerationStructuresKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkCmdBuildAccelerationStructuresKHR");
+    vkCreateRayTracingPipelinesKHR = (PFN_vkCreateRayTracingPipelinesKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkCreateRayTracingPipelinesKHR");
+    vkGetRayTracingShaderGroupHandlesKHR = (PFN_vkGetRayTracingShaderGroupHandlesKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkGetRayTracingShaderGroupHandlesKHR");
+    vkCmdTraceRaysKHR = (PFN_vkCmdTraceRaysKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkCmdTraceRaysKHR");
+    m_rtFunctionsLoaded = true;
+}
+
+void VulkanRenderer::createRayTracingResources()
+{
+    VkExtent2D extent = m_SwapChainContext->getSwapChainExtent();
+    VkFormat shadowFormat = VK_FORMAT_R32_SFLOAT;
+    VkFormatProperties props;
+    vkGetPhysicalDeviceFormatProperties(m_DeviceContext->getPhysicalDevice(), shadowFormat, &props);
+    if (!(props.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT))
+        shadowFormat = VK_FORMAT_R8_UNORM;
+
+    VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    imgInfo.imageType = VK_IMAGE_TYPE_2D;
+    imgInfo.format = shadowFormat;
+    imgInfo.extent = {extent.width, extent.height, 1};
+    imgInfo.mipLevels = 1;
+    imgInfo.arrayLayers = 1;
+    imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VmaAllocationCreateInfo allocCI{};
+    allocCI.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    m_rtShadowImage = VmaImage(m_DeviceContext->getAllocator(), imgInfo, allocCI);
+    if (m_rtShadowImage.get() == VK_NULL_HANDLE)
+        throw std::runtime_error("vmaCreateImage failed for RT shadow image");
+
+    m_rtShadowImageView = TextureManager::createImageView(
+        m_DeviceContext->getDevice(), m_rtShadowImage.get(),
+        shadowFormat, VK_IMAGE_ASPECT_COLOR_BIT);
+
+    VkCommandBuffer cmd = UploadHelpers::beginSingleTimeCommands(
+        *m_DeviceContext, m_CommandManager->getCommandPool());
+
+    VkImageSubresourceRange rng{};
+    rng.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    rng.baseMipLevel = 0;
+    rng.levelCount = 1;
+    rng.baseArrayLayer = 0;
+    rng.layerCount = 1;
+
+    UploadHelpers::transitionImageLayout(
+        cmd, m_rtShadowImage.get(),
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+        rng,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
+
+    UploadHelpers::endSingleTimeCommands(
+        *m_DeviceContext, m_CommandManager->getCommandPool(), cmd);
+
+    std::array<VkDescriptorSetLayoutBinding, 2> b{};
+    b[0].binding = 0;
+    b[0].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    b[0].descriptorCount = 1;
+    b[0].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+                      VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+
+    b[1].binding = 1;
+    b[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    b[1].descriptorCount = 1;
+    b[1].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+
+    VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    li.bindingCount = static_cast<uint32_t>(b.size());
+    li.pBindings = b.data();
+
+    VkDescriptorSetLayout tmpLayout;
+    vkCreateDescriptorSetLayout(
+        m_DeviceContext->getDevice(), &li, nullptr, &tmpLayout);
+
+    m_rtDescriptorSetLayout = VulkanHandle<
+        VkDescriptorSetLayout, DescriptorSetLayoutDeleter>(
+        tmpLayout, {m_DeviceContext->getDevice()});
+
+    std::array<VkDescriptorPoolSize, 2> ps{};
+    ps[0].type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    ps[0].descriptorCount = MAX_FRAMES_IN_FLIGHT;
+    ps[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    ps[1].descriptorCount = MAX_FRAMES_IN_FLIGHT;
+
+    VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    pi.maxSets = MAX_FRAMES_IN_FLIGHT;
+    pi.poolSizeCount = static_cast<uint32_t>(ps.size());
+    pi.pPoolSizes = ps.data();
+
+    VkDescriptorPool pool;
+    vkCreateDescriptorPool(m_DeviceContext->getDevice(), &pi, nullptr, &pool);
+
+    m_rtDescriptorPool = VulkanHandle<
+        VkDescriptorPool, DescriptorPoolDeleter>(
+        pool, {m_DeviceContext->getDevice()});
+}
+
+void VulkanRenderer::createShaderBindingTable()
+{
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
+    VkPhysicalDeviceProperties2 props2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    props2.pNext = &rtProps;
+    vkGetPhysicalDeviceProperties2(m_DeviceContext->getPhysicalDevice(), &props2);
+
+    const uint32_t handleSize = rtProps.shaderGroupHandleSize;
+    const uint32_t handleSizeAligned = (handleSize + rtProps.shaderGroupBaseAlignment - 1) & ~(rtProps.shaderGroupBaseAlignment - 1);
+
+    const uint32_t groupCount = 5;
+    const uint32_t sbtSize = groupCount * handleSizeAligned;
+
+    std::vector<uint8_t> shaderHandleStorage(sbtSize);
+    vkGetRayTracingShaderGroupHandlesKHR(m_DeviceContext->getDevice(), m_PipelineCache->getRayTracingPipeline(), 0, groupCount, sbtSize, shaderHandleStorage.data());
+
+    m_shaderBindingTable = UploadHelpers::createDeviceLocalBufferFromData(
+        *m_DeviceContext, m_CommandManager->getCommandPool(), shaderHandleStorage.data(), sbtSize,
+        VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+
+    VkDeviceAddress sbtAddress = getBufferDeviceAddress(m_shaderBindingTable.get());
+
+    m_rgenRegion.deviceAddress = sbtAddress;
+    m_rgenRegion.stride = handleSizeAligned;
+    m_rgenRegion.size = handleSizeAligned;
+
+    m_missRegion.deviceAddress = sbtAddress + 1 * handleSizeAligned;
+    m_missRegion.stride = handleSizeAligned;
+    m_missRegion.size = 2 * handleSizeAligned;
+
+    m_hitRegion.deviceAddress = sbtAddress + 3 * handleSizeAligned;
+    m_hitRegion.stride = handleSizeAligned;
+    m_hitRegion.size = 2 * handleSizeAligned;
+
+    m_callRegion.deviceAddress = 0;
+    m_callRegion.stride = 0;
+    m_callRegion.size = 0;
+}
+
+void VulkanRenderer::updateRtDescriptorSet(uint32_t frame)
+{
+    if (m_tlas.handle == VK_NULL_HANDLE)
+        return;
+
+    VkDescriptorSet dst = m_rtDescriptorSets[frame];
+
+    VkWriteDescriptorSetAccelerationStructureKHR asInfo{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
+    asInfo.accelerationStructureCount = 1;
+    asInfo.pAccelerationStructures = &m_tlas.handle;
+
+    VkWriteDescriptorSet asWrite{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    asWrite.pNext = &asInfo;
+    asWrite.dstSet = dst;
+    asWrite.dstBinding = 0;
+    asWrite.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    asWrite.descriptorCount = 1;
+
+    VkDescriptorImageInfo img{};
+    img.imageView = m_rtShadowImageView.get();
+    img.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    VkWriteDescriptorSet imgWrite{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    imgWrite.dstSet = dst;
+    imgWrite.dstBinding = 1;
+    imgWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    imgWrite.descriptorCount = 1;
+    imgWrite.pImageInfo = &img;
+
+    std::array<VkWriteDescriptorSet, 2> w = {asWrite, imgWrite};
+    vkUpdateDescriptorSets(m_DeviceContext->getDevice(),
+                           static_cast<uint32_t>(w.size()), w.data(), 0, nullptr);
+}
+
+void VulkanRenderer::buildBlas(const std::vector<std::pair<Chunk *, int>> &chunksToBuild, VkCommandBuffer cmd)
+{
+    if (!m_rtFunctionsLoaded || cmd == VK_NULL_HANDLE)
+    {
+        return;
+    }
+
+    std::vector<std::pair<Chunk *, int>> dirty;
+    dirty.reserve(chunksToBuild.size());
+    for (const auto &p : chunksToBuild)
+    {
+        if (p.first->m_blas_dirty.load(std::memory_order_acquire) && p.first->getState() == Chunk::State::GPU_READY)
+        {
+            dirty.emplace_back(p);
+        }
+    }
+
+    if (dirty.empty())
+    {
+        return;
+    }
+
+    m_tlasIsDirty = true;
+
+    const size_t MAX_BLAS_PER_FRAME = 32;
+    if (dirty.size() > MAX_BLAS_PER_FRAME)
+    {
+        dirty.resize(MAX_BLAS_PER_FRAME);
+    }
+
+    std::vector<VkAccelerationStructureBuildGeometryInfoKHR> buildInfos;
+    std::vector<VkAccelerationStructureGeometryKHR> geometries;
+    std::vector<VkAccelerationStructureGeometryTrianglesDataKHR> triangles;
+    std::vector<uint32_t> triangleCounts;
+    std::vector<ChunkMesh *> targetMeshes;
+
+    buildInfos.reserve(dirty.size());
+    geometries.reserve(dirty.size());
+    triangles.reserve(dirty.size());
+    triangleCounts.reserve(dirty.size());
+    targetMeshes.reserve(dirty.size());
+
+    for (auto &p : dirty)
+    {
+        Chunk *chunk = p.first;
+        int lod = p.second;
+        ChunkMesh *mesh = chunk->getMesh(lod);
+
+        if (!mesh || mesh->indexCount == 0 || mesh->vertexCount == 0 || mesh->vertexBuffer.get() == VK_NULL_HANDLE || mesh->indexBuffer.get() == VK_NULL_HANDLE)
+        {
+            chunk->m_blas_dirty.store(false, std::memory_order_release);
+            continue;
+        }
+
+        if (mesh->blas.handle != VK_NULL_HANDLE)
+            enqueueDestroy(std::move(mesh->blas));
+
+        VkDeviceAddress vAddr = getBufferDeviceAddress(mesh->vertexBuffer.get());
+        VkDeviceAddress iAddr = getBufferDeviceAddress(mesh->indexBuffer.get());
+
+        if (vAddr == 0 || iAddr == 0)
+        {
+            std::cout << "[WARNING] buildBlas: Skipping chunk at (" << chunk->getPos().x << ", " << chunk->getPos().z
+                      << ") due to null buffer device address. The mesh might still be uploading." << std::endl;
+            continue;
+        }
+
+        triangles.push_back({VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
+                             nullptr,
+                             VK_FORMAT_R32G32B32_SFLOAT,
+                             {.deviceAddress = vAddr},
+                             sizeof(Vertex),
+                             mesh->vertexCount > 0 ? mesh->vertexCount - 1 : 0,
+                             VK_INDEX_TYPE_UINT32,
+                             {.deviceAddress = iAddr},
+                             0});
+
+        geometries.push_back({VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+                              nullptr,
+                              VK_GEOMETRY_TYPE_TRIANGLES_KHR,
+                              {.triangles = {}},
+                              VK_GEOMETRY_OPAQUE_BIT_KHR});
+
+        buildInfos.push_back({VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+                              nullptr,
+                              VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+                              VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+                              VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+                              0,
+                              0,
+                              1,
+                              nullptr,
+                              {}});
+
+        triangleCounts.push_back(mesh->indexCount / 3);
+        targetMeshes.push_back(mesh);
+    }
+
+    if (buildInfos.empty())
+        return;
+
+    std::vector<VkAccelerationStructureBuildSizesInfoKHR> sizeInfos(buildInfos.size(), {VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR});
+    std::vector<const VkAccelerationStructureBuildRangeInfoKHR *> rangesPtrs(buildInfos.size());
+    std::vector<VkAccelerationStructureBuildRangeInfoKHR> ranges(buildInfos.size());
+
+    for (size_t i = 0; i < buildInfos.size(); ++i)
+    {
+        geometries[i].geometry.triangles = triangles[i];
+        buildInfos[i].pGeometries = &geometries[i];
+
+        vkGetAccelerationStructureBuildSizesKHR(m_DeviceContext->getDevice(),
+                                                VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                                                &buildInfos[i], &triangleCounts[i], &sizeInfos[i]);
+
+        createAccelerationStructure(*m_DeviceContext, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, sizeInfos[i], targetMeshes[i]->blas);
+        buildInfos[i].dstAccelerationStructure = targetMeshes[i]->blas.handle;
+
+        VmaBuffer scratch = createScratchBuffer(sizeInfos[i].buildScratchSize);
+        buildInfos[i].scratchData.deviceAddress = getBufferDeviceAddress(scratch.get());
+        m_blasBuildScratchBuffers[m_CurrentFrame].push_back(std::move(scratch));
+
+        ranges[i].primitiveCount = triangleCounts[i];
+        rangesPtrs[i] = &ranges[i];
+    }
+
+    vkCmdBuildAccelerationStructuresKHR(cmd, static_cast<uint32_t>(buildInfos.size()),
+                                        buildInfos.data(), rangesPtrs.data());
+
+    VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+    barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR |
+                             VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                         0, 1, &barrier, 0, nullptr, 0, nullptr);
+
+    for (size_t i = 0; i < targetMeshes.size(); ++i)
+    {
+        VkAccelerationStructureDeviceAddressInfoKHR ai{
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
+        ai.accelerationStructure = targetMeshes[i]->blas.handle;
+        targetMeshes[i]->blas.deviceAddress =
+            vkGetAccelerationStructureDeviceAddressKHR(
+                m_DeviceContext->getDevice(), &ai);
+    }
+
+    for (auto &p : dirty)
+        p.first->m_blas_dirty.store(false, std::memory_order_release);
+}
+
+void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &drawList,
+                                    VkCommandBuffer cmd, uint32_t frame)
+{
+    if (!m_rtFunctionsLoaded || !m_DeviceContext->isRayTracingSupported() || cmd == VK_NULL_HANDLE)
+        return;
+
+    if (!m_tlasIsDirty)
+    {
+        return;
+    }
+
+    try
+    {
+        std::vector<VkAccelerationStructureInstanceKHR> instances;
+        instances.reserve(drawList.size());
+
+        for (auto &p : drawList)
+        {
+            const Chunk *c = p.first;
+            const ChunkMesh *m = c->getMesh(p.second);
+
+            if (!m || m->blas.handle == VK_NULL_HANDLE || c->m_blas_dirty.load(std::memory_order_acquire))
+                continue;
+
+            VkAccelerationStructureInstanceKHR inst{};
+            glm::mat4 tr = glm::transpose(c->getModelMatrix());
+            memcpy(&inst.transform, &tr, sizeof(inst.transform));
+            inst.mask = 0xFF;
+            inst.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+            inst.accelerationStructureReference = m->blas.deviceAddress;
+            instances.push_back(inst);
+        }
+
+        if (instances.empty())
+        {
+            if (m_tlas.handle != VK_NULL_HANDLE)
+            {
+                enqueueDestroy(std::move(m_tlas));
+                m_tlas.handle = VK_NULL_HANDLE;
+            }
+            m_tlasIsDirty = false;
+            return;
+        }
+
+        VkDeviceSize sizeBytes = sizeof(instances[0]) * instances.size();
+
+        if (m_tlasInstanceBuffer.get() != VK_NULL_HANDLE)
+        {
+            enqueueDestroy(std::move(m_tlasInstanceBuffer));
+        }
+
+        m_tlasInstanceBuffer = UploadHelpers::createDeviceLocalBufferFromDataWithStaging(
+            *m_DeviceContext, cmd,
+            instances.data(), sizeBytes,
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+            m_asBuildStagingBuffers[frame]);
+
+        VkDeviceAddress instAddr = getBufferDeviceAddress(m_tlasInstanceBuffer.get());
+
+        VkAccelerationStructureGeometryInstancesDataKHR instData{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR};
+        instData.data.deviceAddress = instAddr;
+
+        static VkAccelerationStructureGeometryKHR geom{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
+        geom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+        geom.geometry.instances = instData;
+
+        uint32_t primCount = static_cast<uint32_t>(instances.size());
+        VkAccelerationStructureBuildGeometryInfoKHR build{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
+        build.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+        build.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+        build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+        build.geometryCount = 1;
+        build.pGeometries = &geom;
+
+        VkAccelerationStructureBuildSizesInfoKHR sz{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+        vkGetAccelerationStructureBuildSizesKHR(m_DeviceContext->getDevice(),
+                                                VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                                                &build, &primCount, &sz);
+
+        if (m_tlas.handle != VK_NULL_HANDLE)
+        {
+            enqueueDestroy(std::move(m_tlas));
+        }
+        createAccelerationStructure(*m_DeviceContext, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, sz, m_tlas);
+        build.dstAccelerationStructure = m_tlas.handle;
+
+        VmaBuffer scratch = createScratchBuffer(sz.buildScratchSize);
+        build.scratchData.deviceAddress = getBufferDeviceAddress(scratch.get());
+        m_blasBuildScratchBuffers[m_CurrentFrame].push_back(std::move(scratch));
+
+        VkAccelerationStructureBuildRangeInfoKHR range{.primitiveCount = primCount};
+        const VkAccelerationStructureBuildRangeInfoKHR *pRange = &range;
+
+        vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build, &pRange);
+
+        VkMemoryBarrier tlasBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+        tlasBarrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+        tlasBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                             VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                             0, 1, &tlasBarrier,
+                             0, nullptr,
+                             0, nullptr);
+
+        VkBufferMemoryBarrier barrier = {};
+        barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.buffer = m_tlasInstanceBuffer.get();
+        barrier.offset = 0;
+        barrier.size = VK_WHOLE_SIZE;
+
+        vkCmdPipelineBarrier(
+            cmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+            0,
+            0, nullptr,
+            1, &barrier,
+            0, nullptr);
+
+        VkAccelerationStructureDeviceAddressInfoKHR dai{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
+        dai.accelerationStructure = m_tlas.handle;
+        m_tlas.deviceAddress = vkGetAccelerationStructureDeviceAddressKHR(m_DeviceContext->getDevice(), &dai);
+
+        m_tlasIsDirty = false;
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "Error in buildTlasAsync: " << e.what() << std::endl;
+        return;
+    }
+}
+
+VkDeviceAddress VulkanRenderer::getBufferDeviceAddress(VkBuffer buffer)
+{
+
+    if (buffer == VK_NULL_HANDLE)
+    {
+        return 0;
+    }
+    VkBufferDeviceAddressInfoKHR info{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+    info.buffer = buffer;
+    return vkGetBufferDeviceAddressKHR(m_DeviceContext->getDevice(), &info);
+}
+
+VmaBuffer VulkanRenderer::createScratchBuffer(VkDeviceSize size)
+{
+    VkDeviceSize align = m_DeviceContext->getScratchAlignment();
+    size = (size + align - 1) & ~(align - 1);
+
+    VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    bufferInfo.size = size;
+    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                       VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    return VmaBuffer(m_DeviceContext->getAllocator(), bufferInfo, allocInfo);
+}
+
+glm::vec3 VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos)
 {
     const float eyeHeight = 1.8f * 0.9f;
     glm::vec3 cameraWorldPos = playerPos + glm::vec3(0.0f, eyeHeight, 0.0f);
@@ -225,14 +913,21 @@ glm::vec3 VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &cam
     ubo.skyColor = skyColor;
     ubo.time = static_cast<float>(glfwGetTime());
     ubo.isUnderwater = (cameraWorldPos.y < TerrainGenerator::SEA_LEVEL) ? 1 : 0;
-    ubo.flags = settings.rayTracingFlags;
+    ubo.flags = m_Settings.rayTracingFlags;
 
     memcpy(m_UniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 
     return skyColor;
 }
 
-#pragma region Unchanged Functions
+void VulkanRenderer::enqueueDestroy(AccelerationStructure &&as)
+{
+    if (as.handle != VK_NULL_HANDLE)
+    {
+        m_AsDestroyQueue[m_CurrentFrame].push_back(std::move(as));
+    }
+}
+
 void VulkanRenderer::enqueueDestroy(VmaBuffer &&buffer)
 {
     if (buffer.get() != VK_NULL_HANDLE)
@@ -260,10 +955,13 @@ void VulkanRenderer::enqueueDestroy(VkBuffer buffer, VmaAllocation allocation)
 void VulkanRenderer::updateLightUbo(uint32_t currentImage, uint32_t gameTicks)
 {
     LightUbo ubo{};
-    float time_of_day = (float)gameTicks / 24000.0f;
-    float angle = time_of_day * 2.0f * glm::pi<float>() - glm::half_pi<float>();
 
-    ubo.lightDirection = glm::normalize(glm::vec3(sin(angle), cos(angle), 0.2f));
+    float time_of_day = static_cast<float>(gameTicks) / 24000.0f;
+    float sun_angle = time_of_day * 2.0f * glm::pi<float>() - glm::half_pi<float>();
+
+    glm::vec3 sunDir = glm::normalize(glm::vec3(sin(sun_angle), cos(sun_angle), 0.2f));
+
+    ubo.lightDirection = sunDir;
 
     memcpy(m_LightUbosMapped[currentImage], &ubo, sizeof(ubo));
 }
@@ -329,7 +1027,9 @@ VulkanHandle<VkImageView, ImageViewDeleter> VulkanRenderer::createTexture(const 
     VmaBuffer stagingBuffer;
     {
         VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
-        VmaAllocationCreateInfo allocInfo{VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VMA_MEMORY_USAGE_CPU_ONLY};
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+        allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
         stagingBuffer = VmaBuffer(m_DeviceContext->getAllocator(), bufferInfo, allocInfo);
         void *data;
         vmaMapMemory(m_DeviceContext->getAllocator(), stagingBuffer.getAllocation(), &data);
@@ -350,18 +1050,32 @@ VulkanHandle<VkImageView, ImageViewDeleter> VulkanRenderer::createTexture(const 
     imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
 
-    VmaAllocationCreateInfo allocInfo{0, VMA_MEMORY_USAGE_GPU_ONLY};
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
     outImage = VmaImage(m_DeviceContext->getAllocator(), imageInfo, allocInfo);
 
-    UploadHelpers::transitionImageLayout(*m_DeviceContext, m_CommandManager->getCommandPool(),
-                                         outImage.get(), VK_FORMAT_R8G8B8A8_SRGB,
-                                         VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    UploadHelpers::copyBufferToImage(*m_DeviceContext, m_CommandManager->getCommandPool(),
-                                     stagingBuffer.get(), outImage.get(),
-                                     static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
-    UploadHelpers::transitionImageLayout(*m_DeviceContext, m_CommandManager->getCommandPool(),
-                                         outImage.get(), VK_FORMAT_R8G8B8A8_SRGB,
-                                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    VkCommandBuffer cmd = UploadHelpers::beginSingleTimeCommands(*m_DeviceContext, m_CommandManager->getCommandPool());
+
+    VkImageSubresourceRange range{};
+    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    range.levelCount = 1;
+    range.layerCount = 1;
+
+    UploadHelpers::transitionImageLayout(
+        cmd, outImage.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        range, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+    VkBufferImageCopy region{};
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.layerCount = 1;
+    region.imageExtent = {(uint32_t)texWidth, (uint32_t)texHeight, 1};
+    vkCmdCopyBufferToImage(cmd, stagingBuffer.get(), outImage.get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    UploadHelpers::transitionImageLayout(
+        cmd, outImage.get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        range, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+
+    UploadHelpers::endSingleTimeCommands(*m_DeviceContext, m_CommandManager->getCommandPool(), cmd);
 
     return TextureManager::createImageView(m_DeviceContext->getDevice(), outImage.get(), VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
 }
@@ -395,7 +1109,7 @@ void VulkanRenderer::createDescriptorPool()
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 2);
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 3);
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 4);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -406,6 +1120,7 @@ void VulkanRenderer::createDescriptorPool()
     VkDescriptorPool pool;
     if (vkCreateDescriptorPool(m_DeviceContext->getDevice(), &poolInfo, nullptr, &pool) != VK_SUCCESS)
         throw std::runtime_error("failed to create descriptor pool!");
+
     m_DescriptorPool = VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter>(pool, {m_DeviceContext->getDevice()});
 }
 
@@ -420,54 +1135,74 @@ void VulkanRenderer::createDescriptorSets()
     m_DescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
     if (vkAllocateDescriptorSets(m_DeviceContext->getDevice(), &alloc, m_DescriptorSets.data()) != VK_SUCCESS)
         throw std::runtime_error("failed to allocate descriptor sets");
+}
 
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+void VulkanRenderer::updateDescriptorSets()
+{
+    VkDescriptorBufferInfo mainUboInfo{m_UniformBuffers[m_CurrentFrame].get(), 0, sizeof(UniformBufferObject)};
+    VkDescriptorImageInfo atlasInfo{m_TextureManager->getTextureSampler(), m_TextureManager->getTextureImageView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkDescriptorImageInfo sunInfo{m_TextureManager->getTextureSampler(), m_SunTextureView.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkDescriptorBufferInfo lightUboInfo{m_LightUbos[m_CurrentFrame].get(), 0, sizeof(LightUbo)};
+    VkDescriptorImageInfo moonInfo{m_TextureManager->getTextureSampler(), m_MoonTextureView.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+
+    VkDescriptorImageInfo shadowImageInfo{};
+    shadowImageInfo.sampler = m_TextureManager->getTextureSampler();
+    if (m_rtShadowImageView.get() != VK_NULL_HANDLE)
     {
-        VkDescriptorBufferInfo mainUboInfo{m_UniformBuffers[i].get(), 0, sizeof(UniformBufferObject)};
-        VkDescriptorImageInfo atlasInfo{m_TextureManager->getTextureSampler(), m_TextureManager->getTextureImageView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkDescriptorImageInfo sunInfo{m_TextureManager->getTextureSampler(), m_SunTextureView.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkDescriptorBufferInfo lightUboInfo{m_LightUbos[i].get(), 0, sizeof(LightUbo)};
-        VkDescriptorImageInfo moonInfo{m_TextureManager->getTextureSampler(), m_MoonTextureView.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-
-        std::array<VkWriteDescriptorSet, 5> writes{};
-
-        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[0].dstSet = m_DescriptorSets[i];
-        writes[0].dstBinding = 0;
-        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writes[0].descriptorCount = 1;
-        writes[0].pBufferInfo = &mainUboInfo;
-
-        writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[1].dstSet = m_DescriptorSets[i];
-        writes[1].dstBinding = 1;
-        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        writes[1].descriptorCount = 1;
-        writes[1].pImageInfo = &atlasInfo;
-
-        writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[2].dstSet = m_DescriptorSets[i];
-        writes[2].dstBinding = 2;
-        writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        writes[2].descriptorCount = 1;
-        writes[2].pImageInfo = &sunInfo;
-
-        writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[3].dstSet = m_DescriptorSets[i];
-        writes[3].dstBinding = 3;
-        writes[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writes[3].descriptorCount = 1;
-        writes[3].pBufferInfo = &lightUboInfo;
-
-        writes[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[4].dstSet = m_DescriptorSets[i];
-        writes[4].dstBinding = 4;
-        writes[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        writes[4].descriptorCount = 1;
-        writes[4].pImageInfo = &moonInfo;
-
-        vkUpdateDescriptorSets(m_DeviceContext->getDevice(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        shadowImageInfo.imageView = m_rtShadowImageView.get();
+        shadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     }
+    else
+    {
+        shadowImageInfo.imageView = m_TextureManager->getTextureImageView();
+        shadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    }
+
+    std::array<VkWriteDescriptorSet, 6> writes{};
+
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = m_DescriptorSets[m_CurrentFrame];
+    writes[0].dstBinding = 0;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    writes[0].descriptorCount = 1;
+    writes[0].pBufferInfo = &mainUboInfo;
+
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = m_DescriptorSets[m_CurrentFrame];
+    writes[1].dstBinding = 1;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[1].descriptorCount = 1;
+    writes[1].pImageInfo = &atlasInfo;
+
+    writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[2].dstSet = m_DescriptorSets[m_CurrentFrame];
+    writes[2].dstBinding = 2;
+    writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[2].descriptorCount = 1;
+    writes[2].pImageInfo = &sunInfo;
+
+    writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[3].dstSet = m_DescriptorSets[m_CurrentFrame];
+    writes[3].dstBinding = 3;
+    writes[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    writes[3].descriptorCount = 1;
+    writes[3].pBufferInfo = &lightUboInfo;
+
+    writes[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[4].dstSet = m_DescriptorSets[m_CurrentFrame];
+    writes[4].dstBinding = 4;
+    writes[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[4].descriptorCount = 1;
+    writes[4].pImageInfo = &moonInfo;
+
+    writes[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[5].dstSet = m_DescriptorSets[m_CurrentFrame];
+    writes[5].dstBinding = 5;
+    writes[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[5].descriptorCount = 1;
+    writes[5].pImageInfo = &shadowImageInfo;
+
+    vkUpdateDescriptorSets(m_DeviceContext->getDevice(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 }
 
 void VulkanRenderer::createCrosshairVertexBuffer()
@@ -483,7 +1218,9 @@ void VulkanRenderer::createCrosshairVertexBuffer()
     VmaBuffer stagingBuffer;
     {
         VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
-        VmaAllocationCreateInfo allocInfo{VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VMA_MEMORY_USAGE_CPU_ONLY};
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+        allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
         stagingBuffer = VmaBuffer(m_DeviceContext->getAllocator(), bufferInfo, allocInfo);
         void *data;
         vmaMapMemory(m_DeviceContext->getAllocator(), stagingBuffer.getAllocation(), &data);
@@ -492,7 +1229,8 @@ void VulkanRenderer::createCrosshairVertexBuffer()
     }
 
     VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT};
-    VmaAllocationCreateInfo allocInfo{0, VMA_MEMORY_USAGE_GPU_ONLY};
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
     m_CrosshairVertexBuffer = VmaBuffer(m_DeviceContext->getAllocator(), bufferInfo, allocInfo);
 
     UploadHelpers::copyBuffer(*m_DeviceContext, m_CommandManager->getCommandPool(), stagingBuffer.get(), m_CrosshairVertexBuffer.get(), size);
@@ -563,4 +1301,3 @@ void VulkanRenderer::generateSphereMesh(float radius, int sectors, int stacks,
         }
     }
 }
-#pragma endregion

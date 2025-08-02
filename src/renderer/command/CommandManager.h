@@ -12,6 +12,8 @@
 #include "../../Chunk.h"
 #include "../../Camera.h"
 #include "../RendererConfig.h"
+#include "../RayTracingPushConstants.h"
+#include <vulkan/vulkan.h>
 
 struct SkyPushConstant
 {
@@ -27,7 +29,7 @@ public:
 
     void recordCommandBuffer(
         uint32_t imageIndex, uint32_t currentFrame,
-        const std::vector<std::pair<const Chunk *, int>> &chunksToRender,
+        const std::vector<std::pair<Chunk *, int>> &chunksToRender,
         const std::vector<VkDescriptorSet> &descriptorSets,
         const glm::vec3 &clearColor,
 
@@ -43,6 +45,12 @@ public:
 
     VkCommandBuffer getCommandBuffer(uint32_t index) const { return m_CommandBuffers[index]; }
     VkCommandPool getCommandPool() const { return m_CommandPool.get(); }
+    void recordRayTraceCommand(VkCommandBuffer cb, uint32_t currentFrame, VkDescriptorSet rtDescriptorSet,
+                               const VkStridedDeviceAddressRegionKHR *rgenRegion,
+                               const VkStridedDeviceAddressRegionKHR *missRegion,
+                               const VkStridedDeviceAddressRegionKHR *hitRegion,
+                               const VkStridedDeviceAddressRegionKHR *callRegion,
+                               const void *pushConstants, VkImage shadowImage);
 
 private:
     void createCommandPool();

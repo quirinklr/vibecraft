@@ -10,6 +10,7 @@
 #include <mutex>
 #include <array>
 #include <renderer/resources/RingStagingArena.h>
+#include "renderer/RayTracing.h"
 
 class VulkanRenderer;
 class FastNoiseLite;
@@ -51,11 +52,12 @@ public:
 
 struct ChunkMesh
 {
-    VkBuffer vertexBuffer = VK_NULL_HANDLE;
-    VmaAllocation vertexBufferAllocation = VK_NULL_HANDLE;
-    VkBuffer indexBuffer = VK_NULL_HANDLE;
-    VmaAllocation indexBufferAllocation = VK_NULL_HANDLE;
+    VmaBuffer vertexBuffer;
+    VmaBuffer indexBuffer;
+
+    uint32_t vertexCount = 0;
     uint32_t indexCount = 0;
+    AccelerationStructure blas;
 };
 
 class Chunk
@@ -95,6 +97,7 @@ public:
     int getBestAvailableLOD(int requiredLod) const;
 
     const ChunkMesh *getMesh(int lodLevel) const;
+    ChunkMesh *getMesh(int lodLevel);
     const ChunkMesh *getTransparentMesh(int lodLevel) const;
     const ChunkMesh *getDebugMesh() const { return &m_DebugMesh; }
 
@@ -106,6 +109,7 @@ public:
     std::atomic<State> m_State;
     std::atomic<int> m_Flags{0};
     std::atomic<bool> m_is_dirty{false};
+    std::atomic<bool> m_blas_dirty{false};
 
     mutable std::mutex m_PendingMutex;
     mutable std::mutex m_MeshesMutex;

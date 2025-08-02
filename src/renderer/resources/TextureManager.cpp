@@ -67,17 +67,42 @@ void TextureManager::createTextureImage(const char *path)
     VmaAllocationCreateInfo allocInfo{0, VMA_MEMORY_USAGE_GPU_ONLY};
     m_TextureImage = VmaImage(m_DeviceContext.getAllocator(), imageInfo, allocInfo);
 
-    UploadHelpers::transitionImageLayout(m_DeviceContext, m_CommandPool,
-                                         m_TextureImage.get(), VK_FORMAT_R8G8B8A8_SRGB,
-                                         VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    m_TextureImage = VmaImage(m_DeviceContext.getAllocator(), imageInfo, allocInfo);
 
-    UploadHelpers::copyBufferToImage(m_DeviceContext, m_CommandPool,
-                                     stagingBuffer.get(), m_TextureImage.get(),
-                                     static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+    VkCommandBufferAllocateInfo allocInfoCb{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    allocInfoCb.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfoCb.commandPool = m_CommandPool;
+    allocInfoCb.commandBufferCount = 1;
 
-    UploadHelpers::transitionImageLayout(m_DeviceContext, m_CommandPool,
-                                         m_TextureImage.get(), VK_FORMAT_R8G8B8A8_SRGB,
-                                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    VkCommandBuffer commandBuffer;
+    vkAllocateCommandBuffers(m_DeviceContext.getDevice(), &allocInfoCb, &commandBuffer);
+
+    VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+    VkImageSubresourceRange range{};
+    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    range.levelCount = 1;
+    range.layerCount = 1;
+
+    UploadHelpers::transitionImageLayout(
+        commandBuffer, m_TextureImage.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        range, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+    UploadHelpers::copyBufferToImage(commandBuffer, stagingBuffer.get(), m_TextureImage.get(), static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+
+    UploadHelpers::transitionImageLayout(
+        commandBuffer, m_TextureImage.get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        range, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+
+    vkEndCommandBuffer(commandBuffer);
+    VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+    vkQueueSubmit(m_DeviceContext.getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(m_DeviceContext.getGraphicsQueue());
+    vkFreeCommandBuffers(m_DeviceContext.getDevice(), m_CommandPool, 1, &commandBuffer);
 }
 
 void TextureManager::createTextureImageView()
@@ -108,3 +133,4 @@ void TextureManager::createTextureSampler()
     }
     m_TextureSampler = VulkanHandle<VkSampler, SamplerDeleter>(sampler, {m_DeviceContext.getDevice()});
 }
+

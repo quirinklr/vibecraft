@@ -13,7 +13,7 @@
 
 Engine::Engine()
     : m_Window(WIDTH, HEIGHT, "Vibecraft", m_Settings),
-      m_Renderer(m_Window, m_Settings),
+      m_Renderer(m_Window, m_Settings, m_player_ptr, &m_TerrainGen),
       m_debugController(this)
 {
     glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
@@ -30,10 +30,22 @@ Engine::Engine()
 
 Engine::~Engine()
 {
+    std::cout << "Engine: Destructor started." << std::endl;
+
+    std::cout << "Engine: Shutting down thread pool..." << std::endl;
+    m_Pool.shutdown();
+    std::cout << "Engine: Thread pool shut down." << std::endl;
+
+    std::cout << "Engine: Waiting for GPU to go idle..." << std::endl;
+    vkDeviceWaitIdle(m_Renderer.getDeviceContext()->getDevice());
+    std::cout << "Engine: GPU is idle." << std::endl;
+
     for (auto &[p, c] : m_Chunks)
         c->cleanup(m_Renderer);
     for (auto &c : m_Garbage)
         c->cleanup(m_Renderer);
+
+    std::cout << "Engine: Destructor finished." << std::endl;
 }
 
 Block Engine::get_block(int x, int y, int z)
@@ -66,12 +78,23 @@ void Engine::run()
     float fps_time = last_time;
     int frames = 0;
 
+    const float FIXED_TIMESTEP = 1.0f / 60.0f;
+
     while (!m_Window.shouldClose())
     {
         float now = static_cast<float>(glfwGetTime());
         float dt = now - last_time;
-        m_FrameEMA = 0.9 * m_FrameEMA + 0.1 * dt;
         last_time = now;
+
+        if (dt > 0.25f)
+        {
+            dt = 0.25f;
+        }
+
+        m_FrameEMA = 0.9 * m_FrameEMA + 0.1 * dt;
+
+        glfwPollEvents();
+        processInput(dt, mouse_enabled, last_cursor_x, last_cursor_y);
 
         m_timeAccumulator += dt;
         while (m_timeAccumulator >= 1.0f / m_ticksPerSecond)
@@ -80,20 +103,31 @@ void Engine::run()
             m_timeAccumulator -= 1.0f / m_ticksPerSecond;
         }
 
-        glfwPollEvents();
-
-        processInput(dt, mouse_enabled, last_cursor_x, last_cursor_y);
-
-        for (auto &entity : m_entities)
+        m_physicsAccumulator += dt;
+        while (m_physicsAccumulator >= FIXED_TIMESTEP)
         {
-            entity->update(dt);
+            m_player_ptr->process_keyboard(m_Window.getGLFWwindow(), FIXED_TIMESTEP);
+            for (auto &entity : m_entities)
+            {
+                entity->update(FIXED_TIMESTEP);
+            }
+            m_physicsAccumulator -= FIXED_TIMESTEP;
+        }
+
+        const float alpha = m_physicsAccumulator / FIXED_TIMESTEP;
+
+        m_player_ptr->update_camera_interpolated(this, alpha);
+
+        if (m_showDebugOverlay)
+        {
+            float fps = 1.0f / m_FrameEMA;
+            m_Renderer.getDebugOverlay()->update(*m_player_ptr, m_Settings, fps, m_TerrainGen.getSeed());
         }
 
         std::vector<AABB> debug_aabbs;
         if (m_Settings.showCollisionBoxes)
         {
             debug_aabbs.push_back(m_player_ptr->get_world_aabb());
-
             glm::vec3 p_pos = m_player_ptr->get_position();
             const int radius = 4;
             for (int y = static_cast<int>(p_pos.y) - radius; y < static_cast<int>(p_pos.y) + radius; ++y)
@@ -112,14 +146,18 @@ void Engine::run()
             }
         }
 
-        glm::vec3 player_pos = m_player_ptr->get_position();
-        updateChunks(player_pos);
+        glm::vec3 player_pos_logic = m_player_ptr->get_position();
+        updateChunks(player_pos_logic);
 
         glm::ivec3 playerChunkPos{
-            static_cast<int>(std::floor(player_pos.x / Chunk::WIDTH)), 0,
-            static_cast<int>(std::floor(player_pos.z / Chunk::DEPTH))};
+            static_cast<int>(std::floor(player_pos_logic.x / Chunk::WIDTH)), 0,
+            static_cast<int>(std::floor(player_pos_logic.z / Chunk::DEPTH))};
 
-        m_Renderer.drawFrame(m_player_ptr->get_camera(), player_pos, m_Chunks, playerChunkPos, m_Settings, m_gameTicks, debug_aabbs);
+        if (!m_Renderer.drawFrame(m_player_ptr->get_camera(), player_pos_logic, m_Chunks, playerChunkPos,
+                                  m_gameTicks, debug_aabbs, m_showDebugOverlay))
+        {
+            continue;
+        }
 
         updateWindowTitle(now, fps_time, frames, m_player_ptr->get_position());
     }
@@ -202,7 +240,38 @@ void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
     }
     gLast = gNow;
 
-    m_player_ptr->process_keyboard(window);
+    bool z_now = glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS;
+    if (z_now && !m_key_Z_last_state)
+    {
+        m_showDebugOverlay = !m_showDebugOverlay;
+    }
+    m_key_Z_last_state = z_now;
+
+    static bool lLast = false;
+
+    bool lNow = glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS;
+    if (lNow && !lLast)
+    {
+
+        if (m_Settings.rayTracingFlags & SettingsEnums::SHADOWS)
+        {
+            m_Settings.rayTracingFlags &= ~SettingsEnums::SHADOWS;
+            std::cout << "Ray traced shadows: OFF\n";
+        }
+        else
+        {
+            if (m_Renderer.getDeviceContext()->isRayTracingSupported())
+            {
+                m_Settings.rayTracingFlags |= SettingsEnums::SHADOWS;
+                std::cout << "Ray traced shadows: ON\n";
+            }
+            else
+            {
+                std::cout << "Ray tracing not supported on this device\n";
+            }
+        }
+    }
+    lLast = lNow;
 }
 
 void Engine::set_block(int x, int y, int z, BlockId id)
@@ -235,8 +304,11 @@ void Engine::set_block(int x, int y, int z, BlockId id)
         int chunk_x = static_cast<int>(floor(static_cast<float>(nx) / Chunk::WIDTH));
         int chunk_z = static_cast<int>(floor(static_cast<float>(nz) / Chunk::DEPTH));
         auto it = m_Chunks.find({chunk_x, 0, chunk_z});
+
         if (it != m_Chunks.end())
+        {
             it->second->m_is_dirty.store(true);
+        }
     };
 
     if (local_x == 0)
@@ -312,6 +384,7 @@ void Engine::unloadDistantChunks(const glm::ivec3 &playerChunkPos)
 
 void Engine::processGarbage()
 {
+    vkDeviceWaitIdle(m_Renderer.getDeviceContext()->getDevice());
     std::lock_guard lockJobs(m_MeshJobsMutex);
     m_Garbage.erase(
         std::remove_if(m_Garbage.begin(), m_Garbage.end(),
@@ -389,11 +462,18 @@ void Engine::createMeshJobs(const glm::ivec3 &playerChunkPos)
             int reqLod = (!m_Settings.lodDistances.empty() && dist <= m_Settings.lodDistances[0]) ? 0 : 1;
 
             bool is_dirty = ch->m_is_dirty.load(std::memory_order_acquire);
+            bool blas_is_dirty = ch->m_blas_dirty.load(std::memory_order_acquire);
 
             if (!ch->hasLOD(reqLod) || is_dirty)
             {
                 pending.emplace_back(pos, reqLod);
+
+                if (ch->hasLOD(reqLod))
+                {
+                    ch->m_blas_dirty.store(true, std::memory_order_release);
+                }
             }
+
             if (is_dirty && !ch->hasLOD(1 - reqLod))
             {
                 pending.emplace_back(pos, 1 - reqLod);

@@ -2,6 +2,7 @@
 #include "../../VulkanWrappers.h"
 #include "../core/DeviceContext.h"
 #include <mutex>
+#include <deque>
 
 class RingStagingArena
 {
@@ -19,4 +20,16 @@ private:
     VkDeviceSize m_Size;
     VkDeviceSize m_Head = 0;
     std::mutex m_Mtx;
+
+    struct InFlightRegion
+    {
+        VkDeviceSize begin;
+        VkDeviceSize end;
+        VkFence fence;
+    };
+
+    std::deque<InFlightRegion> m_InFlight;
+    void onUploadSubmitted(VkDeviceSize begin, VkDeviceSize size, VkFence f);
+    void retireCompletedRegions();
+    bool regionBusy(VkDeviceSize begin, VkDeviceSize end) const;
 };

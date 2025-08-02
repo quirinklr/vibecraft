@@ -12,7 +12,6 @@ void SyncPrimitives::createSyncObjects() {
     m_ImageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     m_RenderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     m_InFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
-    m_ImagesInFlight.resize(m_SwapChainContext.getSwapChainImages().size(), VK_NULL_HANDLE);
 
     VkSemaphoreCreateInfo semaphoreInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};

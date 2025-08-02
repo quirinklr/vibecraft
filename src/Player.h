@@ -16,10 +16,13 @@ public:
 
     bool raycast(glm::vec3 &out_block_pos) const;
     void process_mouse_movement(float dx, float dy);
-    void process_keyboard(GLFWwindow *window);
+    void get_orientation(float &yaw, float &pitch) const;
+    void process_keyboard(GLFWwindow *window, float dt);
     void toggle_flight();
 
     Camera &get_camera() { return m_camera; }
+
+    void update_camera_interpolated(Engine *engine, float alpha);
 
 private:
     void update_camera(Engine *engine);
@@ -37,6 +40,6 @@ private:
     const float JUMP_FORCE = 8.5f;
 
     const float FLY_SPEED = 30.0f;
-    const float SWIM_ACCELERATION = 3.0f;
-    const float SWIM_UP_ACCELERATION = 4.0f;
+    const float SWIM_ACCELERATION = 5.0f;
+    const float SWIM_UP_ACCELERATION = 16.0f;
 };

@@ -17,6 +17,8 @@ public:
     virtual void update(float dt);
 
     glm::vec3 get_position() const { return m_position; }
+
+    glm::vec3 get_previous_position() const { return m_previousPosition; }
     AABB get_world_aabb() const { return {m_position + m_hitbox.min, m_position + m_hitbox.max}; }
     bool is_in_water() const { return m_is_in_water; }
 
@@ -29,6 +31,8 @@ protected:
     Engine *m_engine;
 
     glm::vec3 m_position;
+
+    glm::vec3 m_previousPosition;
     glm::vec3 m_velocity{0.f};
     AABB m_hitbox;
 
