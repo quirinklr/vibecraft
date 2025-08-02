@@ -12,15 +12,19 @@ layout(std140, set = 0, binding = 0) uniform CameraUbo {
     int isUnderwater;
 } cameraUbo;
 
-layout(push_constant) uniform PushConstantData { mat4 model; } pc;
-layout(location = 2) out vec3 fragWorldPos;
+layout(std140, set = 0, binding = 6) readonly buffer ModelMatrixSSBO {
+    mat4 models[];
+} modelData;
 
+layout(location = 2) out vec3 fragWorldPos;
 layout(location = 0) flat out vec2 tileOrigin;       
 layout(location = 1)      out vec2 localUV;
 
 void main() {
-    gl_Position = cameraUbo.proj * cameraUbo.view * pc.model * vec4(inPosition, 1.0);
+    mat4 modelMatrix = modelData.models[gl_InstanceIndex];
+
+    gl_Position = cameraUbo.proj * cameraUbo.view * modelMatrix * vec4(inPosition, 1.0);
     tileOrigin = inTileOrigin.xy;
     localUV    = inBlockUV;
-    fragWorldPos = (pc.model * vec4(inPosition, 1.0)).xyz;
+    fragWorldPos = (modelMatrix * vec4(inPosition, 1.0)).xyz;
 }

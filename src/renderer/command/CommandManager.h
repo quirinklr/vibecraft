@@ -29,10 +29,10 @@ public:
 
     void recordCommandBuffer(
         uint32_t imageIndex, uint32_t currentFrame,
-        const std::vector<std::pair<Chunk *, int>> &chunksToRender,
+        const std::vector<std::pair<Chunk *, int>> &opaqueChunks,
+        const std::vector<std::pair<Chunk *, int>> &transparentChunks,
         const std::vector<VkDescriptorSet> &descriptorSets,
         const glm::vec3 &clearColor,
-
         const SkyPushConstant &sun_pc,
         const SkyPushConstant &moon_pc,
         bool isSunVisible,

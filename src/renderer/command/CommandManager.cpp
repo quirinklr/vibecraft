@@ -16,7 +16,8 @@ CommandManager::~CommandManager() {}
 
 void CommandManager::recordCommandBuffer(
     uint32_t imageIndex, uint32_t currentFrame,
-    const std::vector<std::pair<Chunk *, int>> &chunksToRender,
+    const std::vector<std::pair<Chunk *, int>> &opaqueChunks,
+    const std::vector<std::pair<Chunk *, int>> &transparentChunks,
     const std::vector<VkDescriptorSet> &descriptorSets,
     const glm::vec3 &clearColor,
     const SkyPushConstant &sun_pc,
@@ -82,39 +83,37 @@ void CommandManager::recordCommandBuffer(
                             m_PipelineCache.getGraphicsPipelineLayout(),
                             0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
-    for (const auto &[chunk, lod] : chunksToRender)
+    uint32_t instanceOffset = 0;
+    for (uint32_t i = 0; i < opaqueChunks.size(); ++i)
     {
+        const auto &[chunk, lod] = opaqueChunks[i];
         const ChunkMesh *mesh = chunk->getMesh(lod);
-        if (!mesh || mesh->indexCount == 0)
-            continue;
 
         VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
         VkDeviceSize chunk_offsets[] = {0};
         vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, chunk_offsets);
         vkCmdBindIndexBuffer(cb, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-        vkCmdPushConstants(cb, m_PipelineCache.getGraphicsPipelineLayout(),
-                           VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4),
-                           &chunk->getModelMatrix());
-        vkCmdDrawIndexed(cb, mesh->indexCount, 1, 0, 0, 0);
+
+        vkCmdDrawIndexed(cb, mesh->indexCount, 1, 0, 0, i);
     }
+
+    instanceOffset += static_cast<uint32_t>(opaqueChunks.size());
 
     if (!settings.wireframe)
     {
         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getWaterPipeline());
-        for (const auto &[chunk, lod] : chunksToRender)
+
+        for (uint32_t i = 0; i < transparentChunks.size(); ++i)
         {
+            const auto &[chunk, lod] = transparentChunks[i];
             const ChunkMesh *mesh = chunk->getTransparentMesh(lod);
-            if (!mesh || mesh->indexCount == 0)
-                continue;
 
             VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
             VkDeviceSize chunk_offsets[] = {0};
             vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, chunk_offsets);
             vkCmdBindIndexBuffer(cb, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdPushConstants(cb, m_PipelineCache.getGraphicsPipelineLayout(),
-                               VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4),
-                               &chunk->getModelMatrix());
-            vkCmdDrawIndexed(cb, mesh->indexCount, 1, 0, 0, 0);
+
+            vkCmdDrawIndexed(cb, mesh->indexCount, 1, 0, 0, instanceOffset + i);
         }
     }
 

@@ -30,6 +30,8 @@
 class Player;
 class TerrainGenerator;
 
+const int MAX_CHUNKS_PER_FRAME = 4096;
+
 class VulkanRenderer
 {
 public:
@@ -78,6 +80,7 @@ private:
     void updateDescriptorSets();
 
     void createCrosshairVertexBuffer();
+    void createModelMatrixSsbos();
     void createDebugCubeMesh();
     void loadRayTracingFunctions();
     VkDeviceAddress getBufferDeviceAddress(VkBuffer buffer);
@@ -141,6 +144,9 @@ private:
     std::vector<void *> m_UniformBuffersMapped;
     std::vector<VmaBuffer> m_LightUbos;
     std::vector<void *> m_LightUbosMapped;
+
+    std::vector<VmaBuffer> m_ModelMatrixSsbos;
+    std::vector<void *> m_ModelMatrixSsbosMapped;
 
     VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter> m_DescriptorPool;
     std::vector<VkDescriptorSet> m_DescriptorSets;

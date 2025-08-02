@@ -60,6 +60,7 @@ VulkanRenderer::VulkanRenderer(Window &window,
     createSkyResources();
     createLightUbo();
     createUniformBuffers();
+    createModelMatrixSsbos();
     createDescriptorPool();
     createDescriptorSets();
     createCrosshairVertexBuffer();
@@ -84,6 +85,31 @@ VulkanRenderer::VulkanRenderer(Window &window,
             throw std::runtime_error("failed to allocate RT descriptor sets");
 
         createShaderBindingTable();
+    }
+}
+
+void VulkanRenderer::createModelMatrixSsbos()
+{
+    VkDeviceSize bufferSize = sizeof(glm::mat4) * MAX_CHUNKS_PER_FRAME;
+    m_ModelMatrixSsbos.resize(MAX_FRAMES_IN_FLIGHT);
+    m_ModelMatrixSsbosMapped.resize(MAX_FRAMES_IN_FLIGHT);
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+    {
+        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        bufferInfo.size = bufferSize;
+        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+        m_ModelMatrixSsbos[i] = VmaBuffer(m_DeviceContext->getAllocator(), bufferInfo, allocInfo);
+
+        VmaAllocationInfo allocationInfo;
+
+        vmaGetAllocationInfo(m_DeviceContext->getAllocator(), m_ModelMatrixSsbos[i].getAllocation(), &allocationInfo);
+        m_ModelMatrixSsbosMapped[i] = allocationInfo.pMappedData;
     }
 }
 
@@ -177,29 +203,65 @@ bool VulkanRenderer::drawFrame(Camera &camera,
     updateLightUbo(slot, gameTicks);
     glm::vec3 skyColor = updateUniformBuffer(slot, camera, playerPos);
     updateDescriptorSets();
+
+    std::vector<std::pair<Chunk *, int>> opaqueChunks;
+    std::vector<std::pair<Chunk *, int>> transparentChunks;
+    std::vector<std::pair<Chunk *, int>> renderChunks;
+
     if (showDebugOverlay && m_debugOverlay)
     {
 
         m_debugOverlay->update(*m_player, m_Settings, 0.f, m_terrainGen->getSeed());
     }
 
-    std::vector<std::pair<Chunk *, int>> renderChunks;
     renderChunks.reserve(chunks.size());
     const Frustum &fr = camera.getFrustum();
-    for (auto &[pos, ch] : chunks)
+    for (auto &[pos, ch_ptr] : chunks)
     {
-        ch->markReady(*this);
-        if (!fr.intersects(ch->getAABB()))
+        ch_ptr->markReady(*this);
+        if (!fr.intersects(ch_ptr->getAABB()))
             continue;
 
         float d = glm::distance(glm::vec2(pos.x, pos.z), glm::vec2(playerChunkPos.x, playerChunkPos.z));
         int req = (!m_Settings.lodDistances.empty() && d <= m_Settings.lodDistances[0]) ? 0 : 1;
-        int best = ch->getBestAvailableLOD(req);
+        int best = ch_ptr->getBestAvailableLOD(req);
         if (best != -1)
         {
-            renderChunks.emplace_back(ch.get(), best);
+            Chunk *ch = ch_ptr.get();
+
+            renderChunks.emplace_back(ch, best);
+
+            const ChunkMesh *opaqueMesh = ch->getMesh(best);
+            if (opaqueMesh && opaqueMesh->indexCount > 0)
+            {
+                opaqueChunks.emplace_back(ch, best);
+            }
+
+            const ChunkMesh *transparentMesh = ch->getTransparentMesh(best);
+            if (transparentMesh && transparentMesh->indexCount > 0)
+            {
+                transparentChunks.emplace_back(ch, best);
+            }
         }
     }
+
+    std::vector<glm::mat4> modelMatrices;
+    modelMatrices.reserve(opaqueChunks.size() + transparentChunks.size());
+    for (const auto &p : opaqueChunks)
+    {
+        modelMatrices.push_back(p.first->getModelMatrix());
+    }
+    for (const auto &p : transparentChunks)
+    {
+        modelMatrices.push_back(p.first->getModelMatrix());
+    }
+
+    if (!modelMatrices.empty())
+    {
+        memcpy(m_ModelMatrixSsbosMapped[slot], modelMatrices.data(), modelMatrices.size() * sizeof(glm::mat4));
+    }
+
+    updateDescriptorSets();
 
     VkCommandBuffer cmd = m_CommandManager->getCommandBuffer(slot);
     vkResetCommandBuffer(cmd, 0);
@@ -210,8 +272,8 @@ bool VulkanRenderer::drawFrame(Camera &camera,
     {
         try
         {
-            buildBlas(renderChunks, cmd);
-            buildTlasAsync(renderChunks, cmd, slot);
+            buildBlas(opaqueChunks, cmd);
+            buildTlasAsync(opaqueChunks, cmd, slot);
 
             if (m_tlas.handle != VK_NULL_HANDLE)
             {
@@ -290,7 +352,7 @@ bool VulkanRenderer::drawFrame(Camera &camera,
     bool isMoonVisible = moonDir.y > -0.1f;
 
     m_CommandManager->recordCommandBuffer(
-        imageIndex, slot, renderChunks, m_DescriptorSets,
+        imageIndex, slot, opaqueChunks, transparentChunks, m_DescriptorSets,
         skyColor, sun_pc, moon_pc, isSunVisible, isMoonVisible,
         m_SkySphereVertexBuffer.get(), m_SkySphereIndexBuffer.get(), m_SkySphereIndexCount,
         m_CrosshairVertexBuffer.get(),
@@ -741,11 +803,13 @@ void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &
     try
     {
         std::vector<VkAccelerationStructureInstanceKHR> instances;
+
         instances.reserve(drawList.size());
 
         for (auto &p : drawList)
         {
             const Chunk *c = p.first;
+
             const ChunkMesh *m = c->getMesh(p.second);
 
             if (!m || m->blas.handle == VK_NULL_HANDLE || c->m_blas_dirty.load(std::memory_order_acquire))
@@ -1115,11 +1179,13 @@ void VulkanRenderer::createSkyResources()
 
 void VulkanRenderer::createDescriptorPool()
 {
-    std::array<VkDescriptorPoolSize, 2> poolSizes{};
+    std::array<VkDescriptorPoolSize, 3> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 2);
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 4);
+    poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1168,7 +1234,9 @@ void VulkanRenderer::updateDescriptorSets()
         shadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     }
 
-    std::array<VkWriteDescriptorSet, 6> writes{};
+    std::array<VkWriteDescriptorSet, 7> writes{};
+
+    VkDescriptorBufferInfo modelMatrixInfo{m_ModelMatrixSsbos[m_CurrentFrame].get(), 0, VK_WHOLE_SIZE};
 
     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = m_DescriptorSets[m_CurrentFrame];
@@ -1211,6 +1279,13 @@ void VulkanRenderer::updateDescriptorSets()
     writes[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     writes[5].descriptorCount = 1;
     writes[5].pImageInfo = &shadowImageInfo;
+
+    writes[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[6].dstSet = m_DescriptorSets[m_CurrentFrame];
+    writes[6].dstBinding = 6;
+    writes[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[6].descriptorCount = 1;
+    writes[6].pBufferInfo = &modelMatrixInfo;
 
     vkUpdateDescriptorSets(m_DeviceContext->getDevice(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 }

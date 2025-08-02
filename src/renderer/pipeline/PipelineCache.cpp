@@ -149,20 +149,19 @@ PipelineCache::~PipelineCache() = default;
 
 void PipelineCache::createPipelines()
 {
-    VkPushConstantRange pcRange{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4)};
     VkDescriptorSetLayout dsl = m_DescriptorLayout.getDescriptorSetLayout();
     VkPipelineLayoutCreateInfo plCI{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     plCI.setLayoutCount = 1;
     plCI.pSetLayouts = &dsl;
-    plCI.pushConstantRangeCount = 1;
-    plCI.pPushConstantRanges = &pcRange;
+    plCI.pushConstantRangeCount = 0;
+    plCI.pPushConstantRanges = nullptr;
 
     VkPipelineLayout layoutRaw{};
     if (vkCreatePipelineLayout(m_DeviceContext.getDevice(), &plCI, nullptr, &layoutRaw) != VK_SUCCESS)
         throw std::runtime_error("failed to create pipeline layout!");
     m_PipelineLayout = VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter>(layoutRaw, {m_DeviceContext.getDevice()});
 
-    VkDevice dev = m_DeviceContext.getDevice();
+        VkDevice dev = m_DeviceContext.getDevice();
     VkRenderPass rp = m_SwapChainContext.getRenderPass();
 
     const std::string defaultVert = "shaders/shader.vert.spv";
@@ -256,7 +255,7 @@ void PipelineCache::createRayTracingPipeline()
     groups.push_back({VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR, VK_SHADER_UNUSED_KHR, 3, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR});
 
     groups.push_back({VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, 4, VK_SHADER_UNUSED_KHR});
-    
+
     VkRayTracingPipelineCreateInfoKHR pipelineInfo{VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR};
     pipelineInfo.stageCount = static_cast<uint32_t>(stages.size());
     pipelineInfo.pStages = stages.data();
