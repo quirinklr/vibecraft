@@ -331,7 +331,10 @@ void VulkanRenderer::drawFrame(Camera &camera,
         m_SwapChainContext->recreateSwapChain();
         if (m_debugOverlay)
             m_debugOverlay->onWindowResize(m_SwapChainContext->getSwapChainExtent());
+
+        recreateRayTracingShadowImage();
     }
+
     else if (res == VK_ERROR_DEVICE_LOST)
     {
         throw std::runtime_error("Vulkan device lost during present");
@@ -650,13 +653,39 @@ void VulkanRenderer::buildBlas(const std::vector<std::pair<Chunk *, int>> &chunk
 
     vkCmdPipelineBarrier(cmd,
                          VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR |
+                             VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                          0, 1, &barrier, 0, nullptr, 0, nullptr);
 
-    for (auto &p : dirty)
+    for (size_t i = 0; i < targetMeshes.size(); ++i)
     {
-        p.first->m_blas_dirty.store(false, std::memory_order_release);
+        VkAccelerationStructureDeviceAddressInfoKHR ai{
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
+        ai.accelerationStructure = targetMeshes[i]->blas.handle;
+        targetMeshes[i]->blas.deviceAddress =
+            vkGetAccelerationStructureDeviceAddressKHR(
+                m_DeviceContext->getDevice(), &ai);
     }
+
+    for (auto &p : dirty)
+        p.first->m_blas_dirty.store(false, std::memory_order_release);
+}
+
+void VulkanRenderer::recreateRayTracingShadowImage()
+{
+    if (!m_DeviceContext->isRayTracingSupported())
+        return;
+
+    if (m_rtShadowImage.get() != VK_NULL_HANDLE)
+        enqueueDestroy(std::move(m_rtShadowImage));
+        
+    if (m_rtShadowImageView.get() != VK_NULL_HANDLE)
+        m_rtShadowImageView = {};
+
+    createRayTracingResources();
+
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        updateRtDescriptorSet(i);
 }
 
 void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &drawList,
@@ -748,6 +777,17 @@ void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &
         const VkAccelerationStructureBuildRangeInfoKHR *pRange = &range;
 
         vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build, &pRange);
+
+        VkMemoryBarrier tlasBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+        tlasBarrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+        tlasBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                             VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                             0, 1, &tlasBarrier,
+                             0, nullptr,
+                             0, nullptr);
 
         VkBufferMemoryBarrier barrier = {};
         barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;

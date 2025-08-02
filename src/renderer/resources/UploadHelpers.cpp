@@ -66,7 +66,8 @@ VmaBuffer UploadHelpers::createDeviceLocalBufferFromDataWithStaging(
     {
         VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0,
                                       size,
-                                      VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                           usage |
                                           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT};
         VmaAllocationCreateInfo allocInfo{};
@@ -83,7 +84,8 @@ VmaBuffer UploadHelpers::createDeviceLocalBufferFromDataWithStaging(
     {
         VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0,
                                       size,
-                                      VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                           usage |
                                           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT};
         VmaAllocationCreateInfo allocInfo{};
@@ -265,14 +267,22 @@ void UploadHelpers::submitChunkMeshUpload(const DeviceContext &dc,
         if (up.stagingVbSize > 0)
         {
             b.size = up.stagingVbSize;
-            b.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+            b.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                      VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
             vb = VmaBuffer(dc.getAllocator(), b, a);
         }
 
         if (up.stagingIbSize > 0)
         {
             b.size = up.stagingIbSize;
-            b.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+            b.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                      VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
             ib = VmaBuffer(dc.getAllocator(), b, a);
         }
 
@@ -367,7 +377,8 @@ VmaBuffer UploadHelpers::createDeviceLocalBufferFromData(
     {
         VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0,
                                       size,
-                                      VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                           usage |
                                           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT};
         VmaAllocationCreateInfo allocInfo{VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VMA_MEMORY_USAGE_CPU_ONLY};
@@ -382,7 +393,8 @@ VmaBuffer UploadHelpers::createDeviceLocalBufferFromData(
     {
         VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0,
                                       size,
-                                      VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                           usage |
                                           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT};
         VmaAllocationCreateInfo allocInfo{0, VMA_MEMORY_USAGE_GPU_ONLY};

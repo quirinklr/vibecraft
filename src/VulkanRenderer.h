@@ -65,6 +65,7 @@ private:
     void buildBlas(const std::vector<std::pair<Chunk *, int>> &chunksToBuild, VkCommandBuffer cmd);
     void buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &drawList, VkCommandBuffer cmd, uint32_t frame);
     void createRayTracingResources();
+    void recreateRayTracingShadowImage();
     void createShaderBindingTable();
     void updateRtDescriptorSet(uint32_t frame);
 

@@ -9,6 +9,7 @@
 #include "renderer/resources/UploadHelpers.h"
 #include <chrono>
 #include <iostream>
+#include "renderer/resources/RingStagingArena.h"
 
 using hrc = std::chrono::high_resolution_clock;
 using milli = std::chrono::duration<double, std::milli>;
@@ -206,8 +207,9 @@ bool Chunk::uploadMesh(VulkanRenderer &renderer, int lodLevel)
     ChunkMesh newMesh;
     VkCommandPool pool = renderer.getCommandManager()->getCommandPool();
 
-    UploadHelpers::submitChunkMeshUpload(*renderer.getDeviceContext(), pool, job, newMesh.vertexBuffer, newMesh.indexBuffer);
-
+    UploadHelpers::submitChunkMeshUpload(*renderer.getDeviceContext(), pool, job,
+                                         newMesh.vertexBuffer,
+                                         newMesh.indexBuffer);
     if (job.cmdBuffer != VK_NULL_HANDLE)
     {
         VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
@@ -317,7 +319,9 @@ bool Chunk::uploadTransparentMesh(VulkanRenderer &renderer, int lodLevel)
     ChunkMesh newMesh;
     VkCommandPool pool = renderer.getCommandManager()->getCommandPool();
 
-    UploadHelpers::submitChunkMeshUpload(*renderer.getDeviceContext(), pool, job, newMesh.vertexBuffer, newMesh.indexBuffer);
+    UploadHelpers::submitChunkMeshUpload(*renderer.getDeviceContext(), pool, job,
+                                         newMesh.vertexBuffer,
+                                         newMesh.indexBuffer);
 
     if (job.cmdBuffer != VK_NULL_HANDLE)
     {

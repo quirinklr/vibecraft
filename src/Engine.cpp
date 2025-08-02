@@ -229,6 +229,7 @@ void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
     m_key_Z_last_state = z_now;
 
     static bool lLast = false;
+    
     bool lNow = glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS;
     if (lNow && !lLast)
     {

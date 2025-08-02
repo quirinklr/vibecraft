@@ -23,7 +23,8 @@ public:
                                const std::vector<Vertex> &v,
                                const std::vector<uint32_t> &i,
                                UploadJob &up);
-    static void submitChunkMeshUpload(const DeviceContext &dc, VkCommandPool pool,
+    static void submitChunkMeshUpload(const DeviceContext &dc,
+                                      VkCommandPool pool,
                                       UploadJob &up,
                                       VmaBuffer &vb,
                                       VmaBuffer &ib);
