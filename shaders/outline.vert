@@ -18,4 +18,6 @@ layout(push_constant) uniform PushConstantData {
 
 void main() {
     gl_Position = cameraUbo.proj * cameraUbo.view * pc.model * vec4(inPosition, 1.0);
+    
+    gl_Position.z -= 0.0005 * gl_Position.w;
 }

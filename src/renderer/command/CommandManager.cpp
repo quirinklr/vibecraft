@@ -101,6 +101,23 @@ void CommandManager::recordCommandBuffer(
 
     instanceOffset += static_cast<uint32_t>(opaqueChunks.size());
 
+    if (outlineVertexCount > 0 && hoveredBlockPos)
+    {
+        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getOutlinePipeline());
+        vkCmdSetLineWidth(cb, 2.0f);
+        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                m_PipelineCache.getOutlinePipelineLayout(),
+                                0, 1, &descriptorSets[currentFrame], 0, nullptr);
+        VkDeviceSize outline_offsets[] = {0};
+        vkCmdBindVertexBuffers(cb, 0, 1, &outlineVB, outline_offsets);
+
+        glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(*hoveredBlockPos));
+        vkCmdPushConstants(cb, m_PipelineCache.getOutlinePipelineLayout(),
+                           VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
+
+        vkCmdDraw(cb, outlineVertexCount, 1, 0, 0);
+    }
+
     if (!settings.wireframe)
     {
         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getWaterPipeline());
@@ -138,23 +155,6 @@ void CommandManager::recordCommandBuffer(
                                VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
             vkCmdDrawIndexed(cb, debugCubeIndexCount, 1, 0, 0, 0);
         }
-    }
-
-    if (outlineVertexCount > 0 && hoveredBlockPos)
-    {
-        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getOutlinePipeline());
-        vkCmdSetLineWidth(cb, 2.0f);
-        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                m_PipelineCache.getOutlinePipelineLayout(),
-                                0, 1, &descriptorSets[currentFrame], 0, nullptr);
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(cb, 0, 1, &outlineVB, offsets);
-
-        glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(*hoveredBlockPos));
-        vkCmdPushConstants(cb, m_PipelineCache.getOutlinePipelineLayout(),
-                           VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
-
-        vkCmdDraw(cb, outlineVertexCount, 1, 0, 0);
     }
 
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,

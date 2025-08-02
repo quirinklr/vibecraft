@@ -278,6 +278,7 @@ void PipelineCache::createRayTracingPipeline()
 
 void PipelineCache::createSkyPipeline()
 {
+
     VkPushConstantRange pcRange{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SkyPushConstant)};
 
     VkDescriptorSetLayout dsl = m_DescriptorLayout.getDescriptorSetLayout();
@@ -342,6 +343,7 @@ void PipelineCache::createOutlinePipeline()
     rasterizer.polygonMode = VK_POLYGON_MODE_LINE;
     rasterizer.lineWidth = 2.0f;
     rasterizer.cullMode = VK_CULL_MODE_NONE;
+    rasterizer.depthBiasEnable = VK_FALSE;
 
     VkPipelineMultisampleStateCreateInfo multisampling{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
     multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
