@@ -21,8 +21,8 @@ void Player::toggle_flight()
 
 void Player::update(float dt)
 {
+
     Entity::update(dt);
-    update_camera(m_engine);
 }
 
 void Player::process_keyboard(GLFWwindow *window, float dt)
@@ -146,6 +146,29 @@ void Player::get_orientation(float &yaw, float &pitch) const
 {
     yaw = m_yaw;
     pitch = m_pitch;
+}
+
+void Player::update_camera_interpolated(Engine *engine, float alpha)
+{
+
+    glm::vec3 interpolated_pos = glm::mix(m_previousPosition, m_position, alpha);
+
+    glm::vec3 eye_position = interpolated_pos + glm::vec3(0.f, m_hitbox.max.y * 0.9f, 0.f);
+    glm::vec3 look_direction{
+        cos(m_yaw) * cos(m_pitch),
+        sin(m_pitch),
+        sin(m_yaw) * cos(m_pitch)};
+    m_camera.setViewDirection(eye_position, look_direction);
+
+    auto ext = engine->get_window().getExtent();
+    if (ext.height > 0)
+    {
+        m_camera.setPerspectiveProjection(
+            glm::radians(m_settings.fov),
+            static_cast<float>(ext.width) / ext.height,
+            0.1f,
+            1000.f);
+    }
 }
 
 void Player::process_mouse_movement(float dx, float dy)

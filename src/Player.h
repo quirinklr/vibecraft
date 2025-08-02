@@ -22,6 +22,8 @@ public:
 
     Camera &get_camera() { return m_camera; }
 
+    void update_camera_interpolated(Engine *engine, float alpha);
+
 private:
     void update_camera(Engine *engine);
 

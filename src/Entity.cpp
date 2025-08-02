@@ -5,7 +5,8 @@
 
 Entity::Entity(Engine *engine, glm::vec3 position)
     : m_engine(engine),
-      m_position(position)
+      m_position(position),
+      m_previousPosition(position)
 {
     const float width = 0.6f;
     const float height = 1.8f;
@@ -45,31 +46,33 @@ void Entity::check_for_water()
 
 void Entity::update(float dt)
 {
+
+    m_previousPosition = m_position;
+
     check_for_water();
 
     if (m_is_flying)
     {
         m_position += m_velocity * dt;
-        return;
     }
-
-    m_velocity.y += GRAVITY * dt;
-
-    if (m_is_in_water)
+    else
     {
+        m_velocity.y += GRAVITY * dt;
 
-        m_velocity.y += BUOYANCY_FORCE * dt;
+        if (m_is_in_water)
+        {
+            m_velocity.y += BUOYANCY_FORCE * dt;
+            m_velocity -= m_velocity * WATER_DRAG_FACTOR * dt;
+        }
 
-        m_velocity -= m_velocity * WATER_DRAG_FACTOR * dt;
-    }
+        m_position += m_velocity * dt;
+        resolve_collisions();
 
-    m_position += m_velocity * dt;
-    resolve_collisions();
-
-    if (m_is_on_ground && !m_is_in_water)
-    {
-        m_velocity.x = 0;
-        m_velocity.z = 0;
+        if (m_is_on_ground && !m_is_in_water)
+        {
+            m_velocity.x = 0;
+            m_velocity.z = 0;
+        }
     }
 }
 

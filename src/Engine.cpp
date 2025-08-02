@@ -114,6 +114,10 @@ void Engine::run()
             m_physicsAccumulator -= FIXED_TIMESTEP;
         }
 
+        const float alpha = m_physicsAccumulator / FIXED_TIMESTEP;
+
+        m_player_ptr->update_camera_interpolated(this, alpha);
+
         if (m_showDebugOverlay)
         {
             float fps = 1.0f / m_FrameEMA;
@@ -142,14 +146,14 @@ void Engine::run()
             }
         }
 
-        glm::vec3 player_pos = m_player_ptr->get_position();
-        updateChunks(player_pos);
+        glm::vec3 player_pos_logic = m_player_ptr->get_position();
+        updateChunks(player_pos_logic);
 
         glm::ivec3 playerChunkPos{
-            static_cast<int>(std::floor(player_pos.x / Chunk::WIDTH)), 0,
-            static_cast<int>(std::floor(player_pos.z / Chunk::DEPTH))};
+            static_cast<int>(std::floor(player_pos_logic.x / Chunk::WIDTH)), 0,
+            static_cast<int>(std::floor(player_pos_logic.z / Chunk::DEPTH))};
 
-        if (!m_Renderer.drawFrame(m_player_ptr->get_camera(), player_pos, m_Chunks, playerChunkPos,
+        if (!m_Renderer.drawFrame(m_player_ptr->get_camera(), player_pos_logic, m_Chunks, playerChunkPos,
                                   m_gameTicks, debug_aabbs, m_showDebugOverlay))
         {
             continue;
