@@ -106,14 +106,11 @@ void Engine::run()
         m_physicsAccumulator += dt;
         while (m_physicsAccumulator >= FIXED_TIMESTEP)
         {
-
             m_player_ptr->process_keyboard(m_Window.getGLFWwindow(), FIXED_TIMESTEP);
-
             for (auto &entity : m_entities)
             {
                 entity->update(FIXED_TIMESTEP);
             }
-
             m_physicsAccumulator -= FIXED_TIMESTEP;
         }
 
@@ -251,6 +248,7 @@ void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
     bool lNow = glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS;
     if (lNow && !lLast)
     {
+
         if (m_Settings.rayTracingFlags & SettingsEnums::SHADOWS)
         {
             m_Settings.rayTracingFlags &= ~SettingsEnums::SHADOWS;
