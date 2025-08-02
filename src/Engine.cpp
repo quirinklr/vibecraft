@@ -82,8 +82,14 @@ void Engine::run()
     {
         float now = static_cast<float>(glfwGetTime());
         float dt = now - last_time;
-        m_FrameEMA = 0.9 * m_FrameEMA + 0.1 * dt;
         last_time = now;
+
+        if (dt > 0.25f)
+        {
+            dt = 0.25f;
+        }
+
+        m_FrameEMA = 0.9 * m_FrameEMA + 0.1 * dt;
 
         m_timeAccumulator += dt;
         while (m_timeAccumulator >= 1.0f / m_ticksPerSecond)
@@ -104,6 +110,7 @@ void Engine::run()
 
         for (auto &entity : m_entities)
         {
+
             entity->update(dt);
         }
 
@@ -229,7 +236,7 @@ void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
     m_key_Z_last_state = z_now;
 
     static bool lLast = false;
-    
+
     bool lNow = glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS;
     if (lNow && !lLast)
     {

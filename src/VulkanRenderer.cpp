@@ -47,9 +47,9 @@ VulkanRenderer::VulkanRenderer(Window &window,
 
     m_debugOverlay = std::make_unique<DebugOverlay>(
         *m_DeviceContext,
-        m_CommandManager->getCommandPool(),
-        m_SwapChainContext->getRenderPass(),
-        m_SwapChainContext->getSwapChainExtent());
+        m_CommandManager->getCommandPool());
+
+    m_debugOverlay->recreate(m_SwapChainContext->getRenderPass(), m_SwapChainContext->getSwapChainExtent());
 
     m_TextureManager = std::make_unique<TextureManager>(
         *m_DeviceContext, m_CommandManager->getCommandPool());
@@ -144,13 +144,20 @@ void VulkanRenderer::drawFrame(Camera &camera,
         m_SyncPrimitives->getImageAvailableSemaphore(slot),
         VK_NULL_HANDLE, &imageIndex);
 
-    if (res == VK_ERROR_OUT_OF_DATE_KHR)
+    if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || m_Window.wasWindowResized())
     {
+        m_Window.resetWindowResizedFlag();
         m_SwapChainContext->recreateSwapChain();
+
         if (m_debugOverlay)
-            m_debugOverlay->onWindowResize(m_SwapChainContext->getSwapChainExtent());
+        {
+            m_debugOverlay->recreate(m_SwapChainContext->getRenderPass(), m_SwapChainContext->getSwapChainExtent());
+        }
+
+        recreateRayTracingShadowImage();
         return;
     }
+
     if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR)
     {
         throw std::runtime_error("failed to acquire swap chain image");
@@ -329,10 +336,13 @@ void VulkanRenderer::drawFrame(Camera &camera,
     {
         m_Window.resetWindowResizedFlag();
         m_SwapChainContext->recreateSwapChain();
-        if (m_debugOverlay)
-            m_debugOverlay->onWindowResize(m_SwapChainContext->getSwapChainExtent());
 
+        if (m_debugOverlay)
+        {
+            m_debugOverlay->recreate(m_SwapChainContext->getRenderPass(), m_SwapChainContext->getSwapChainExtent());
+        }
         recreateRayTracingShadowImage();
+        return;
     }
 
     else if (res == VK_ERROR_DEVICE_LOST)
@@ -790,7 +800,7 @@ void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &
         VkAccelerationStructureBuildRangeInfoKHR range{.primitiveCount = primCount};
         const VkAccelerationStructureBuildRangeInfoKHR *pRange = &range;
 
-            vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build, &pRange);
+        vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build, &pRange);
 
         VkMemoryBarrier tlasBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
         tlasBarrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;

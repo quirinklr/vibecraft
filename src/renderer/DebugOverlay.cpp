@@ -7,6 +7,7 @@
 #include <vector>
 #include <array>
 #include <fstream>
+#include <cstdio>
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
@@ -43,17 +44,33 @@ namespace
 
 static stbtt_bakedchar cdata[96];
 
-DebugOverlay::DebugOverlay(DeviceContext &deviceContext, VkCommandPool commandPool, VkRenderPass renderPass, VkExtent2D viewportExtent)
-    : m_deviceContext(deviceContext), m_commandPool(commandPool), m_renderPass(renderPass), m_viewportExtent(viewportExtent)
+DebugOverlay::DebugOverlay(DeviceContext &deviceContext, VkCommandPool commandPool)
+    : m_deviceContext(deviceContext), m_commandPool(commandPool)
 {
-
     VkPhysicalDeviceProperties properties;
     vkGetPhysicalDeviceProperties(m_deviceContext.getPhysicalDevice(), &properties);
     m_gpuName = properties.deviceName;
     m_raytracingSupport = m_deviceContext.isRayTracingSupported() ? "Yes" : "No";
 
     createFontTexture();
-    createPipeline();
+}
+
+void DebugOverlay::cleanupPipeline()
+{
+    m_pipeline = {nullptr, {}};
+    m_pipelineLayout = {nullptr, {}};
+    m_descriptorPool = {nullptr, {}};
+    m_descriptorSetLayout = {nullptr, {}};
+    m_vertexBuffer = {};
+}
+
+void DebugOverlay::recreate(VkRenderPass renderPass, VkExtent2D viewportExtent)
+{
+    m_renderPass = renderPass;
+    m_viewportExtent = viewportExtent;
+
+    cleanupPipeline();
+    createPipeline(renderPass);
 }
 
 DebugOverlay::~DebugOverlay() {}
@@ -117,19 +134,52 @@ void DebugOverlay::createFontTexture()
     m_fontSampler = VulkanHandle<VkSampler, SamplerDeleter>(sampler, {m_deviceContext.getDevice()});
 }
 
-void DebugOverlay::createPipeline()
+void DebugOverlay::createPipeline(VkRenderPass renderPass)
 {
-}
 
+    VkDescriptorSetLayoutBinding samplerLayoutBinding{};
+    samplerLayoutBinding.binding = 0;
+    samplerLayoutBinding.descriptorCount = 1;
+    samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    layoutInfo.bindingCount = 1;
+    layoutInfo.pBindings = &samplerLayoutBinding;
+
+    VkDescriptorSetLayout dsl;
+    vkCreateDescriptorSetLayout(m_deviceContext.getDevice(), &layoutInfo, nullptr, &dsl);
+    m_descriptorSetLayout = VulkanHandle<VkDescriptorSetLayout, DescriptorSetLayoutDeleter>(dsl, {m_deviceContext.getDevice()});
+
+    VkDescriptorPoolSize poolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
+    VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &poolSize;
+    poolInfo.maxSets = 1;
+
+    VkDescriptorPool pool;
+    vkCreateDescriptorPool(m_deviceContext.getDevice(), &poolInfo, nullptr, &pool);
+    m_descriptorPool = VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter>(pool, {m_deviceContext.getDevice()});
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &dsl;
+
+    VkPipelineLayout pl;
+    vkCreatePipelineLayout(m_deviceContext.getDevice(), &pipelineLayoutInfo, nullptr, &pl);
+    m_pipelineLayout = VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter>(pl, {m_deviceContext.getDevice()});
+
+    auto vertShader = createShaderModule(m_deviceContext.getDevice(), readBinaryFile("shaders/debug.vert.spv"));
+    auto fragShader = createShaderModule(m_deviceContext.getDevice(), readBinaryFile("shaders/debug.frag.spv"));
+
+    VkPipelineShaderStageCreateInfo stages[2] = {
+        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vertShader.get(), "main"},
+        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, fragShader.get(), "main"}};
+}
 void DebugOverlay::update(const Player &player, const Settings &settings, float fps, int64_t seed)
 {
 }
 
 void DebugOverlay::draw(VkCommandBuffer commandBuffer)
 {
-}
-
-void DebugOverlay::onWindowResize(VkExtent2D newExtent)
-{
-    m_viewportExtent = newExtent;
 }

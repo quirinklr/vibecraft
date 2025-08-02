@@ -13,21 +13,25 @@ struct Settings;
 class DebugOverlay
 {
 public:
-    DebugOverlay(DeviceContext &deviceContext, VkCommandPool commandPool, VkRenderPass renderPass, VkExtent2D viewportExtent);
+    DebugOverlay(DeviceContext &deviceContext, VkCommandPool commandPool);
     ~DebugOverlay();
 
     void update(const Player &player, const Settings &settings, float fps, int64_t seed);
     void draw(VkCommandBuffer commandBuffer);
-    void onWindowResize(VkExtent2D newExtent);
+
+    void recreate(VkRenderPass renderPass, VkExtent2D viewportExtent);
 
 private:
     void createFontTexture();
-    void createPipeline();
+
+    void createPipeline(VkRenderPass renderPass);
+    void cleanupPipeline();
     void generateStringMesh(float x, float y, const std::string &text, std::vector<glm::vec4> &vertices);
 
     DeviceContext &m_deviceContext;
     VkCommandPool m_commandPool;
-    VkRenderPass m_renderPass;
+
+    VkRenderPass m_renderPass = VK_NULL_HANDLE;
     VkExtent2D m_viewportExtent;
 
     VmaImage m_fontImage;
