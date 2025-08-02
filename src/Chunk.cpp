@@ -614,6 +614,7 @@ void Chunk::buildMeshGreedy(int lodLevel,
                         int tex = (dim == 0) ? (back ? bd.texture_indices[4] : bd.texture_indices[5]) : (dim == 1) ? (back ? bd.texture_indices[0] : bd.texture_indices[1])
                                                                                                                    : (back ? bd.texture_indices[3] : bd.texture_indices[2]);
                         glm::vec3 tileO{(tex % 16) * ATLAS_INV_SIZE, (tex / 16) * ATLAS_INV_SIZE, 0.f};
+
                         auto uv = [&](const glm::vec3 &p) -> glm::vec2
                         { return (dim == 0) ? glm::vec2(p.z, p.y) : (dim == 1) ? glm::vec2(p.x, p.z)
                                                                                : glm::vec2(p.x, p.y); };
@@ -636,20 +637,8 @@ void Chunk::buildMeshGreedy(int lodLevel,
                                 glm::vec3 v2 = p0 + duv + dvv;
                                 glm::vec3 v3 = p0 + dvv;
 
-                                if (id == BlockId::WATER && dim == 1 && !back)
-                                {
-                                    float top_y = v0.y;
-                                    if (std::abs(v0.y - top_y) < 0.01f)
-                                        v0.y -= 0.1f;
-                                    if (std::abs(v1.y - top_y) < 0.01f)
-                                        v1.y -= 0.1f;
-                                    if (std::abs(v2.y - top_y) < 0.01f)
-                                        v2.y -= 0.1f;
-                                    if (std::abs(v3.y - top_y) < 0.01f)
-                                        v3.y -= 0.1f;
-                                }
-
                                 uint32_t base = static_cast<uint32_t>(vertices.size());
+
                                 vertices.push_back({v0, tileO, uv(v0)});
                                 vertices.push_back({v1, tileO, uv(v1)});
                                 vertices.push_back({v2, tileO, uv(v2)});
@@ -687,6 +676,7 @@ void Chunk::buildMeshGreedy(int lodLevel,
                         glm::vec3 v3 = p0 + dvv;
 
                         uint32_t base = static_cast<uint32_t>(vertices.size());
+
                         vertices.push_back({v0, tileO, uv(v0)});
                         vertices.push_back({v1, tileO, uv(v1)});
                         vertices.push_back({v2, tileO, uv(v2)});

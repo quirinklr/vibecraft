@@ -232,13 +232,17 @@ void PipelineCache::createRayTracingPipeline()
     m_RayTracingPipelineLayout = VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter>(layout, {device});
 
     auto rgen = makeShader(device, "shaders/raytracing/shadow.rgen.spv");
-    auto rmiss = makeShader(device, "shaders/raytracing/shadow.rmiss.spv");
     auto rchit = makeShader(device, "shaders/raytracing/shadow.rchit.spv");
+    auto rmiss = makeShader(device, "shaders/raytracing/shadow.rmiss.spv");
+    auto rahit_occlusion = makeShader(device, "shaders/raytracing/shadow_occlusion.rahit.spv");
+    auto rmiss_occlusion = makeShader(device, "shaders/raytracing/shadow_occlusion.rmiss.spv");
 
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     stages.push_back({VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_RAYGEN_BIT_KHR, rgen.get(), "main"});
     stages.push_back({VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_MISS_BIT_KHR, rmiss.get(), "main"});
+    stages.push_back({VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_MISS_BIT_KHR, rmiss_occlusion.get(), "main"});
     stages.push_back({VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, rchit.get(), "main"});
+    stages.push_back({VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_ANY_HIT_BIT_KHR, rahit_occlusion.get(), "main"});
 
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
 
@@ -246,14 +250,18 @@ void PipelineCache::createRayTracingPipeline()
 
     groups.push_back({VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, 1, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR});
 
-    groups.push_back({VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR, VK_SHADER_UNUSED_KHR, 2, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR});
+    groups.push_back({VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, 2, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR});
+
+    groups.push_back({VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR, VK_SHADER_UNUSED_KHR, 3, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR});
+
+    groups.push_back({VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, 4, VK_SHADER_UNUSED_KHR});
 
     VkRayTracingPipelineCreateInfoKHR pipelineInfo{VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR};
     pipelineInfo.stageCount = static_cast<uint32_t>(stages.size());
     pipelineInfo.pStages = stages.data();
     pipelineInfo.groupCount = static_cast<uint32_t>(groups.size());
     pipelineInfo.pGroups = groups.data();
-    pipelineInfo.maxPipelineRayRecursionDepth = 1;
+    pipelineInfo.maxPipelineRayRecursionDepth = 2;
     pipelineInfo.layout = m_RayTracingPipelineLayout.get();
 
     auto vkCreateRayTracingPipelinesKHR = (PFN_vkCreateRayTracingPipelinesKHR)vkGetDeviceProcAddr(device, "vkCreateRayTracingPipelinesKHR");
@@ -262,7 +270,6 @@ void PipelineCache::createRayTracingPipeline()
     {
         throw std::runtime_error("Failed to create ray tracing pipeline!");
     }
-
     m_RayTracingPipeline = VulkanHandle<VkPipeline, PipelineDeleter>(rtPipeline, {device});
     vkDestroyDescriptorSetLayout(device, rtDescriptorSetLayout, nullptr);
 }

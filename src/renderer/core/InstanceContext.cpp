@@ -17,7 +17,7 @@ void InstanceContext::createInstance()
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     appInfo.pEngineName = "Vibecraft Engine";
     appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_0;
+    appInfo.apiVersion = VK_API_VERSION_1_2;
 
     VkInstanceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -29,13 +29,13 @@ void InstanceContext::createInstance()
     createInfo.ppEnabledExtensionNames = glfwExtensions;
     createInfo.enabledLayerCount = 0;
 
-    #ifndef NDEBUG
-        if (m_EnableValidationLayers)
-        {
-            createInfo.enabledLayerCount = static_cast<uint32_t>(m_ValidationLayers.size());
-            createInfo.ppEnabledLayerNames = m_ValidationLayers.data();
-        }
-    #endif
+#ifndef NDEBUG
+    if (m_EnableValidationLayers)
+    {
+        createInfo.enabledLayerCount = static_cast<uint32_t>(m_ValidationLayers.size());
+        createInfo.ppEnabledLayerNames = m_ValidationLayers.data();
+    }
+#endif
 
     VkInstance instance;
     if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS)

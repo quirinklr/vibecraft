@@ -463,7 +463,8 @@ void VulkanRenderer::createShaderBindingTable()
 
     const uint32_t handleSize = rtProps.shaderGroupHandleSize;
     const uint32_t handleSizeAligned = (handleSize + rtProps.shaderGroupBaseAlignment - 1) & ~(rtProps.shaderGroupBaseAlignment - 1);
-    const uint32_t groupCount = 3;
+
+    const uint32_t groupCount = 5;
     const uint32_t sbtSize = groupCount * handleSizeAligned;
 
     std::vector<uint8_t> shaderHandleStorage(sbtSize);
@@ -474,17 +475,22 @@ void VulkanRenderer::createShaderBindingTable()
         VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
 
     VkDeviceAddress sbtAddress = getBufferDeviceAddress(m_shaderBindingTable.get());
+
     m_rgenRegion.deviceAddress = sbtAddress;
     m_rgenRegion.stride = handleSizeAligned;
     m_rgenRegion.size = handleSizeAligned;
 
-    m_missRegion.deviceAddress = sbtAddress + handleSizeAligned;
+    m_missRegion.deviceAddress = sbtAddress + 1 * handleSizeAligned;
     m_missRegion.stride = handleSizeAligned;
-    m_missRegion.size = handleSizeAligned;
+    m_missRegion.size = 2 * handleSizeAligned;
 
-    m_hitRegion.deviceAddress = sbtAddress + 2 * handleSizeAligned;
+    m_hitRegion.deviceAddress = sbtAddress + 3 * handleSizeAligned;
     m_hitRegion.stride = handleSizeAligned;
-    m_hitRegion.size = handleSizeAligned;
+    m_hitRegion.size = 2 * handleSizeAligned;
+
+    m_callRegion.deviceAddress = 0;
+    m_callRegion.stride = 0;
+    m_callRegion.size = 0;
 }
 
 void VulkanRenderer::updateRtDescriptorSet(uint32_t frame)
@@ -678,7 +684,7 @@ void VulkanRenderer::recreateRayTracingShadowImage()
 
     if (m_rtShadowImage.get() != VK_NULL_HANDLE)
         enqueueDestroy(std::move(m_rtShadowImage));
-        
+
     if (m_rtShadowImageView.get() != VK_NULL_HANDLE)
         m_rtShadowImageView = {};
 
