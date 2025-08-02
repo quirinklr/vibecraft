@@ -25,7 +25,7 @@ struct Settings
 
     bool wireframe = false;
     bool showCollisionBoxes = false;
-    uint32_t rayTracingFlags = 0;
+    uint32_t rayTracingFlags = 1;
 
     int renderDistance = 12;
     std::vector<int> lodDistances = {8, 16, 24};

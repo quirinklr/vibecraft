@@ -34,7 +34,7 @@ void main() {
     vec2 uv = tileOrigin + fract(localUV) * TILE_SIZE;
     vec4 textureColor = texture(texSampler, uv);
     
-    vec3 fogColor = vec3(0.05, 0.18, 0.25);
+    vec3 fogColor = vec3(0.00, 0.08, 0.25);
 
     vec3 viewVec = normalize(cameraUbo.cameraPos - fragWorldPos);
     vec3 normalVec = vec3(0.0, 1.0, 0.0);
