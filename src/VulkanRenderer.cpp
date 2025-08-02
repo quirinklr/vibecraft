@@ -924,10 +924,13 @@ void VulkanRenderer::enqueueDestroy(VkBuffer buffer, VmaAllocation allocation)
 void VulkanRenderer::updateLightUbo(uint32_t currentImage, uint32_t gameTicks)
 {
     LightUbo ubo{};
-    float time_of_day = (float)gameTicks / 24000.0f;
-    float angle = time_of_day * 2.0f * glm::pi<float>() - glm::half_pi<float>();
 
-    ubo.lightDirection = glm::normalize(glm::vec3(sin(angle), cos(angle), 0.2f));
+    float time_of_day = static_cast<float>(gameTicks) / 24000.0f;
+    float sun_angle = time_of_day * 2.0f * glm::pi<float>() - glm::half_pi<float>();
+
+    glm::vec3 sunDir = glm::normalize(glm::vec3(sin(sun_angle), cos(sun_angle), 0.2f));
+
+    ubo.lightDirection = sunDir;
 
     memcpy(m_LightUbosMapped[currentImage], &ubo, sizeof(ubo));
 }

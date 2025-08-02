@@ -26,23 +26,34 @@ layout(location = 0) out vec4 outColor;
 const float TILE_SIZE = 1.0 / 16.0;
 const uint FLAG_SHADOWS = 1;
 const vec3 AMBIENT_NIGHT = vec3(0.1, 0.12, 0.2);
+const vec3 AMBIENT_DAY = vec3(0.6, 0.6, 0.7); 
 const vec3 SUNLIGHT = vec3(1.0, 1.0, 0.95);
 
 void main() {
-    vec2 uv = tileOrigin + fract(localUV) * TILE_SIZE;
-    vec4 textureColor = texture(texSampler, uv);
+vec2 uv = tileOrigin + fract(localUV) * TILE_SIZE;
+vec4 textureColor = texture(texSampler, uv);
+      
+if (textureColor.a < 0.1) {
+    discard;
+}
+
+if (cameraUbo.isUnderwater == 1) {
     
-    if (textureColor.a < 0.1) {
-        discard;
-    }
+} else {
+    float sunUpFactor = smoothstep(-0.1, 0.1, uboLight.lightDirection.y);
     
+    
+    vec3 directLight = mix(vec3(0.4, 0.4, 0.5), SUNLIGHT, sunUpFactor); 
+    
+    
+    vec3 ambientLight = mix(AMBIENT_NIGHT, AMBIENT_DAY, sunUpFactor);
     
     float computedShadow = texture(shadowMap, gl_FragCoord.xy / textureSize(shadowMap, 0)).r;
     float shadowFactor = mix(1.0, computedShadow, float((cameraUbo.flags & FLAG_SHADOWS) != 0));
 
     
-    outColor = vec4(vec3(shadowFactor), 1.0); 
+    outColor.rgb = textureColor.rgb * (ambientLight + directLight * shadowFactor);
+    outColor.a = textureColor.a;
+}
 
-    
-    
 }
