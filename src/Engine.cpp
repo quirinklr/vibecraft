@@ -78,6 +78,8 @@ void Engine::run()
     float fps_time = last_time;
     int frames = 0;
 
+    const float FIXED_TIMESTEP = 1.0f / 60.0f;
+
     while (!m_Window.shouldClose())
     {
         float now = static_cast<float>(glfwGetTime());
@@ -91,6 +93,9 @@ void Engine::run()
 
         m_FrameEMA = 0.9 * m_FrameEMA + 0.1 * dt;
 
+        glfwPollEvents();
+        processInput(dt, mouse_enabled, last_cursor_x, last_cursor_y);
+
         m_timeAccumulator += dt;
         while (m_timeAccumulator >= 1.0f / m_ticksPerSecond)
         {
@@ -98,9 +103,19 @@ void Engine::run()
             m_timeAccumulator -= 1.0f / m_ticksPerSecond;
         }
 
-        glfwPollEvents();
+        m_physicsAccumulator += dt;
+        while (m_physicsAccumulator >= FIXED_TIMESTEP)
+        {
 
-        processInput(dt, mouse_enabled, last_cursor_x, last_cursor_y);
+            m_player_ptr->process_keyboard(m_Window.getGLFWwindow(), FIXED_TIMESTEP);
+
+            for (auto &entity : m_entities)
+            {
+                entity->update(FIXED_TIMESTEP);
+            }
+
+            m_physicsAccumulator -= FIXED_TIMESTEP;
+        }
 
         if (m_showDebugOverlay)
         {
@@ -108,16 +123,10 @@ void Engine::run()
             m_Renderer.getDebugOverlay()->update(*m_player_ptr, m_Settings, fps, m_TerrainGen.getSeed());
         }
 
-        for (auto &entity : m_entities)
-        {
-            entity->update(dt);
-        }
-
         std::vector<AABB> debug_aabbs;
         if (m_Settings.showCollisionBoxes)
         {
             debug_aabbs.push_back(m_player_ptr->get_world_aabb());
-
             glm::vec3 p_pos = m_player_ptr->get_position();
             const int radius = 4;
             for (int y = static_cast<int>(p_pos.y) - radius; y < static_cast<int>(p_pos.y) + radius; ++y)
@@ -242,7 +251,6 @@ void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
     bool lNow = glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS;
     if (lNow && !lLast)
     {
-
         if (m_Settings.rayTracingFlags & SettingsEnums::SHADOWS)
         {
             m_Settings.rayTracingFlags &= ~SettingsEnums::SHADOWS;
@@ -262,8 +270,6 @@ void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
         }
     }
     lLast = lNow;
-
-    m_player_ptr->process_keyboard(window);
 }
 
 void Engine::set_block(int x, int y, int z, BlockId id)
