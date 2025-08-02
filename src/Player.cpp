@@ -103,7 +103,7 @@ void Player::process_keyboard(GLFWwindow *window, float dt)
             move_direction = glm::normalize(move_direction);
         }
 
-        const float GROUND_ACCELERATION = 35.0f;
+        const float GROUND_ACCELERATION = 80.0f;
         const float AIR_ACCELERATION = 15.0f;
         float acceleration = m_is_on_ground ? GROUND_ACCELERATION : AIR_ACCELERATION;
 
