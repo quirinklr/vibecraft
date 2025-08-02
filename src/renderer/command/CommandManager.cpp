@@ -25,7 +25,7 @@ void CommandManager::recordCommandBuffer(
     bool isSunVisible,
     bool isMoonVisible,
     VkBuffer skySphereVB, VkBuffer skySphereIB, uint32_t skySphereIndexCount,
-    VkBuffer crosshairVertexBuffer,
+    VkBuffer crosshairVB, VkBuffer crosshairIB, VkDescriptorSet crosshairDS,
     VkBuffer debugCubeVB, VkBuffer debugCubeIB, uint32_t debugCubeIndexCount,
     const Settings &settings, const std::vector<AABB> &debugAABBs,
     VkBuffer outlineVB,
@@ -157,12 +157,12 @@ void CommandManager::recordCommandBuffer(
         }
     }
 
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      m_PipelineCache.getCrosshairPipeline());
-    vkCmdSetLineWidth(cb, 2.5f);
-    VkDeviceSize z = 0;
-    vkCmdBindVertexBuffers(cb, 0, 1, &crosshairVertexBuffer, &z);
-    vkCmdDraw(cb, 4, 1, 0, 0);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getCrosshairPipeline());
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getCrosshairPipelineLayout(), 0, 1, &crosshairDS, 0, nullptr);
+    VkDeviceSize crosshair_offsets[] = {0};
+    vkCmdBindVertexBuffers(cb, 0, 1, &crosshairVB, crosshair_offsets);
+    vkCmdBindIndexBuffer(cb, crosshairIB, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(cb, 6, 1, 0, 0, 0);
 
     vkCmdEndRenderPass(cb);
 }

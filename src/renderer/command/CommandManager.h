@@ -39,7 +39,7 @@ public:
         bool isSunVisible,
         bool isMoonVisible,
         VkBuffer skySphereVB, VkBuffer skySphereIB, uint32_t skySphereIndexCount,
-        VkBuffer crosshairVertexBuffer,
+        VkBuffer crosshairVB, VkBuffer crosshairIB, VkDescriptorSet crosshairDS,
         VkBuffer debugCubeVB, VkBuffer debugCubeIB, uint32_t debugCubeIndexCount,
         const Settings &settings, const std::vector<AABB> &debugAABBs,
         VkBuffer outlineVB,

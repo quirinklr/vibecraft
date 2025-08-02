@@ -83,7 +83,8 @@ private:
     void updateDescriptorSets();
 
     void createOutlineVertexBuffer();
-    void createCrosshairVertexBuffer();
+    void createCrosshairResources();
+    void recreateCrosshairVertexBuffer();
     void createModelMatrixSsbos();
     void createDebugCubeMesh();
     void loadRayTracingFunctions();
@@ -155,8 +156,6 @@ private:
     VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter> m_DescriptorPool;
     std::vector<VkDescriptorSet> m_DescriptorSets;
 
-    VmaBuffer m_CrosshairVertexBuffer;
-
     VmaBuffer m_SkySphereVertexBuffer;
     VmaBuffer m_SkySphereIndexBuffer;
     uint32_t m_SkySphereIndexCount = 0;
@@ -179,4 +178,12 @@ private:
     std::vector<VmaBuffer> m_asBuildStagingBuffers[MAX_FRAMES_IN_FLIGHT];
     std::vector<std::shared_ptr<Chunk>> m_ChunkCleanupQueue[MAX_FRAMES_IN_FLIGHT];
     std::vector<AccelerationStructure> m_AsDestroyQueue[MAX_FRAMES_IN_FLIGHT];
+
+    VmaImage m_CrosshairTexture;
+    VulkanHandle<VkImageView, ImageViewDeleter> m_CrosshairTextureView;
+    VmaBuffer m_CrosshairVertexBuffer;
+    VmaBuffer m_CrosshairIndexBuffer;
+    VulkanHandle<VkDescriptorSetLayout, DescriptorSetLayoutDeleter> m_CrosshairDescriptorSetLayout;
+    VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter> m_CrosshairDescriptorPool;
+    VkDescriptorSet m_CrosshairDescriptorSet = VK_NULL_HANDLE;
 };

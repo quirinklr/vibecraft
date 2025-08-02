@@ -63,7 +63,8 @@ VulkanRenderer::VulkanRenderer(Window &window,
     createModelMatrixSsbos();
     createDescriptorPool();
     createDescriptorSets();
-    createCrosshairVertexBuffer();
+    createCrosshairResources();
+    recreateCrosshairVertexBuffer();
     createOutlineVertexBuffer();
     createDebugCubeMesh();
 
@@ -89,31 +90,6 @@ VulkanRenderer::VulkanRenderer(Window &window,
     }
 }
 
-void VulkanRenderer::createModelMatrixSsbos()
-{
-    VkDeviceSize bufferSize = sizeof(glm::mat4) * MAX_CHUNKS_PER_FRAME;
-    m_ModelMatrixSsbos.resize(MAX_FRAMES_IN_FLIGHT);
-    m_ModelMatrixSsbosMapped.resize(MAX_FRAMES_IN_FLIGHT);
-
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
-    {
-        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-        bufferInfo.size = bufferSize;
-        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-        m_ModelMatrixSsbos[i] = VmaBuffer(m_DeviceContext->getAllocator(), bufferInfo, allocInfo);
-
-        VmaAllocationInfo allocationInfo;
-
-        vmaGetAllocationInfo(m_DeviceContext->getAllocator(), m_ModelMatrixSsbos[i].getAllocation(), &allocationInfo);
-        m_ModelMatrixSsbosMapped[i] = allocationInfo.pMappedData;
-    }
-}
-
 VulkanRenderer::~VulkanRenderer()
 {
 
@@ -121,6 +97,13 @@ VulkanRenderer::~VulkanRenderer()
     {
         vkDeviceWaitIdle(m_DeviceContext->getDevice());
     }
+
+    m_CrosshairDescriptorPool = {nullptr, {}};
+    m_CrosshairDescriptorSetLayout = {nullptr, {}};
+    m_CrosshairVertexBuffer = {};
+    m_CrosshairIndexBuffer = {};
+    m_CrosshairTextureView = {nullptr, {}};
+    m_CrosshairTexture = {};
 
     m_tlas.destroy(m_DeviceContext->getDevice());
 
@@ -143,6 +126,62 @@ VulkanRenderer::~VulkanRenderer()
     {
         vkDestroyCommandPool(m_DeviceContext->getDevice(), m_TransferCommandPool, nullptr);
         m_TransferCommandPool = VK_NULL_HANDLE;
+    }
+}
+
+
+void VulkanRenderer::recreateCrosshairVertexBuffer()
+{
+    m_CrosshairVertexBuffer = {};
+
+    const float sizeInPixels = 32.0f;
+    float w = static_cast<float>(m_SwapChainContext->getSwapChainExtent().width);
+    float h = static_cast<float>(m_SwapChainContext->getSwapChainExtent().height);
+    float aspect = h / w;
+
+    float halfWidthNdc = (sizeInPixels / w);
+    float halfHeightNdc = (sizeInPixels / h);
+
+    struct Vertex
+    {
+        glm::vec2 pos;
+        glm::vec2 uv;
+    };
+    std::vector<Vertex> vertices = {
+        {{-halfWidthNdc, -halfHeightNdc}, {0.0f, 1.0f}},
+        {{halfWidthNdc, -halfHeightNdc}, {1.0f, 1.0f}},
+        {{halfWidthNdc, halfHeightNdc}, {1.0f, 0.0f}},
+        {{-halfWidthNdc, halfHeightNdc}, {0.0f, 0.0f}},
+    };
+
+    m_CrosshairVertexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
+        *m_DeviceContext, m_CommandManager->getCommandPool(),
+        vertices.data(), sizeof(Vertex) * vertices.size(),
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+}
+
+void VulkanRenderer::createModelMatrixSsbos()
+{
+    VkDeviceSize bufferSize = sizeof(glm::mat4) * MAX_CHUNKS_PER_FRAME;
+    m_ModelMatrixSsbos.resize(MAX_FRAMES_IN_FLIGHT);
+    m_ModelMatrixSsbosMapped.resize(MAX_FRAMES_IN_FLIGHT);
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+    {
+        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        bufferInfo.size = bufferSize;
+        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+        m_ModelMatrixSsbos[i] = VmaBuffer(m_DeviceContext->getAllocator(), bufferInfo, allocInfo);
+
+        VmaAllocationInfo allocationInfo;
+
+        vmaGetAllocationInfo(m_DeviceContext->getAllocator(), m_ModelMatrixSsbos[i].getAllocation(), &allocationInfo);
+        m_ModelMatrixSsbosMapped[i] = allocationInfo.pMappedData;
     }
 }
 
@@ -181,6 +220,7 @@ bool VulkanRenderer::drawFrame(Camera &camera,
             m_debugOverlay->recreate(m_SwapChainContext->getRenderPass(), m_SwapChainContext->getSwapChainExtent());
 
         recreateRayTracingShadowImage();
+        recreateCrosshairVertexBuffer();
         return false;
     }
 
@@ -364,7 +404,7 @@ bool VulkanRenderer::drawFrame(Camera &camera,
         imageIndex, slot, opaqueChunks, transparentChunks, m_DescriptorSets,
         skyColor, sun_pc, moon_pc, isSunVisible, isMoonVisible,
         m_SkySphereVertexBuffer.get(), m_SkySphereIndexBuffer.get(), m_SkySphereIndexCount,
-        m_CrosshairVertexBuffer.get(),
+        m_CrosshairVertexBuffer.get(), m_CrosshairIndexBuffer.get(), m_CrosshairDescriptorSet,
         m_DebugCubeVertexBuffer.get(), m_DebugCubeIndexBuffer.get(), m_DebugCubeIndexCount,
         m_Settings, debugAABBs,
         m_outlineVertexBuffer.get(), static_cast<uint32_t>(outlineVertices.size()), hoveredBlockPos);
@@ -1318,35 +1358,58 @@ void VulkanRenderer::createOutlineVertexBuffer()
     m_outlineVertexBufferMapped = allocationInfo.pMappedData;
 }
 
-void VulkanRenderer::createCrosshairVertexBuffer()
+void VulkanRenderer::createCrosshairResources()
 {
-    const float halfLenPx = 10.0f;
-    float w = float(m_SwapChainContext->getSwapChainExtent().width);
-    float h = float(m_SwapChainContext->getSwapChainExtent().height);
-    float ndcHalfX = halfLenPx * 2.0f / w;
-    float ndcHalfY = halfLenPx * 2.0f / h;
-    std::array<glm::vec2, 4> verts = {{{-ndcHalfX, 0.0f}, {+ndcHalfX, 0.0f}, {0.0f, -ndcHalfY}, {0.0f, +ndcHalfY}}};
-    VkDeviceSize size = sizeof(verts);
+    m_CrosshairTextureView = createTexture("textures/crosshair.png", m_CrosshairTexture);
 
-    VmaBuffer stagingBuffer;
-    {
-        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-        allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
-        stagingBuffer = VmaBuffer(m_DeviceContext->getAllocator(), bufferInfo, allocInfo);
-        void *data;
-        vmaMapMemory(m_DeviceContext->getAllocator(), stagingBuffer.getAllocation(), &data);
-        memcpy(data, verts.data(), size);
-        vmaUnmapMemory(m_DeviceContext->getAllocator(), stagingBuffer.getAllocation());
-    }
+    VkDevice device = m_DeviceContext->getDevice();
+    VkDescriptorSetLayoutBinding binding{};
+    binding.binding = 0;
+    binding.descriptorCount = 1;
+    binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT};
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-    m_CrosshairVertexBuffer = VmaBuffer(m_DeviceContext->getAllocator(), bufferInfo, allocInfo);
+    VkDescriptorSetLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    layoutInfo.bindingCount = 1;
+    layoutInfo.pBindings = &binding;
+    VkDescriptorSetLayout layout;
+    vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &layout);
+    m_CrosshairDescriptorSetLayout = VulkanHandle<VkDescriptorSetLayout, DescriptorSetLayoutDeleter>(layout, {device});
 
-    UploadHelpers::copyBuffer(*m_DeviceContext, m_CommandManager->getCommandPool(), stagingBuffer.get(), m_CrosshairVertexBuffer.get(), size);
+    VkDescriptorPoolSize poolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
+    VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &poolSize;
+    poolInfo.maxSets = 1;
+    VkDescriptorPool pool;
+    vkCreateDescriptorPool(device, &poolInfo, nullptr, &pool);
+    m_CrosshairDescriptorPool = VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter>(pool, {device});
+
+    VkDescriptorSetAllocateInfo allocInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    allocInfo.descriptorPool = pool;
+    allocInfo.descriptorSetCount = 1;
+    allocInfo.pSetLayouts = &layout;
+    vkAllocateDescriptorSets(device, &allocInfo, &m_CrosshairDescriptorSet);
+
+    VkDescriptorImageInfo imageInfo{};
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imageInfo.imageView = m_CrosshairTextureView.get();
+    imageInfo.sampler = m_TextureManager->getTextureSampler();
+
+    VkWriteDescriptorSet descriptorWrite{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    descriptorWrite.dstSet = m_CrosshairDescriptorSet;
+    descriptorWrite.dstBinding = 0;
+    descriptorWrite.dstArrayElement = 0;
+    descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descriptorWrite.descriptorCount = 1;
+    descriptorWrite.pImageInfo = &imageInfo;
+    vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
+
+    std::vector<uint32_t> indices = {0, 1, 2, 2, 3, 0};
+    m_CrosshairIndexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
+        *m_DeviceContext, m_CommandManager->getCommandPool(),
+        indices.data(), sizeof(uint32_t) * indices.size(),
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 }
 
 void VulkanRenderer::createDebugCubeMesh()

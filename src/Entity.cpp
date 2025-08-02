@@ -46,7 +46,6 @@ void Entity::check_for_water()
 
 void Entity::update(float dt)
 {
-
     m_previousPosition = m_position;
 
     check_for_water();
@@ -57,21 +56,31 @@ void Entity::update(float dt)
     }
     else
     {
-        m_velocity.y += GRAVITY * dt;
 
+        m_velocity.y += GRAVITY * dt;
         if (m_is_in_water)
         {
             m_velocity.y += BUOYANCY_FORCE * dt;
+
             m_velocity -= m_velocity * WATER_DRAG_FACTOR * dt;
         }
 
         m_position += m_velocity * dt;
+
         resolve_collisions();
 
         if (m_is_on_ground && !m_is_in_water)
         {
-            m_velocity.x = 0;
-            m_velocity.z = 0;
+            float ground_friction = 10.0f;
+            m_velocity.x *= std::max(0.0f, 1.0f - dt * ground_friction);
+            m_velocity.z *= std::max(0.0f, 1.0f - dt * ground_friction);
+        }
+
+        else if (!m_is_in_water)
+        {
+            float air_drag = 1.0f;
+            m_velocity.x *= std::max(0.0f, 1.0f - dt * air_drag);
+            m_velocity.z *= std::max(0.0f, 1.0f - dt * air_drag);
         }
     }
 }

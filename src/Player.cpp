@@ -27,6 +27,7 @@ void Player::update(float dt)
 
 void Player::process_keyboard(GLFWwindow *window, float dt)
 {
+
     if (m_is_flying)
     {
         glm::vec3 forward{cos(m_yaw) * cos(m_pitch), sin(m_pitch), sin(m_yaw) * cos(m_pitch)};
@@ -53,6 +54,7 @@ void Player::process_keyboard(GLFWwindow *window, float dt)
         }
         m_velocity = move_direction * FLY_SPEED;
     }
+
     else if (m_is_in_water)
     {
         glm::vec3 forward{cos(m_yaw), 0, sin(m_yaw)};
@@ -72,7 +74,6 @@ void Player::process_keyboard(GLFWwindow *window, float dt)
         {
             move_direction = glm::normalize(move_direction);
         }
-
         m_velocity += move_direction * SWIM_ACCELERATION * dt;
 
         if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
@@ -80,8 +81,10 @@ void Player::process_keyboard(GLFWwindow *window, float dt)
             m_velocity.y += SWIM_UP_ACCELERATION * dt;
         }
     }
+
     else
     {
+
         glm::vec3 forward{cos(m_yaw), 0, sin(m_yaw)};
         glm::vec3 right = glm::normalize(glm::cross(forward, {0.f, 1.f, 0.f}));
         glm::vec3 move_direction{0.f};
@@ -95,16 +98,28 @@ void Player::process_keyboard(GLFWwindow *window, float dt)
         if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
             move_direction += right;
 
-        m_is_sprinting = (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS);
-        float current_speed = m_is_sprinting ? SPRINT_SPEED : WALK_SPEED;
-
         if (glm::length(move_direction) > 0.0f)
         {
             move_direction = glm::normalize(move_direction);
         }
 
-        m_velocity.x = move_direction.x * current_speed;
-        m_velocity.z = move_direction.z * current_speed;
+        const float GROUND_ACCELERATION = 35.0f;
+        const float AIR_ACCELERATION = 15.0f;
+        float acceleration = m_is_on_ground ? GROUND_ACCELERATION : AIR_ACCELERATION;
+
+        m_velocity.x += move_direction.x * acceleration * dt;
+        m_velocity.z += move_direction.z * acceleration * dt;
+
+        m_is_sprinting = (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS);
+        float current_speed_limit = m_is_sprinting ? SPRINT_SPEED : WALK_SPEED;
+
+        glm::vec3 horizontal_velocity = {m_velocity.x, 0.0f, m_velocity.z};
+        if (glm::length(horizontal_velocity) > current_speed_limit)
+        {
+            glm::vec3 limited_velocity = glm::normalize(horizontal_velocity) * current_speed_limit;
+            m_velocity.x = limited_velocity.x;
+            m_velocity.z = limited_velocity.z;
+        }
 
         if (m_is_on_ground && glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
         {
