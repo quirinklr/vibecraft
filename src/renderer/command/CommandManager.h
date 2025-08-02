@@ -3,6 +3,7 @@
 #include <glm/glm.hpp>
 #include <memory>
 #include <map>
+#include <optional>
 #include "../../math/Ivec3Less.h"
 
 #include "../../VulkanWrappers.h"
@@ -40,8 +41,10 @@ public:
         VkBuffer skySphereVB, VkBuffer skySphereIB, uint32_t skySphereIndexCount,
         VkBuffer crosshairVertexBuffer,
         VkBuffer debugCubeVB, VkBuffer debugCubeIB, uint32_t debugCubeIndexCount,
-        const Settings &settings,
-        const std::vector<AABB> &debugAABBs);
+        const Settings &settings, const std::vector<AABB> &debugAABBs,
+        VkBuffer outlineVB,
+        uint32_t outlineVertexCount,
+        const std::optional<glm::ivec3> &hoveredBlockPos);
 
     VkCommandBuffer getCommandBuffer(uint32_t index) const { return m_CommandBuffers[index]; }
     VkCommandPool getCommandPool() const { return m_CommandPool.get(); }

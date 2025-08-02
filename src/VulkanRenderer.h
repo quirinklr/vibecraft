@@ -26,6 +26,7 @@
 #include <memory>
 #include <mutex>
 #include <glm/glm.hpp>
+#include <optional>
 
 class Player;
 class TerrainGenerator;
@@ -46,7 +47,9 @@ public:
                    const glm::ivec3 &playerChunkPos,
                    uint32_t gameTicks,
                    const std::vector<AABB> &debugAABBs,
-                   bool showDebugOverlay);
+                   bool showDebugOverlay,
+                   const std::vector<glm::vec3> &outlineVertices,
+                   const std::optional<glm::ivec3> &hoveredBlockPos);
 
     void scheduleChunkGpuCleanup(std::shared_ptr<Chunk> chunk);
 
@@ -79,6 +82,7 @@ private:
     void createDescriptorSets();
     void updateDescriptorSets();
 
+    void createOutlineVertexBuffer();
     void createCrosshairVertexBuffer();
     void createModelMatrixSsbos();
     void createDebugCubeMesh();
@@ -160,6 +164,10 @@ private:
     VulkanHandle<VkImageView, ImageViewDeleter> m_SunTextureView;
     VmaImage m_MoonTexture;
     VulkanHandle<VkImageView, ImageViewDeleter> m_MoonTextureView;
+
+    VmaBuffer m_outlineVertexBuffer;
+    void *m_outlineVertexBufferMapped = nullptr;
+    const uint32_t MAX_OUTLINE_VERTICES = 48;
 
     VmaBuffer m_DebugCubeVertexBuffer;
     VmaBuffer m_DebugCubeIndexBuffer;

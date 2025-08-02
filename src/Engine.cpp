@@ -110,6 +110,22 @@ void Engine::run()
             m_Renderer.getDebugOverlay()->update(*m_player_ptr, m_Settings, fps, m_TerrainGen.getSeed());
         }
 
+        glm::vec3 hovered_block_pos_float;
+        if (m_player_ptr->raycast(hovered_block_pos_float))
+        {
+            m_hoveredBlockPos = glm::ivec3(floor(hovered_block_pos_float.x), floor(hovered_block_pos_float.y), floor(hovered_block_pos_float.z));
+        }
+        else
+        {
+            m_hoveredBlockPos.reset();
+        }
+
+        std::vector<glm::vec3> outlineVertices;
+        if (m_hoveredBlockPos)
+        {
+            generateBlockOutline(*m_hoveredBlockPos, outlineVertices);
+        }
+
         std::vector<AABB> debug_aabbs;
         if (m_Settings.showCollisionBoxes)
         {
@@ -140,7 +156,7 @@ void Engine::run()
             static_cast<int>(std::floor(player_pos_logic.z / Chunk::DEPTH))};
 
         if (!m_Renderer.drawFrame(m_player_ptr->get_camera(), player_pos_logic, m_Chunks, playerChunkPos,
-                                  m_gameTicks, debug_aabbs, m_showDebugOverlay))
+                                  m_gameTicks, debug_aabbs, m_showDebugOverlay, outlineVertices, m_hoveredBlockPos))
         {
             continue;
         }
@@ -299,6 +315,46 @@ void Engine::set_block(int x, int y, int z, BlockId id)
         mark_neighbor_dirty(x, z - 1);
     if (local_z == Chunk::DEPTH - 1)
         mark_neighbor_dirty(x, z + 1);
+}
+
+void Engine::generateBlockOutline(const glm::ivec3 &pos, std::vector<glm::vec3> &vertices)
+{
+    vertices.clear();
+
+    auto add_edge = [&](const glm::vec3 &v1, const glm::vec3 &v2)
+    {
+        vertices.push_back(v1);
+        vertices.push_back(v2);
+    };
+
+    auto check_face = [&](const glm::ivec3 &neighbor_pos, const std::vector<std::pair<glm::vec3, glm::vec3>> &edges)
+    {
+        Block block = get_block(neighbor_pos.x, neighbor_pos.y, neighbor_pos.z);
+        if (!BlockDatabase::get().get_block_data(block.id).is_solid)
+        {
+            for (const auto &edge : edges)
+            {
+                add_edge(edge.first, edge.second);
+            }
+        }
+    };
+
+    const glm::vec3 v000(0, 0, 0), v100(1, 0, 0), v110(1, 1, 0), v010(0, 1, 0);
+    const glm::vec3 v001(0, 0, 1), v101(1, 0, 1), v111(1, 1, 1), v011(0, 1, 1);
+
+    const std::vector<std::pair<glm::vec3, glm::vec3>> posX_edges = {{v100, v110}, {v110, v111}, {v111, v101}, {v101, v100}};
+    const std::vector<std::pair<glm::vec3, glm::vec3>> negX_edges = {{v001, v011}, {v011, v010}, {v010, v000}, {v000, v001}};
+    const std::vector<std::pair<glm::vec3, glm::vec3>> posY_edges = {{v010, v110}, {v110, v111}, {v111, v011}, {v011, v010}};
+    const std::vector<std::pair<glm::vec3, glm::vec3>> negY_edges = {{v001, v101}, {v101, v100}, {v100, v000}, {v000, v001}};
+    const std::vector<std::pair<glm::vec3, glm::vec3>> posZ_edges = {{v101, v111}, {v111, v011}, {v011, v001}, {v001, v101}};
+    const std::vector<std::pair<glm::vec3, glm::vec3>> negZ_edges = {{v000, v010}, {v010, v110}, {v110, v100}, {v100, v000}};
+
+    check_face({pos.x + 1, pos.y, pos.z}, posX_edges);
+    check_face({pos.x - 1, pos.y, pos.z}, negX_edges);
+    check_face({pos.x, pos.y + 1, pos.z}, posY_edges);
+    check_face({pos.x, pos.y - 1, pos.z}, negY_edges);
+    check_face({pos.x, pos.y, pos.z + 1}, posZ_edges);
+    check_face({pos.x, pos.y, pos.z - 1}, negZ_edges);
 }
 
 void Engine::updateWindowTitle(float now, float &fpsTime, int &frames, const glm::vec3 &player_pos)

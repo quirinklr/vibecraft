@@ -15,6 +15,7 @@
 #include "Entity.h"
 #include "Player.h"
 #include "DebugController.h"
+#include <optional>
 
 struct ChunkLodRequestLess
 {
@@ -48,6 +49,8 @@ public:
     Settings &getSettings() { return m_Settings; }
     void advanceTime(int32_t ticks);
 
+    void generateBlockOutline(const glm::ivec3 &pos, std::vector<glm::vec3> &vertices);
+
 private:
     void processInput(float dt, bool &mouse_enabled, double &lx, double &ly);
     void updateWindowTitle(float now, float &fpsTime, int &frames, const glm::vec3 &player_pos);
@@ -77,6 +80,8 @@ private:
     Player *m_player_ptr = nullptr;
 
     TerrainGenerator m_TerrainGen;
+    std::optional<glm::ivec3> m_hoveredBlockPos;
+
     double m_FrameEMA = 0.004;
 
     mutable std::mutex m_MeshJobsMutex;

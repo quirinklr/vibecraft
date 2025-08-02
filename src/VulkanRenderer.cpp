@@ -64,6 +64,7 @@ VulkanRenderer::VulkanRenderer(Window &window,
     createDescriptorPool();
     createDescriptorSets();
     createCrosshairVertexBuffer();
+    createOutlineVertexBuffer();
     createDebugCubeMesh();
 
     if (m_DeviceContext->isRayTracingSupported())
@@ -151,7 +152,9 @@ bool VulkanRenderer::drawFrame(Camera &camera,
                                const glm::ivec3 &playerChunkPos,
                                uint32_t gameTicks,
                                const std::vector<AABB> &debugAABBs,
-                               bool showDebugOverlay)
+                               bool showDebugOverlay,
+                               const std::vector<glm::vec3> &outlineVertices,
+                               const std::optional<glm::ivec3> &hoveredBlockPos)
 {
     const uint32_t slot = m_CurrentFrame;
 
@@ -202,6 +205,12 @@ bool VulkanRenderer::drawFrame(Camera &camera,
 
     updateLightUbo(slot, gameTicks);
     glm::vec3 skyColor = updateUniformBuffer(slot, camera, playerPos);
+
+    if (!outlineVertices.empty())
+    {
+        memcpy(m_outlineVertexBufferMapped, outlineVertices.data(), outlineVertices.size() * sizeof(glm::vec3));
+    }
+
     updateDescriptorSets();
 
     std::vector<std::pair<Chunk *, int>> opaqueChunks;
@@ -357,7 +366,8 @@ bool VulkanRenderer::drawFrame(Camera &camera,
         m_SkySphereVertexBuffer.get(), m_SkySphereIndexBuffer.get(), m_SkySphereIndexCount,
         m_CrosshairVertexBuffer.get(),
         m_DebugCubeVertexBuffer.get(), m_DebugCubeIndexBuffer.get(), m_DebugCubeIndexCount,
-        m_Settings, debugAABBs);
+        m_Settings, debugAABBs,
+        m_outlineVertexBuffer.get(), static_cast<uint32_t>(outlineVertices.size()), hoveredBlockPos);
 
     if (showDebugOverlay && m_debugOverlay)
     {
@@ -1288,6 +1298,23 @@ void VulkanRenderer::updateDescriptorSets()
     writes[6].pBufferInfo = &modelMatrixInfo;
 
     vkUpdateDescriptorSets(m_DeviceContext->getDevice(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+}
+
+void VulkanRenderer::createOutlineVertexBuffer()
+{
+    VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    bufferInfo.size = sizeof(glm::vec3) * MAX_OUTLINE_VERTICES;
+    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+    allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+    m_outlineVertexBuffer = VmaBuffer(m_DeviceContext->getAllocator(), bufferInfo, allocInfo);
+
+    VmaAllocationInfo allocationInfo;
+    vmaGetAllocationInfo(m_DeviceContext->getAllocator(), m_outlineVertexBuffer.getAllocation(), &allocationInfo);
+    m_outlineVertexBufferMapped = allocationInfo.pMappedData;
 }
 
 void VulkanRenderer::createCrosshairVertexBuffer()

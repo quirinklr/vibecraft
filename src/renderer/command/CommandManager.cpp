@@ -27,8 +27,10 @@ void CommandManager::recordCommandBuffer(
     VkBuffer skySphereVB, VkBuffer skySphereIB, uint32_t skySphereIndexCount,
     VkBuffer crosshairVertexBuffer,
     VkBuffer debugCubeVB, VkBuffer debugCubeIB, uint32_t debugCubeIndexCount,
-    const Settings &settings,
-    const std::vector<AABB> &debugAABBs)
+    const Settings &settings, const std::vector<AABB> &debugAABBs,
+    VkBuffer outlineVB,
+    uint32_t outlineVertexCount,
+    const std::optional<glm::ivec3> &hoveredBlockPos)
 {
 
     VkCommandBuffer cb = m_CommandBuffers[currentFrame];
@@ -136,6 +138,23 @@ void CommandManager::recordCommandBuffer(
                                VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
             vkCmdDrawIndexed(cb, debugCubeIndexCount, 1, 0, 0, 0);
         }
+    }
+
+    if (outlineVertexCount > 0 && hoveredBlockPos)
+    {
+        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getOutlinePipeline());
+        vkCmdSetLineWidth(cb, 2.0f);
+        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                m_PipelineCache.getOutlinePipelineLayout(),
+                                0, 1, &descriptorSets[currentFrame], 0, nullptr);
+        VkDeviceSize offsets[] = {0};
+        vkCmdBindVertexBuffers(cb, 0, 1, &outlineVB, offsets);
+
+        glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(*hoveredBlockPos));
+        vkCmdPushConstants(cb, m_PipelineCache.getOutlinePipelineLayout(),
+                           VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
+
+        vkCmdDraw(cb, outlineVertexCount, 1, 0, 0);
     }
 
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
