@@ -110,7 +110,6 @@ void Engine::run()
 
         for (auto &entity : m_entities)
         {
-
             entity->update(dt);
         }
 
@@ -144,8 +143,11 @@ void Engine::run()
             static_cast<int>(std::floor(player_pos.x / Chunk::WIDTH)), 0,
             static_cast<int>(std::floor(player_pos.z / Chunk::DEPTH))};
 
-        m_Renderer.drawFrame(m_player_ptr->get_camera(), player_pos, m_Chunks, playerChunkPos,
-                             m_gameTicks, debug_aabbs, m_showDebugOverlay);
+        if (!m_Renderer.drawFrame(m_player_ptr->get_camera(), player_pos, m_Chunks, playerChunkPos,
+                                  m_gameTicks, debug_aabbs, m_showDebugOverlay))
+        {
+            continue;
+        }
 
         updateWindowTitle(now, fps_time, frames, m_player_ptr->get_position());
     }

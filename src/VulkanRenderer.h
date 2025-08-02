@@ -38,7 +38,7 @@ public:
     VulkanRenderer(const VulkanRenderer &) = delete;
     VulkanRenderer &operator=(const VulkanRenderer &) = delete;
 
-    void drawFrame(Camera &camera,
+    bool drawFrame(Camera &camera,
                    const glm::vec3 &playerPos,
                    std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks,
                    const glm::ivec3 &playerChunkPos,

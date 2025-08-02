@@ -119,7 +119,7 @@ VulkanRenderer::~VulkanRenderer()
     }
 }
 
-void VulkanRenderer::drawFrame(Camera &camera,
+bool VulkanRenderer::drawFrame(Camera &camera,
                                const glm::vec3 &playerPos,
                                std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks,
                                const glm::ivec3 &playerChunkPos,
@@ -148,20 +148,19 @@ void VulkanRenderer::drawFrame(Camera &camera,
     {
         m_Window.resetWindowResizedFlag();
         m_SwapChainContext->recreateSwapChain();
-
         if (m_debugOverlay)
-        {
             m_debugOverlay->recreate(m_SwapChainContext->getRenderPass(), m_SwapChainContext->getSwapChainExtent());
-        }
 
         recreateRayTracingShadowImage();
-        return;
+        return false;
     }
 
-    if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR)
+    else if (res != VK_SUCCESS)
     {
         throw std::runtime_error("failed to acquire swap chain image");
     }
+
+    vkResetFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(slot));
 
     m_asBuildStagingBuffers[slot].clear();
     m_blasBuildScratchBuffers[slot].clear();
@@ -178,7 +177,8 @@ void VulkanRenderer::drawFrame(Camera &camera,
     updateDescriptorSets();
     if (showDebugOverlay && m_debugOverlay)
     {
-        m_debugOverlay->update(*m_player, m_Settings, 250.f, m_terrainGen->getSeed());
+
+        m_debugOverlay->update(*m_player, m_Settings, 0.f, m_terrainGen->getSeed());
     }
 
     std::vector<std::pair<Chunk *, int>> renderChunks;
@@ -190,7 +190,7 @@ void VulkanRenderer::drawFrame(Camera &camera,
         if (!fr.intersects(ch->getAABB()))
             continue;
 
-        float d = glm::distance(glm::vec2(pos), glm::vec2(playerChunkPos));
+        float d = glm::distance(glm::vec2(pos.x, pos.z), glm::vec2(playerChunkPos.x, playerChunkPos.z));
         int req = (!m_Settings.lodDistances.empty() && d <= m_Settings.lodDistances[0]) ? 0 : 1;
         int best = ch->getBestAvailableLOD(req);
         if (best != -1)
@@ -295,6 +295,11 @@ void VulkanRenderer::drawFrame(Camera &camera,
         m_DebugCubeVertexBuffer.get(), m_DebugCubeIndexBuffer.get(), m_DebugCubeIndexCount,
         m_Settings, debugAABBs);
 
+    if (showDebugOverlay && m_debugOverlay)
+    {
+        m_debugOverlay->draw(cmd);
+    }
+
     vkEndCommandBuffer(cmd);
 
     VkSemaphore waitSemaphores[] = {m_SyncPrimitives->getImageAvailableSemaphore(slot)};
@@ -312,7 +317,7 @@ void VulkanRenderer::drawFrame(Camera &camera,
 
     {
         std::scoped_lock lk(gGraphicsQueueMutex);
-        vkResetFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(slot));
+
         if (vkQueueSubmit(m_DeviceContext->getGraphicsQueue(), 1, &si, m_SyncPrimitives->getInFlightFence(slot)) != VK_SUCCESS)
         {
             throw std::runtime_error("vkQueueSubmit failed");
@@ -332,29 +337,17 @@ void VulkanRenderer::drawFrame(Camera &camera,
         res = vkQueuePresentKHR(m_DeviceContext->getPresentQueue(), &pi);
     }
 
-    if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || m_Window.wasWindowResized())
-    {
-        m_Window.resetWindowResizedFlag();
-        m_SwapChainContext->recreateSwapChain();
-
-        if (m_debugOverlay)
-        {
-            m_debugOverlay->recreate(m_SwapChainContext->getRenderPass(), m_SwapChainContext->getSwapChainExtent());
-        }
-        recreateRayTracingShadowImage();
-        return;
-    }
-
-    else if (res == VK_ERROR_DEVICE_LOST)
+    if (res == VK_ERROR_DEVICE_LOST)
     {
         throw std::runtime_error("Vulkan device lost during present");
     }
-    else if (res != VK_SUCCESS)
+    else if (res != VK_SUCCESS && res != VK_ERROR_OUT_OF_DATE_KHR && res != VK_SUBOPTIMAL_KHR)
     {
         throw std::runtime_error("Failed to present swap chain image");
     }
 
     m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+    return true;
 }
 
 void VulkanRenderer::recreateRayTracingShadowImage()
@@ -362,16 +355,34 @@ void VulkanRenderer::recreateRayTracingShadowImage()
     if (!m_DeviceContext->isRayTracingSupported())
         return;
 
-    if (m_rtShadowImage.get() != VK_NULL_HANDLE)
-        enqueueDestroy(std::move(m_rtShadowImage));
+    vkDeviceWaitIdle(m_DeviceContext->getDevice());
 
-    if (m_rtShadowImageView.get() != VK_NULL_HANDLE)
-        m_rtShadowImageView = {};
+    m_rtShadowImageView = {};
+    m_rtShadowImage = {};
+    m_rtDescriptorSets.clear();
+    m_rtDescriptorPool = {};
+    m_rtDescriptorSetLayout = {};
 
     createRayTracingResources();
 
+    m_rtDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+    VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    ai.descriptorPool = m_rtDescriptorPool.get();
+    ai.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, m_rtDescriptorSetLayout.get());
+    ai.pSetLayouts = layouts.data();
+
+    if (vkAllocateDescriptorSets(m_DeviceContext->getDevice(), &ai, m_rtDescriptorSets.data()) != VK_SUCCESS)
+    {
+        throw std::runtime_error("failed to re-allocate RT descriptor sets after resize");
+    }
+
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+    {
         updateRtDescriptorSet(i);
+    }
+
+    m_tlasIsDirty = true;
 }
 
 void VulkanRenderer::loadRayTracingFunctions()
