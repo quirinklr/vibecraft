@@ -30,22 +30,8 @@ Engine::Engine()
 
 Engine::~Engine()
 {
-    std::cout << "Engine: Destructor started." << std::endl;
-
-    std::cout << "Engine: Shutting down thread pool..." << std::endl;
     m_Pool.shutdown();
-    std::cout << "Engine: Thread pool shut down." << std::endl;
-
-    std::cout << "Engine: Waiting for GPU to go idle..." << std::endl;
     vkDeviceWaitIdle(m_Renderer.getDeviceContext()->getDevice());
-    std::cout << "Engine: GPU is idle." << std::endl;
-
-    for (auto &[p, c] : m_Chunks)
-        c->cleanup(m_Renderer);
-    for (auto &c : m_Garbage)
-        c->cleanup(m_Renderer);
-
-    std::cout << "Engine: Destructor finished." << std::endl;
 }
 
 Block Engine::get_block(int x, int y, int z)
@@ -256,18 +242,12 @@ void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
         if (m_Settings.rayTracingFlags & SettingsEnums::SHADOWS)
         {
             m_Settings.rayTracingFlags &= ~SettingsEnums::SHADOWS;
-            std::cout << "Ray traced shadows: OFF\n";
         }
         else
         {
             if (m_Renderer.getDeviceContext()->isRayTracingSupported())
             {
                 m_Settings.rayTracingFlags |= SettingsEnums::SHADOWS;
-                std::cout << "Ray traced shadows: ON\n";
-            }
-            else
-            {
-                std::cout << "Ray tracing not supported on this device\n";
             }
         }
     }
@@ -384,22 +364,21 @@ void Engine::unloadDistantChunks(const glm::ivec3 &playerChunkPos)
 
 void Engine::processGarbage()
 {
-    vkDeviceWaitIdle(m_Renderer.getDeviceContext()->getDevice());
-    std::lock_guard lockJobs(m_MeshJobsMutex);
+
+    if (m_Garbage.empty())
+        return;
+
     m_Garbage.erase(
         std::remove_if(m_Garbage.begin(), m_Garbage.end(),
                        [this](const std::shared_ptr<Chunk> &chunk)
                        {
-                           if (chunk.use_count() > 1)
-                               return false;
-                           Chunk::State st = chunk->getState();
-                           if (st != Chunk::State::GPU_READY && st != Chunk::State::TERRAIN_READY)
-                               return false;
-                           for (int lod = 0; lod <= 1; ++lod)
-                               if (m_MeshJobsInProgress.count({chunk->getPos(), lod}))
-                                   return false;
-                           chunk->cleanup(m_Renderer);
-                           return true;
+                           if (chunk.use_count() == 1)
+                           {
+
+                               m_Renderer.scheduleChunkGpuCleanup(chunk);
+                               return true;
+                           }
+                           return false;
                        }),
         m_Garbage.end());
 }

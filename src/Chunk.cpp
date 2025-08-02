@@ -713,66 +713,6 @@ void Chunk::buildAndStageMesh(VmaAllocator allocator, RingStagingArena &arena,
     m_State.store(State::STAGING_READY);
 }
 
-void Chunk::cleanup(VulkanRenderer &renderer)
-{
-
-    for (auto &[lod, mesh] : m_Meshes)
-    {
-        if (mesh.vertexBuffer.get() != VK_NULL_HANDLE)
-            renderer.enqueueDestroy(std::move(mesh.vertexBuffer));
-        if (mesh.indexBuffer.get() != VK_NULL_HANDLE)
-            renderer.enqueueDestroy(std::move(mesh.indexBuffer));
-
-        if (mesh.blas.handle != VK_NULL_HANDLE)
-        {
-            renderer.enqueueDestroy(std::move(mesh.blas));
-        }
-    }
-
-    for (auto &[lod, mesh] : m_TransparentMeshes)
-    {
-        if (mesh.vertexBuffer.get() != VK_NULL_HANDLE)
-            renderer.enqueueDestroy(std::move(mesh.vertexBuffer));
-        if (mesh.indexBuffer.get() != VK_NULL_HANDLE)
-            renderer.enqueueDestroy(std::move(mesh.indexBuffer));
-    }
-
-    {
-        std::scoped_lock lock(m_PendingMutex);
-        for (auto &[lod, job] : m_PendingUploads)
-        {
-            if (job.fence != VK_NULL_HANDLE)
-            {
-                vkWaitForFences(renderer.getDevice(), 1, &job.fence, VK_TRUE, 1'000'000'000);
-                vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
-            }
-            if (job.cmdBuffer != VK_NULL_HANDLE)
-            {
-                vkFreeCommandBuffers(renderer.getDevice(), renderer.getCommandManager()->getCommandPool(), 1, &job.cmdBuffer);
-            }
-        }
-        m_PendingUploads.clear();
-
-        for (auto &[lod, job] : m_PendingTransparentUploads)
-        {
-            if (job.fence != VK_NULL_HANDLE)
-            {
-                vkWaitForFences(renderer.getDevice(), 1, &job.fence, VK_TRUE, 1'000'000'000);
-                vkDestroyFence(renderer.getDevice(), job.fence, nullptr);
-            }
-            if (job.cmdBuffer != VK_NULL_HANDLE)
-            {
-                vkFreeCommandBuffers(renderer.getDevice(), renderer.getCommandManager()->getCommandPool(), 1, &job.cmdBuffer);
-            }
-        }
-        m_PendingTransparentUploads.clear();
-    }
-
-    m_Meshes.clear();
-    m_TransparentMeshes.clear();
-    m_State.store(State::INITIAL);
-}
-
 bool Chunk::hasLOD(int lodLevel) const
 {
     std::scoped_lock lock(m_MeshesMutex);

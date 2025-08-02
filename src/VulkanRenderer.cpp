@@ -166,10 +166,12 @@ bool VulkanRenderer::drawFrame(Camera &camera,
     m_blasBuildScratchBuffers[slot].clear();
     m_BufferDestroyQueue[slot].clear();
     m_ImageDestroyQueue[slot].clear();
+
     for (auto &as : m_AsDestroyQueue[slot])
     {
         as.destroy(m_DeviceContext->getDevice());
     }
+
     m_AsDestroyQueue[slot].clear();
 
     updateLightUbo(slot, gameTicks);
@@ -348,6 +350,14 @@ bool VulkanRenderer::drawFrame(Camera &camera,
 
     m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     return true;
+}
+
+void VulkanRenderer::scheduleChunkGpuCleanup(std::shared_ptr<Chunk> chunk)
+{
+    if (chunk)
+    {
+        m_ChunkCleanupQueue[m_CurrentFrame].push_back(std::move(chunk));
+    }
 }
 
 void VulkanRenderer::recreateRayTracingShadowImage()

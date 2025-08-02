@@ -79,7 +79,6 @@ public:
     ~Chunk();
 
     void generateTerrain(FastNoiseLite &noise);
-    void cleanup(VulkanRenderer &renderer);
     void markReady(VulkanRenderer &renderer);
 
     void buildAndStageMesh(VmaAllocator allocator, RingStagingArena &arena,
@@ -114,6 +113,9 @@ public:
     mutable std::mutex m_PendingMutex;
     mutable std::mutex m_MeshesMutex;
 
+    std::map<int, ChunkMesh> m_Meshes;
+    std::map<int, ChunkMesh> m_TransparentMeshes;
+
 private:
     void buildMeshGreedy(int lodLevel,
                          std::vector<Vertex> &outOpaqueVertices, std::vector<uint32_t> &outOpaqueIndices,
@@ -124,8 +126,6 @@ private:
     glm::mat4 m_ModelMatrix;
     std::vector<Block> m_Blocks;
 
-    std::map<int, ChunkMesh> m_Meshes;
-    std::map<int, ChunkMesh> m_TransparentMeshes;
     ChunkMesh m_DebugMesh;
     std::map<int, UploadJob> m_PendingUploads;
     std::map<int, UploadJob> m_PendingTransparentUploads;

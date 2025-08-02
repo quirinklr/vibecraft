@@ -46,6 +46,8 @@ public:
                    const std::vector<AABB> &debugAABBs,
                    bool showDebugOverlay);
 
+    void scheduleChunkGpuCleanup(std::shared_ptr<Chunk> chunk);
+
     void enqueueDestroy(VmaBuffer &&buffer);
     void enqueueDestroy(VmaImage &&image);
     void enqueueDestroy(VkBuffer buffer, VmaAllocation allocation);
@@ -161,5 +163,6 @@ private:
     std::vector<VmaBuffer> m_BufferDestroyQueue[MAX_FRAMES_IN_FLIGHT];
     std::vector<VmaImage> m_ImageDestroyQueue[MAX_FRAMES_IN_FLIGHT];
     std::vector<VmaBuffer> m_asBuildStagingBuffers[MAX_FRAMES_IN_FLIGHT];
+    std::vector<std::shared_ptr<Chunk>> m_ChunkCleanupQueue[MAX_FRAMES_IN_FLIGHT];
     std::vector<AccelerationStructure> m_AsDestroyQueue[MAX_FRAMES_IN_FLIGHT];
 };
