@@ -30,30 +30,43 @@ const vec3 AMBIENT_DAY = vec3(0.6, 0.6, 0.7);
 const vec3 SUNLIGHT = vec3(1.0, 1.0, 0.95);
 
 void main() {
-vec2 uv = tileOrigin + fract(localUV) * TILE_SIZE;
-vec4 textureColor = texture(texSampler, uv);
-      
-if (textureColor.a < 0.1) {
-    discard;
-}
+    vec2 uv = tileOrigin + fract(localUV) * TILE_SIZE;
+    vec4 textureColor = texture(texSampler, uv);
+          
+    if (textureColor.a < 0.1) {
+        discard;
+    }
 
-if (cameraUbo.isUnderwater == 1) {
-    
-} else {
-    float sunUpFactor = smoothstep(-0.1, 0.1, uboLight.lightDirection.y);
-    
-    
-    vec3 directLight = mix(vec3(0.4, 0.4, 0.5), SUNLIGHT, sunUpFactor); 
-    
-    
-    vec3 ambientLight = mix(AMBIENT_NIGHT, AMBIENT_DAY, sunUpFactor);
-    
-    float computedShadow = texture(shadowMap, gl_FragCoord.xy / textureSize(shadowMap, 0)).r;
-    float shadowFactor = mix(1.0, computedShadow, float((cameraUbo.flags & FLAG_SHADOWS) != 0));
+    if (cameraUbo.isUnderwater == 1) {
+        
+        vec3 fogColor = vec3(0.05, 0.18, 0.25); 
+        float fogDensity = 0.15; 
+        
+        float dist = distance(cameraUbo.cameraPos, fragWorldPos);
+        
+        
+        float fogFactor = exp(-dist * fogDensity);
+        fogFactor = clamp(fogFactor, 0.0, 1.0);
 
-    
-    outColor.rgb = textureColor.rgb * (ambientLight + directLight * shadowFactor);
-    outColor.a = textureColor.a;
-}
+        
+        vec3 finalColor = mix(fogColor, textureColor.rgb, fogFactor);
 
+        outColor = vec4(finalColor, 1.0);
+
+    } else {
+        float sunUpFactor = smoothstep(-0.1, 0.1, uboLight.lightDirection.y);
+        
+        
+        vec3 directLight = mix(vec3(0.4, 0.4, 0.5), SUNLIGHT, sunUpFactor); 
+        
+        
+        vec3 ambientLight = mix(AMBIENT_NIGHT, AMBIENT_DAY, sunUpFactor);
+        
+        float computedShadow = texture(shadowMap, gl_FragCoord.xy / textureSize(shadowMap, 0)).r;
+        float shadowFactor = mix(1.0, computedShadow, float((cameraUbo.flags & FLAG_SHADOWS) != 0));
+
+        
+        outColor.rgb = textureColor.rgb * (ambientLight + directLight * shadowFactor);
+        outColor.a = textureColor.a;
+    }
 }
