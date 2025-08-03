@@ -3,7 +3,7 @@
 #include "VulkanRenderer.h"
 #include "Settings.h"
 #include "Chunk.h"
-#include <map>
+#include <unordered_map>
 #include <memory>
 #include <glm/glm.hpp>
 #include "math/Ivec3Less.h"
@@ -89,7 +89,8 @@ private:
     std::set<std::pair<glm::ivec3, int>, ChunkLodRequestLess> m_MeshJobsInProgress;
 
     mutable std::mutex m_ChunksMutex;
-    std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> m_Chunks;
+
+    std::unordered_map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_hasher> m_Chunks;
     std::vector<std::shared_ptr<Chunk>> m_Garbage;
     ThreadPool m_Pool;
 

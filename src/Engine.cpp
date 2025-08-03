@@ -164,7 +164,7 @@ void Engine::run()
             static_cast<int>(std::floor(player_pos_logic.x / Chunk::WIDTH)), 0,
             static_cast<int>(std::floor(player_pos_logic.z / Chunk::DEPTH))};
 
-        std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> chunks_copy;
+        std::unordered_map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_hasher> chunks_copy;
         {
             std::lock_guard<std::mutex> lock(m_ChunksMutex);
             chunks_copy = m_Chunks;
@@ -175,7 +175,6 @@ void Engine::run()
         {
             continue;
         }
-
         updateWindowTitle(now, fps_time, frames, m_player_ptr->get_position());
     }
 }

@@ -4,6 +4,7 @@
 #include "Settings.h"
 #include <glm/gtc/constants.hpp>
 #include <algorithm>
+#include <cfloat>
 
 Player::Player(Engine *engine, glm::vec3 position, const Settings &settings)
     : Entity(engine, position), m_settings(settings)
@@ -131,26 +132,69 @@ void Player::process_keyboard(GLFWwindow *window, float dt)
 bool Player::raycast(glm::vec3 &out_block_pos) const
 {
     const float reach = 5.0f;
-    const float step = 0.05f;
 
     glm::vec3 position = m_position + glm::vec3(0.f, m_hitbox.max.y * 0.9f, 0.f);
-    glm::vec3 direction{
+    glm::vec3 direction = {
         cos(m_yaw) * cos(m_pitch),
         sin(m_pitch),
         sin(m_yaw) * cos(m_pitch)};
 
-    for (float t = 0.0f; t < reach; t += step)
-    {
-        glm::vec3 current_pos = position + direction * t;
-        int block_x = static_cast<int>(floor(current_pos.x));
-        int block_y = static_cast<int>(floor(current_pos.y));
-        int block_z = static_cast<int>(floor(current_pos.z));
+    int blockX = static_cast<int>(floor(position.x));
+    int blockY = static_cast<int>(floor(position.y));
+    int blockZ = static_cast<int>(floor(position.z));
 
-        Block block = m_engine->get_block(block_x, block_y, block_z);
+    const int stepX = (direction.x > 0) ? 1 : -1;
+    const int stepY = (direction.y > 0) ? 1 : -1;
+    const int stepZ = (direction.z > 0) ? 1 : -1;
+
+    const float tDeltaX = (direction.x == 0) ? FLT_MAX : abs(1.0f / direction.x);
+    const float tDeltaY = (direction.y == 0) ? FLT_MAX : abs(1.0f / direction.y);
+    const float tDeltaZ = (direction.z == 0) ? FLT_MAX : abs(1.0f / direction.z);
+
+    float tMaxX = (stepX > 0) ? (floor(position.x) + 1 - position.x) * tDeltaX : (position.x - floor(position.x)) * tDeltaX;
+    float tMaxY = (stepY > 0) ? (floor(position.y) + 1 - position.y) * tDeltaY : (position.y - floor(position.y)) * tDeltaY;
+    float tMaxZ = (stepZ > 0) ? (floor(position.z) + 1 - position.z) * tDeltaZ : (position.z - floor(position.z)) * tDeltaZ;
+
+    float t = 0.0f;
+
+    while (t <= reach)
+    {
+        Block block = m_engine->get_block(blockX, blockY, blockZ);
         if (BlockDatabase::get().get_block_data(block.id).is_solid)
         {
-            out_block_pos = {block_x, block_y, block_z};
+            out_block_pos = {blockX, blockY, blockZ};
             return true;
+        }
+
+        if (tMaxX < tMaxY)
+        {
+            if (tMaxX < tMaxZ)
+            {
+                t = tMaxX;
+                tMaxX += tDeltaX;
+                blockX += stepX;
+            }
+            else
+            {
+                t = tMaxZ;
+                tMaxZ += tDeltaZ;
+                blockZ += stepZ;
+            }
+        }
+        else
+        {
+            if (tMaxY < tMaxZ)
+            {
+                t = tMaxY;
+                tMaxY += tDeltaY;
+                blockY += stepY;
+            }
+            else
+            {
+                t = tMaxZ;
+                tMaxZ += tDeltaZ;
+                blockZ += stepZ;
+            }
         }
     }
 

@@ -11,6 +11,7 @@
 #include <stb_image.h>
 #include <numeric>
 #include "renderer/RayTracingPushConstants.h"
+#include <unordered_map>
 
 VulkanRenderer::VulkanRenderer(Window &window,
                                Settings &settings,
@@ -129,7 +130,6 @@ VulkanRenderer::~VulkanRenderer()
     }
 }
 
-
 void VulkanRenderer::recreateCrosshairVertexBuffer()
 {
     m_CrosshairVertexBuffer = {};
@@ -187,13 +187,15 @@ void VulkanRenderer::createModelMatrixSsbos()
 
 bool VulkanRenderer::drawFrame(Camera &camera,
                                const glm::vec3 &playerPos,
-                               std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks,
+
+                               std::unordered_map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_hasher> &chunks,
                                const glm::ivec3 &playerChunkPos,
                                uint32_t gameTicks,
                                const std::vector<AABB> &debugAABBs,
                                bool showDebugOverlay,
                                const std::vector<glm::vec3> &outlineVertices,
                                const std::optional<glm::ivec3> &hoveredBlockPos)
+
 {
     const uint32_t slot = m_CurrentFrame;
 

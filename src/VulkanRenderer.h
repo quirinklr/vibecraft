@@ -43,7 +43,7 @@ public:
 
     bool drawFrame(Camera &camera,
                    const glm::vec3 &playerPos,
-                   std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> &chunks,
+                   std::unordered_map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_hasher> &chunks,
                    const glm::ivec3 &playerChunkPos,
                    uint32_t gameTicks,
                    const std::vector<AABB> &debugAABBs,
