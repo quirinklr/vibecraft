@@ -44,12 +44,21 @@ Block Engine::get_block(int x, int y, int z)
     int chunk_x = static_cast<int>(floor(static_cast<float>(x) / Chunk::WIDTH));
     int chunk_z = static_cast<int>(floor(static_cast<float>(z) / Chunk::DEPTH));
 
-    auto it = m_Chunks.find({chunk_x, 0, chunk_z});
-    if (it != m_Chunks.end() && it->second->getState() >= Chunk::State::TERRAIN_READY)
+    std::shared_ptr<Chunk> chunk;
+    {
+        std::lock_guard<std::mutex> lock(m_ChunksMutex);
+        auto it = m_Chunks.find({chunk_x, 0, chunk_z});
+        if (it != m_Chunks.end())
+        {
+            chunk = it->second;
+        }
+    }
+
+    if (chunk && chunk->getState() >= Chunk::State::TERRAIN_READY)
     {
         int local_x = x - chunk_x * Chunk::WIDTH;
         int local_z = z - chunk_z * Chunk::DEPTH;
-        return it->second->getBlock(local_x, y, local_z);
+        return chunk->getBlock(local_x, y, local_z);
     }
 
     return {BlockId::AIR};
@@ -155,7 +164,13 @@ void Engine::run()
             static_cast<int>(std::floor(player_pos_logic.x / Chunk::WIDTH)), 0,
             static_cast<int>(std::floor(player_pos_logic.z / Chunk::DEPTH))};
 
-        if (!m_Renderer.drawFrame(m_player_ptr->get_camera(), player_pos_logic, m_Chunks, playerChunkPos,
+        std::map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_less> chunks_copy;
+        {
+            std::lock_guard<std::mutex> lock(m_ChunksMutex);
+            chunks_copy = m_Chunks;
+        }
+
+        if (!m_Renderer.drawFrame(m_player_ptr->get_camera(), player_pos_logic, chunks_copy, playerChunkPos,
                                   m_gameTicks, debug_aabbs, m_showDebugOverlay, outlineVertices, m_hoveredBlockPos))
         {
             continue;
@@ -279,6 +294,7 @@ void Engine::set_block(int x, int y, int z, BlockId id)
     {
         int chunk_x = static_cast<int>(floor(static_cast<float>(block_x) / Chunk::WIDTH));
         int chunk_z = static_cast<int>(floor(static_cast<float>(block_z) / Chunk::DEPTH));
+        std::lock_guard<std::mutex> lock(m_ChunksMutex);
         auto it = m_Chunks.find({chunk_x, 0, chunk_z});
         if (it != m_Chunks.end())
         {
@@ -299,6 +315,7 @@ void Engine::set_block(int x, int y, int z, BlockId id)
     {
         int chunk_x = static_cast<int>(floor(static_cast<float>(nx) / Chunk::WIDTH));
         int chunk_z = static_cast<int>(floor(static_cast<float>(nz) / Chunk::DEPTH));
+        std::lock_guard<std::mutex> lock(m_ChunksMutex);
         auto it = m_Chunks.find({chunk_x, 0, chunk_z});
 
         if (it != m_Chunks.end())
@@ -373,17 +390,26 @@ void Engine::updateWindowTitle(float now, float &fpsTime, int &frames, const glm
 
 void Engine::createChunkContainer(const glm::ivec3 &pos)
 {
-    if (m_Chunks.count(pos))
-        return;
+    Chunk *raw = nullptr;
+    bool should_create = false;
+    {
+        std::lock_guard<std::mutex> lock(m_ChunksMutex);
+        if (m_Chunks.find(pos) == m_Chunks.end())
+        {
+            auto ch = std::make_shared<Chunk>(pos);
+            raw = ch.get();
+            m_Chunks[pos] = std::move(ch);
+            should_create = true;
+        }
+    }
 
-    auto ch = std::make_shared<Chunk>(pos);
-    Chunk *raw = ch.get();
-    m_Chunks[pos] = std::move(ch);
-
-    m_Pool.submit([this, raw](std::stop_token st)
-                  {
-        if (st.stop_requested()) return;
-        m_TerrainGen.populateChunk(*raw); });
+    if (should_create && raw)
+    {
+        m_Pool.submit([this, raw](std::stop_token st)
+                      {
+            if (st.stop_requested()) return;
+            m_TerrainGen.populateChunk(*raw); });
+    }
 }
 
 void Engine::updateChunks(const glm::vec3 &cam_pos)
@@ -403,18 +429,21 @@ void Engine::updateChunks(const glm::vec3 &cam_pos)
 void Engine::unloadDistantChunks(const glm::ivec3 &playerChunkPos)
 {
     std::vector<glm::ivec3> chunksToUnload;
-    for (auto &[pos, chunk] : m_Chunks)
     {
-        if (std::max(std::abs(pos.x - playerChunkPos.x), std::abs(pos.z - playerChunkPos.z)) > m_Settings.renderDistance)
+        std::lock_guard<std::mutex> lock(m_ChunksMutex);
+        for (auto &[pos, chunk] : m_Chunks)
         {
-            chunksToUnload.push_back(pos);
+            if (std::max(std::abs(pos.x - playerChunkPos.x), std::abs(pos.z - playerChunkPos.z)) > m_Settings.renderDistance)
+            {
+                chunksToUnload.push_back(pos);
+            }
         }
-    }
 
-    for (auto &pos : chunksToUnload)
-    {
-        m_Garbage.push_back(std::move(m_Chunks.at(pos)));
-        m_Chunks.erase(pos);
+        for (auto &pos : chunksToUnload)
+        {
+            m_Garbage.push_back(std::move(m_Chunks.at(pos)));
+            m_Chunks.erase(pos);
+        }
     }
 }
 
@@ -448,7 +477,12 @@ void Engine::loadVisibleChunks(const glm::ivec3 &playerChunkPos)
         for (int x = -m_Settings.renderDistance; x <= m_Settings.renderDistance; ++x)
         {
             glm::ivec3 chunkPos = playerChunkPos + glm::ivec3(x, 0, z);
-            if (!m_Chunks.count(chunkPos))
+            bool exists;
+            {
+                std::lock_guard<std::mutex> lock(m_ChunksMutex);
+                exists = m_Chunks.count(chunkPos) > 0;
+            }
+            if (!exists)
             {
                 chunk_positions_to_load.push_back(chunkPos);
             }
@@ -485,11 +519,17 @@ void Engine::createMeshJobs(const glm::ivec3 &playerChunkPos)
         for (int x = -m_Settings.renderDistance; x <= m_Settings.renderDistance; ++x)
         {
             glm::ivec3 pos = playerChunkPos + glm::ivec3(x, 0, z);
-            auto it = m_Chunks.find(pos);
-            if (it == m_Chunks.end())
-                continue;
 
-            Chunk *ch = it->second.get();
+            std::shared_ptr<Chunk> ch_ptr;
+            {
+                std::lock_guard<std::mutex> lock(m_ChunksMutex);
+                auto it = m_Chunks.find(pos);
+                if (it == m_Chunks.end())
+                    continue;
+                ch_ptr = it->second;
+            }
+
+            Chunk *ch = ch_ptr.get();
             if (ch->getState() == Chunk::State::INITIAL)
                 continue;
 
@@ -523,10 +563,18 @@ void Engine::createMeshJobs(const glm::ivec3 &playerChunkPos)
         {
             m_MeshJobsToCreate.insert(job);
 
-            auto it = m_Chunks.find(job.first);
-            if (it != m_Chunks.end())
+            std::shared_ptr<Chunk> chunk_to_update;
             {
-                it->second->m_is_dirty.store(false, std::memory_order_release);
+                std::lock_guard<std::mutex> chunk_lock(m_ChunksMutex);
+                auto it = m_Chunks.find(job.first);
+                if (it != m_Chunks.end())
+                {
+                    chunk_to_update = it->second;
+                }
+            }
+            if (chunk_to_update)
+            {
+                chunk_to_update->m_is_dirty.store(false, std::memory_order_release);
             }
         }
     }
@@ -577,23 +625,31 @@ void Engine::submitMeshJobs()
         m_MeshJobsToCreate.erase(job);
         m_MeshJobsInProgress.insert(job);
 
-        auto it = m_Chunks.find(job.first);
-        if (it == m_Chunks.end())
+        ChunkMeshInput in;
+        std::shared_ptr<Chunk> selfChunk;
         {
-            m_MeshJobsInProgress.erase(job);
-            continue;
+            std::lock_guard<std::mutex> chunk_lock(m_ChunksMutex);
+            auto it = m_Chunks.find(job.first);
+            if (it == m_Chunks.end())
+            {
+                m_MeshJobsInProgress.erase(job);
+                continue;
+            }
+            selfChunk = it->second;
         }
 
-        ChunkMeshInput in;
-        in.selfChunk = it->second;
-        glm::ivec3 p = it->second->getPos();
+        in.selfChunk = selfChunk;
+        glm::ivec3 p = selfChunk->getPos();
 
         glm::ivec3 off[8] = {{p.x - 1, 0, p.z}, {p.x + 1, 0, p.z}, {p.x, 0, p.z - 1}, {p.x, 0, p.z + 1}, {p.x - 1, 0, p.z - 1}, {p.x + 1, 0, p.z - 1}, {p.x - 1, 0, p.z + 1}, {p.x + 1, 0, p.z + 1}};
-        for (int j = 0; j < 8; ++j)
         {
-            auto n = m_Chunks.find(off[j]);
-            if (n != m_Chunks.end() && n->second->getState() >= Chunk::State::TERRAIN_READY)
-                in.neighborChunks[j] = n->second;
+            std::lock_guard<std::mutex> chunk_lock(m_ChunksMutex);
+            for (int j = 0; j < 8; ++j)
+            {
+                auto n = m_Chunks.find(off[j]);
+                if (n != m_Chunks.end() && n->second->getState() >= Chunk::State::TERRAIN_READY)
+                    in.neighborChunks[j] = n->second;
+            }
         }
 
         m_Pool.submit(
@@ -615,7 +671,18 @@ void Engine::submitMeshJobs()
 void Engine::uploadReadyMeshes()
 {
     int uploaded = 0;
-    for (auto &[pos, ch] : m_Chunks)
+
+    std::vector<std::shared_ptr<Chunk>> chunks_to_process;
+    {
+        std::lock_guard<std::mutex> lock(m_ChunksMutex);
+        chunks_to_process.reserve(m_Chunks.size());
+        for (auto const &[pos, chunk] : m_Chunks)
+        {
+            chunks_to_process.push_back(chunk);
+        }
+    }
+
+    for (auto &ch : chunks_to_process)
     {
         if (uploaded >= m_Settings.chunksToUploadPerFrame)
             break;
