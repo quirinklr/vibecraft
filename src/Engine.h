@@ -47,6 +47,8 @@ public:
     void set_block(int x, int y, int z, BlockId id);
     void spawn_item(glm::vec3 position, BlockId blockId);
 
+    bool raycast_camera_occlusion(const glm::vec3 &start, glm::vec3 &end);
+
     Window &get_window() { return m_Window; }
     Settings &getSettings() { return m_Settings; }
     void advanceTime(int32_t ticks);
@@ -73,6 +75,7 @@ private:
 
     bool m_showDebugOverlay = false;
     bool m_key_Z_last_state = false;
+    bool m_key_X_last_state = false;
     uint32_t m_gameTicks = 15000;
     float m_ticksPerSecond = 20.0f;
     float m_timeAccumulator = 0.0f;

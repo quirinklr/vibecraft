@@ -7,6 +7,13 @@
 
 struct Settings;
 
+enum class CameraMode
+{
+    FIRST_PERSON,
+    THIRD_PERSON,
+    FOURTH_PERSON
+};
+
 class Player : public Entity
 {
 public:
@@ -19,13 +26,14 @@ public:
     void get_orientation(float &yaw, float &pitch) const;
     void process_keyboard(GLFWwindow *window, float dt);
     void toggle_flight();
+    void cycle_camera_mode();
 
     Camera &get_camera() { return m_camera; }
 
     void update_camera_interpolated(Engine *engine, float alpha);
 
 private:
-    void update_camera(Engine *engine);
+    CameraMode m_cameraMode = CameraMode::FIRST_PERSON;
 
     Camera m_camera;
     float m_yaw = -glm::half_pi<float>();
@@ -33,6 +41,7 @@ private:
     bool m_is_sprinting = false;
 
     const Settings &m_settings;
+    const float THIRD_PERSON_DISTANCE = 4.0f;
 
     const float MOUSE_SENSITIVITY = 0.002f;
     const float WALK_SPEED = 5.0f;

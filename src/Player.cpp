@@ -20,6 +20,11 @@ void Player::toggle_flight()
     }
 }
 
+void Player::cycle_camera_mode()
+{
+    m_cameraMode = static_cast<CameraMode>((static_cast<int>(m_cameraMode) + 1) % 3);
+}
+
 void Player::update(float dt)
 {
 
@@ -209,15 +214,44 @@ void Player::get_orientation(float &yaw, float &pitch) const
 
 void Player::update_camera_interpolated(Engine *engine, float alpha)
 {
-
     glm::vec3 interpolated_pos = glm::mix(m_previousPosition, m_position, alpha);
+    glm::vec3 eye_pos = interpolated_pos + glm::vec3(0.f, m_hitbox.max.y * 0.9f, 0.f);
 
-    glm::vec3 eye_position = interpolated_pos + glm::vec3(0.f, m_hitbox.max.y * 0.9f, 0.f);
     glm::vec3 look_direction{
         cos(m_yaw) * cos(m_pitch),
         sin(m_pitch),
         sin(m_yaw) * cos(m_pitch)};
-    m_camera.setViewDirection(eye_position, look_direction);
+
+    glm::vec3 final_cam_pos;
+    glm::vec3 final_look_dir;
+
+    switch (m_cameraMode)
+    {
+    case CameraMode::FIRST_PERSON:
+        final_cam_pos = eye_pos;
+        final_look_dir = look_direction;
+        break;
+
+    case CameraMode::THIRD_PERSON:
+    {
+        glm::vec3 ideal_cam_pos = eye_pos - look_direction * THIRD_PERSON_DISTANCE;
+        final_cam_pos = ideal_cam_pos;
+        engine->raycast_camera_occlusion(eye_pos, final_cam_pos);
+        final_look_dir = glm::normalize(eye_pos - final_cam_pos);
+        break;
+    }
+
+    case CameraMode::FOURTH_PERSON:
+    {
+        glm::vec3 ideal_cam_pos = eye_pos + look_direction * THIRD_PERSON_DISTANCE;
+        final_cam_pos = ideal_cam_pos;
+        engine->raycast_camera_occlusion(eye_pos, final_cam_pos);
+        final_look_dir = glm::normalize(eye_pos - final_cam_pos);
+        break;
+    }
+    }
+
+    m_camera.setViewDirection(final_cam_pos, final_look_dir);
 
     auto ext = engine->get_window().getExtent();
     if (ext.height > 0)
@@ -236,24 +270,4 @@ void Player::process_mouse_movement(float dx, float dy)
     m_yaw += dx * m_settings.mouseSensitivityX * MOUSE_SENSITIVITY;
     m_pitch += processed_dy * m_settings.mouseSensitivityY * MOUSE_SENSITIVITY;
     m_pitch = glm::clamp(m_pitch, -glm::half_pi<float>() + 0.01f, glm::half_pi<float>() - 0.01f);
-}
-
-void Player::update_camera(Engine *engine)
-{
-    glm::vec3 eye_position = m_position + glm::vec3(0.f, m_hitbox.max.y * 0.9f, 0.f);
-    glm::vec3 look_direction{
-        cos(m_yaw) * cos(m_pitch),
-        sin(m_pitch),
-        sin(m_yaw) * cos(m_pitch)};
-    m_camera.setViewDirection(eye_position, look_direction);
-
-    auto ext = engine->get_window().getExtent();
-    if (ext.height > 0)
-    {
-        m_camera.setPerspectiveProjection(
-            glm::radians(m_settings.fov),
-            static_cast<float>(ext.width) / ext.height,
-            0.1f,
-            1000.f);
-    }
 }
