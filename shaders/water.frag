@@ -29,11 +29,6 @@ const vec3 SUNLIGHT = vec3(0.8, 0.9, 1.0);
 const vec3 FOG_COLOR = vec3(0.05, 0.18, 0.25);
 
 void main() {
-    
-    if (cameraUbo.isUnderwater == 1 && fragWorldPos.y > cameraUbo.cameraPos.y) {
-        discard;
-    }
-
     vec2 uv = tileOrigin + fract(localUV) * TILE_SIZE;
     vec4 textureColor = texture(texSampler, uv);
     

@@ -20,10 +20,9 @@
 #include "renderer/RendererConfig.h"
 #include "math/Ivec3Less.h"
 #include "renderer/DebugOverlay.h"
+#include "renderer/PlayerModel.h"
 #include "renderer/RayTracingPushConstants.h"
 #include "Item.h"
-#include "Item.h"
-
 #include <map>
 #include <memory>
 #include <mutex>
@@ -31,7 +30,6 @@
 #include <optional>
 
 class Item;
-
 class Player;
 class TerrainGenerator;
 
@@ -40,12 +38,15 @@ const int MAX_CHUNKS_PER_FRAME = 4096;
 class VulkanRenderer
 {
 public:
-    VulkanRenderer(Window &window, Settings &settings, Player *player, TerrainGenerator *terrainGen);
+    VulkanRenderer(Window &window,
+                   Settings &settings,
+                   TerrainGenerator *terrainGen);
     ~VulkanRenderer();
     VulkanRenderer(const VulkanRenderer &) = delete;
     VulkanRenderer &operator=(const VulkanRenderer &) = delete;
 
-    bool drawFrame(Camera &camera,
+    bool drawFrame(Player *player,
+                   Camera &camera,
                    const glm::vec3 &playerPos,
                    std::unordered_map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_hasher> &chunks,
                    const glm::ivec3 &playerChunkPos,
@@ -53,7 +54,7 @@ public:
                    const std::vector<AABB> &debugAABBs,
                    bool showDebugOverlay,
                    const std::vector<glm::vec3> &outlineVertices,
-                                      const std::optional<glm::ivec3> &hoveredBlockPos,
+                   const std::optional<glm::ivec3> &hoveredBlockPos,
                    const std::vector<std::unique_ptr<Item>> &items);
 
     void scheduleChunkGpuCleanup(std::shared_ptr<Chunk> chunk);
@@ -80,6 +81,7 @@ private:
     void recreateRayTracingShadowImage();
     void createShaderBindingTable();
     void updateRtDescriptorSet(uint32_t frame);
+    void updatePlayerDescriptorSet();
 
     void createUniformBuffers();
     void createLightUbo();
@@ -104,7 +106,6 @@ private:
                             std::vector<uint32_t> &outIndices);
     Window &m_Window;
     Settings &m_Settings;
-    Player *m_player;
     TerrainGenerator *m_terrainGen;
 
     std::unique_ptr<InstanceContext> m_InstanceContext;
@@ -196,4 +197,9 @@ private:
     VulkanHandle<VkDescriptorSetLayout, DescriptorSetLayoutDeleter> m_CrosshairDescriptorSetLayout;
     VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter> m_CrosshairDescriptorPool;
     VkDescriptorSet m_CrosshairDescriptorSet = VK_NULL_HANDLE;
+
+    std::unique_ptr<PlayerModel> m_playerModel;
+    VmaImage m_playerSkinTexture;
+    VulkanHandle<VkImageView, ImageViewDeleter> m_playerSkinTextureView;
+    VkDescriptorSet m_playerDescriptorSet;
 };

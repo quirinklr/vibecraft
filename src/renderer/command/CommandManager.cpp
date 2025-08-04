@@ -4,7 +4,9 @@
 #include "../../math/Ivec3Less.h"
 #include <Globals.h>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/constants.hpp>
 #include "../../BlockAtlas.h"
+#include "../PlayerModel.h"
 
 CommandManager::CommandManager(const DeviceContext &deviceContext, const SwapChainContext &swapChainContext, const PipelineCache &pipelineCache)
     : m_DeviceContext(deviceContext), m_SwapChainContext(swapChainContext), m_PipelineCache(pipelineCache)
@@ -33,9 +35,12 @@ void CommandManager::recordCommandBuffer(
     uint32_t outlineVertexCount,
     const std::optional<glm::ivec3> &hoveredBlockPos,
     const std::vector<std::unique_ptr<Item>> &items,
-    VkBuffer itemVB, VkBuffer itemIB, uint32_t itemIndexCount)
-{
+    VkBuffer itemVB, VkBuffer itemIB, uint32_t itemIndexCount,
 
+    Player *player,
+    VkDescriptorSet playerDescriptorSet,
+    PlayerModel &playerModel)
+{
     VkCommandBuffer cb = m_CommandBuffers[currentFrame];
 
     const std::array<VkClearValue, 2> clearValues = {
@@ -72,7 +77,6 @@ void CommandManager::recordCommandBuffer(
         vkCmdPushConstants(cb, m_PipelineCache.getSkyPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SkyPushConstant), &sun_pc);
         vkCmdDrawIndexed(cb, skySphereIndexCount, 1, 0, 0, 0);
     }
-
     if (isMoonVisible)
     {
         vkCmdPushConstants(cb, m_PipelineCache.getSkyPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SkyPushConstant), &moon_pc);
@@ -98,11 +102,14 @@ void CommandManager::recordCommandBuffer(
         VkDeviceSize chunk_offsets[] = {0};
         vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, chunk_offsets);
         vkCmdBindIndexBuffer(cb, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-
         vkCmdDrawIndexed(cb, mesh->indexCount, 1, 0, 0, i);
     }
-
     instanceOffset += static_cast<uint32_t>(opaqueChunks.size());
+
+    if (player->getCameraMode() != CameraMode::FIRST_PERSON)
+    {
+        recordPlayer(cb, player, playerDescriptorSet, playerModel);
+    }
 
     if (outlineVertexCount > 0 && hoveredBlockPos)
     {
@@ -113,34 +120,30 @@ void CommandManager::recordCommandBuffer(
                                 0, 1, &descriptorSets[currentFrame], 0, nullptr);
         VkDeviceSize outline_offsets[] = {0};
         vkCmdBindVertexBuffers(cb, 0, 1, &outlineVB, outline_offsets);
-
         glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(*hoveredBlockPos));
         vkCmdPushConstants(cb, m_PipelineCache.getOutlinePipelineLayout(),
                            VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
-
         vkCmdDraw(cb, outlineVertexCount, 1, 0, 0);
     }
 
     if (!settings.wireframe)
     {
         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getWaterPipeline());
-
         for (uint32_t i = 0; i < transparentChunks.size(); ++i)
         {
             const auto &[chunk, lod] = transparentChunks[i];
             const ChunkMesh *mesh = chunk->getTransparentMesh(lod);
-
             VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
             VkDeviceSize chunk_offsets[] = {0};
             vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, chunk_offsets);
             vkCmdBindIndexBuffer(cb, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-
             vkCmdDrawIndexed(cb, mesh->indexCount, 1, 0, 0, instanceOffset + i);
         }
     }
 
     if (settings.showCollisionBoxes && !debugAABBs.empty())
     {
+
         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getDebugPipeline());
         vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 m_PipelineCache.getDebugPipelineLayout(),
@@ -160,13 +163,6 @@ void CommandManager::recordCommandBuffer(
         }
     }
 
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getCrosshairPipeline());
-    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getCrosshairPipelineLayout(), 0, 1, &crosshairDS, 0, nullptr);
-    VkDeviceSize crosshair_offsets[] = {0};
-    vkCmdBindVertexBuffers(cb, 0, 1, &crosshairVB, crosshair_offsets);
-    vkCmdBindIndexBuffer(cb, crosshairIB, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(cb, 6, 1, 0, 0, 0);
-
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getItemPipeline());
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             m_PipelineCache.getItemPipelineLayout(),
@@ -181,13 +177,10 @@ void CommandManager::recordCommandBuffer(
         glm::mat4 model;
         glm::vec3 tileOrigin;
     };
-
     const int textureIndexMap[6] = {2, 3, 0, 1, 5, 4};
-
     for (const auto &item : items)
     {
         const auto &blockData = BlockDatabase::get().get_block_data(item->get_block_id());
-
         ItemPushConstant pc;
         pc.model = glm::translate(glm::mat4(1.0f), item->get_render_position());
         pc.model = glm::rotate(pc.model, glm::radians(item->get_rotation()), glm::vec3(0.0f, 1.0f, 0.0f));
@@ -196,15 +189,36 @@ void CommandManager::recordCommandBuffer(
         {
             int tex_idx_for_face = blockData.texture_indices[textureIndexMap[i]];
             pc.tileOrigin = glm::vec3((tex_idx_for_face % 16) * ATLAS_INV_SIZE, (tex_idx_for_face / 16) * ATLAS_INV_SIZE, 0.f);
-
             vkCmdPushConstants(cb, m_PipelineCache.getItemPipelineLayout(),
                                VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ItemPushConstant), &pc);
-
             vkCmdDrawIndexed(cb, 6, 1, i * 6, 0, 0);
         }
     }
 
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getCrosshairPipeline());
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getCrosshairPipelineLayout(), 0, 1, &crosshairDS, 0, nullptr);
+    VkDeviceSize crosshair_offsets[] = {0};
+    vkCmdBindVertexBuffers(cb, 0, 1, &crosshairVB, crosshair_offsets);
+    vkCmdBindIndexBuffer(cb, crosshairIB, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(cb, 6, 1, 0, 0, 0);
+
     vkCmdEndRenderPass(cb);
+}
+
+void CommandManager::recordPlayer(VkCommandBuffer cb, Player *player, VkDescriptorSet descriptorSet, class PlayerModel &model)
+{
+
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getPlayerPipeline());
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getPlayerPipelineLayout(), 0, 1, &descriptorSet, 0, nullptr);
+
+    float yaw, pitch;
+    player->get_orientation(yaw, pitch);
+
+    glm::mat4 modelMatrix = glm::translate(glm::mat4(1.0f), player->get_position());
+    modelMatrix = glm::rotate(modelMatrix, yaw + glm::pi<float>(), glm::vec3(0.0f, 1.0f, 0.0f));
+    vkCmdPushConstants(cb, m_PipelineCache.getPlayerPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &modelMatrix);
+
+    model.draw(cb);
 }
 
 void CommandManager::createCommandPool()
@@ -226,11 +240,9 @@ void CommandManager::createCommandPool()
 void CommandManager::createCommandBuffers()
 {
     m_CommandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
-
     VkCommandBufferAllocateInfo allocInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     allocInfo.commandPool = m_CommandPool.get();
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-
     allocInfo.commandBufferCount = static_cast<uint32_t>(m_CommandBuffers.size());
     if (vkAllocateCommandBuffers(m_DeviceContext.getDevice(), &allocInfo, m_CommandBuffers.data()) != VK_SUCCESS)
         throw std::runtime_error("failed to allocate graphics command buffers");
@@ -245,7 +257,6 @@ void CommandManager::recordRayTraceCommand(VkCommandBuffer cb, uint32_t currentF
 {
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_PipelineCache.getRayTracingPipeline());
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_PipelineCache.getRayTracingPipelineLayout(), 0, 1, &rtDescriptorSet, 0, 0);
-
     vkCmdPushConstants(
         cb,
         m_PipelineCache.getRayTracingPipelineLayout(),
@@ -253,7 +264,6 @@ void CommandManager::recordRayTraceCommand(VkCommandBuffer cb, uint32_t currentF
         0,
         sizeof(RayTracePushConstants),
         pushConstants);
-
     VkExtent2D extent = m_SwapChainContext.getSwapChainExtent();
     auto vkCmdTraceRaysKHR = (PFN_vkCmdTraceRaysKHR)vkGetDeviceProcAddr(m_DeviceContext.getDevice(), "vkCmdTraceRaysKHR");
 
@@ -269,7 +279,6 @@ void CommandManager::recordRayTraceCommand(VkCommandBuffer cb, uint32_t currentF
     toGeneral.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     toGeneral.subresourceRange.levelCount = 1;
     toGeneral.subresourceRange.layerCount = 1;
-
     vkCmdPipelineBarrier(
         cb,
         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
@@ -285,15 +294,12 @@ void CommandManager::recordRayTraceCommand(VkCommandBuffer cb, uint32_t currentF
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
     barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
     barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-
     barrier.image = shadowImage;
     barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     barrier.subresourceRange.levelCount = 1;
     barrier.subresourceRange.layerCount = 1;
-
     vkCmdPipelineBarrier(
         cb,
         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,

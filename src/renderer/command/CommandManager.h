@@ -15,6 +15,7 @@
 #include "../RendererConfig.h"
 #include "../RayTracingPushConstants.h"
 #include "../../Item.h"
+#include "../../Player.h"
 #include <vulkan/vulkan.h>
 
 struct SkyPushConstant
@@ -23,11 +24,15 @@ struct SkyPushConstant
     alignas(4) int is_sun;
 };
 
+class PlayerModel;
+
 class CommandManager
 {
 public:
     CommandManager(const DeviceContext &deviceContext, const SwapChainContext &swapChainContext, const PipelineCache &pipelineCache);
     ~CommandManager();
+
+    void recordPlayer(VkCommandBuffer cb, Player *player, VkDescriptorSet descriptorSet, PlayerModel &model);
 
     void recordCommandBuffer(
         uint32_t imageIndex, uint32_t currentFrame,
@@ -47,7 +52,11 @@ public:
         uint32_t outlineVertexCount,
         const std::optional<glm::ivec3> &hoveredBlockPos,
         const std::vector<std::unique_ptr<Item>> &items,
-        VkBuffer itemVB, VkBuffer itemIB, uint32_t itemIndexCount);
+        VkBuffer itemVB, VkBuffer itemIB, uint32_t itemIndexCount,
+
+        Player *player,
+        VkDescriptorSet playerDescriptorSet,
+        PlayerModel &playerModel);
 
     VkCommandBuffer getCommandBuffer(uint32_t index) const { return m_CommandBuffers[index]; }
     VkCommandPool getCommandPool() const { return m_CommandPool.get(); }

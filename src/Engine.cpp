@@ -14,7 +14,7 @@
 
 Engine::Engine()
 	: m_Window(WIDTH, HEIGHT, "Vibecraft", m_Settings),
-	  m_Renderer(m_Window, m_Settings, m_player_ptr, &m_TerrainGen),
+	  m_Renderer(m_Window, m_Settings, &m_TerrainGen),
 	  m_debugController(this)
 {
 	glfwSetInputMode(m_Window.getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
@@ -212,7 +212,7 @@ void Engine::run()
 			chunks_copy = m_Chunks;
 		}
 
-		if (!m_Renderer.drawFrame(m_player_ptr->get_camera(), player_pos_logic, chunks_copy, playerChunkPos,
+		if (!m_Renderer.drawFrame(m_player_ptr, m_player_ptr->get_camera(), player_pos_logic, chunks_copy, playerChunkPos,
 								  m_gameTicks, debug_aabbs, m_showDebugOverlay, outlineVertices, m_hoveredBlockPos, m_items))
 		{
 			continue;

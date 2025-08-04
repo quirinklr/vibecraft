@@ -28,10 +28,14 @@ public:
     VkPipelineLayout getRayTracingPipelineLayout() const { return m_RayTracingPipelineLayout.get(); }
     VkPipeline getItemPipeline() const { return m_ItemPipeline.get(); }
     VkPipelineLayout getItemPipelineLayout() const { return m_ItemPipelineLayout.get(); }
+    VkPipeline getPlayerPipeline() const { return m_PlayerPipeline.get(); }
+    VkPipelineLayout getPlayerPipelineLayout() const { return m_PlayerPipelineLayout.get(); }
+    VkDescriptorSetLayout getPlayerDescriptorSetLayout() const { return m_PlayerDescriptorSetLayout.get(); }
 
     void createPipelines();
 
 private:
+    void createPlayerPipeline();
     void createRayTracingPipeline();
     void createSkyPipeline();
     void createCrosshairPipeline();
@@ -60,4 +64,7 @@ private:
     VulkanHandle<VkPipeline, PipelineDeleter> m_RayTracingPipeline;
     VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter> m_ItemPipelineLayout;
     VulkanHandle<VkPipeline, PipelineDeleter> m_ItemPipeline;
+    VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter> m_PlayerPipelineLayout;
+    VulkanHandle<VkPipeline, PipelineDeleter> m_PlayerPipeline;
+    VulkanHandle<VkDescriptorSetLayout, DescriptorSetLayoutDeleter> m_PlayerDescriptorSetLayout;
 };

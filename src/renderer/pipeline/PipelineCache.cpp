@@ -146,9 +146,52 @@ PipelineCache::PipelineCache(const DeviceContext &deviceContext,
     }
 
     createItemPipeline();
+    createPlayerPipeline();
 }
 
 PipelineCache::~PipelineCache() = default;
+
+void PipelineCache::createPlayerPipeline()
+{
+    VkDevice dev = m_DeviceContext.getDevice();
+    VkRenderPass rp = m_SwapChainContext.getRenderPass();
+
+    VkPushConstantRange pcRange{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4)};
+
+    std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo dslCI{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    dslCI.bindingCount = static_cast<uint32_t>(bindings.size());
+    dslCI.pBindings = bindings.data();
+    VkDescriptorSetLayout dsl;
+    vkCreateDescriptorSetLayout(dev, &dslCI, nullptr, &dsl);
+    m_PlayerDescriptorSetLayout = VulkanHandle<VkDescriptorSetLayout, DescriptorSetLayoutDeleter>(dsl, {dev});
+
+    VkPipelineLayoutCreateInfo plCI{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    plCI.setLayoutCount = 1;
+
+    VkDescriptorSetLayout playerDsl = m_PlayerDescriptorSetLayout.get();
+    plCI.pSetLayouts = &playerDsl;
+
+    plCI.pushConstantRangeCount = 1;
+    plCI.pPushConstantRanges = &pcRange;
+
+    VkPipelineLayout layoutRaw{};
+    if (vkCreatePipelineLayout(dev, &plCI, nullptr, &layoutRaw) != VK_SUCCESS)
+        throw std::runtime_error("failed to create player pipeline layout!");
+    m_PlayerPipelineLayout = VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter>(layoutRaw, {dev});
+
+    m_PlayerPipeline = VulkanHandle<VkPipeline, PipelineDeleter>(
+        buildPipeline(dev, rp, m_PlayerPipelineLayout.get(), VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, false, true, true, "shaders/player.vert.spv", "shaders/player.frag.spv"), {dev});
+}
 
 void PipelineCache::createItemPipeline()
 {

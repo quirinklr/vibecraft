@@ -27,6 +27,7 @@ public:
     void process_keyboard(GLFWwindow *window, float dt);
     void toggle_flight();
     void cycle_camera_mode();
+    CameraMode getCameraMode() const { return m_cameraMode; }
 
     Camera &get_camera() { return m_camera; }
 

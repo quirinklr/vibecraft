@@ -13,14 +13,13 @@
 #include "renderer/RayTracingPushConstants.h"
 #include <unordered_map>
 #include "BlockAtlas.h"
+#include "Player.h"
 
 VulkanRenderer::VulkanRenderer(Window &window,
                                Settings &settings,
-                               Player *player,
                                TerrainGenerator *terrainGen)
-    : m_Window(window), m_Settings(settings), m_player(player), m_terrainGen(terrainGen)
+    : m_Window(window), m_Settings(settings), m_terrainGen(terrainGen)
 {
-
     m_InstanceContext = std::make_unique<InstanceContext>(m_Window);
     m_DeviceContext = std::make_unique<DeviceContext>(*m_InstanceContext);
 
@@ -66,10 +65,12 @@ VulkanRenderer::VulkanRenderer(Window &window,
     createDescriptorPool();
     createDescriptorSets();
     createCrosshairResources();
-    recreateCrosshairVertexBuffer();
     createOutlineVertexBuffer();
+    recreateCrosshairVertexBuffer();
     createDebugCubeMesh();
     createItemMesh();
+
+    m_playerModel = std::make_unique<PlayerModel>(*m_DeviceContext, m_CommandManager->getCommandPool());
 
     if (m_DeviceContext->isRayTracingSupported())
     {
@@ -95,11 +96,13 @@ VulkanRenderer::VulkanRenderer(Window &window,
 
 VulkanRenderer::~VulkanRenderer()
 {
-
     if (m_DeviceContext && m_DeviceContext->getDevice() != VK_NULL_HANDLE)
     {
         vkDeviceWaitIdle(m_DeviceContext->getDevice());
     }
+
+    m_playerSkinTextureView = {nullptr, {}};
+    m_playerSkinTexture = {};
 
     m_CrosshairDescriptorPool = {nullptr, {}};
     m_CrosshairDescriptorSetLayout = {nullptr, {}};
@@ -112,7 +115,6 @@ VulkanRenderer::~VulkanRenderer()
 
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
-
         m_blasBuildScratchBuffers[i].clear();
         m_asBuildStagingBuffers[i].clear();
         m_BufferDestroyQueue[i].clear();
@@ -187,7 +189,7 @@ void VulkanRenderer::createModelMatrixSsbos()
     }
 }
 
-bool VulkanRenderer::drawFrame(Camera &camera,
+bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
                                const glm::vec3 &playerPos,
 
                                std::unordered_map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_hasher> &chunks,
@@ -253,7 +255,14 @@ bool VulkanRenderer::drawFrame(Camera &camera,
 
     if (!outlineVertices.empty())
     {
-        memcpy(m_outlineVertexBufferMapped, outlineVertices.data(), outlineVertices.size() * sizeof(glm::vec3));
+
+        const size_t bufferMaxSize = sizeof(glm::vec3) * MAX_OUTLINE_VERTICES;
+
+        size_t dataToCopySize = outlineVertices.size() * sizeof(glm::vec3);
+
+        size_t copySize = std::min(dataToCopySize, bufferMaxSize);
+
+        memcpy(m_outlineVertexBufferMapped, outlineVertices.data(), copySize);
     }
 
     updateDescriptorSets();
@@ -264,8 +273,7 @@ bool VulkanRenderer::drawFrame(Camera &camera,
 
     if (showDebugOverlay && m_debugOverlay)
     {
-
-        m_debugOverlay->update(*m_player, m_Settings, 0.f, m_terrainGen->getSeed());
+        m_debugOverlay->update(*player, m_Settings, 0.f, m_terrainGen->getSeed());
     }
 
     renderChunks.reserve(chunks.size());
@@ -312,10 +320,19 @@ bool VulkanRenderer::drawFrame(Camera &camera,
 
     if (!modelMatrices.empty())
     {
-        memcpy(m_ModelMatrixSsbosMapped[slot], modelMatrices.data(), modelMatrices.size() * sizeof(glm::mat4));
+        size_t dataToCopySize = modelMatrices.size() * sizeof(glm::mat4);
+
+        const size_t bufferSize = sizeof(glm::mat4) * MAX_CHUNKS_PER_FRAME;
+
+        size_t copySize = std::min(dataToCopySize, bufferSize);
+
+        memcpy(m_ModelMatrixSsbosMapped[slot], modelMatrices.data(), copySize);
     }
 
-    updateDescriptorSets();
+    if (player->getCameraMode() != CameraMode::FIRST_PERSON)
+    {
+        updatePlayerDescriptorSet();
+    }
 
     VkCommandBuffer cmd = m_CommandManager->getCommandBuffer(slot);
     vkResetCommandBuffer(cmd, 0);
@@ -413,7 +430,9 @@ bool VulkanRenderer::drawFrame(Camera &camera,
         m_DebugCubeVertexBuffer.get(), m_DebugCubeIndexBuffer.get(), m_DebugCubeIndexCount,
         m_Settings, debugAABBs,
         m_outlineVertexBuffer.get(), static_cast<uint32_t>(outlineVertices.size()), hoveredBlockPos,
-        items, m_itemVertexBuffer.get(), m_itemIndexBuffer.get(), m_itemIndexCount);
+        items, m_itemVertexBuffer.get(), m_itemIndexBuffer.get(), m_itemIndexCount,
+
+        player, m_playerDescriptorSet, *m_playerModel);
 
     if (showDebugOverlay && m_debugOverlay)
     {
@@ -469,7 +488,6 @@ bool VulkanRenderer::drawFrame(Camera &camera,
     m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     return true;
 }
-
 void VulkanRenderer::scheduleChunkGpuCleanup(std::shared_ptr<Chunk> chunk)
 {
     if (chunk)
@@ -1215,6 +1233,7 @@ void VulkanRenderer::createSkyResources()
 {
     m_SunTextureView = createTexture("textures/sun.png", m_SunTexture);
     m_MoonTextureView = createTexture("textures/moon.png", m_MoonTexture);
+    m_playerSkinTextureView = createTexture("textures/player_skin.png", m_playerSkinTexture);
 
     std::vector<Vertex> vertices = {
         {{-0.5f, -0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
@@ -1238,9 +1257,9 @@ void VulkanRenderer::createDescriptorPool()
 {
     std::array<VkDescriptorPoolSize, 3> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 2);
+    poolSizes[0].descriptorCount = (MAX_FRAMES_IN_FLIGHT * 2) + 1;
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 4);
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 5);
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
@@ -1248,7 +1267,7 @@ void VulkanRenderer::createDescriptorPool()
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) + 1;
 
     VkDescriptorPool pool;
     if (vkCreateDescriptorPool(m_DeviceContext->getDevice(), &poolInfo, nullptr, &pool) != VK_SUCCESS)
@@ -1266,8 +1285,46 @@ void VulkanRenderer::createDescriptorSets()
     alloc.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
     alloc.pSetLayouts = layouts.data();
     m_DescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
-    if (vkAllocateDescriptorSets(m_DeviceContext->getDevice(), &alloc, m_DescriptorSets.data()) != VK_SUCCESS)
+    if (vkAllocateDescriptorSets(m_DeviceContext->getDevice(), &alloc, m_DescriptorSets.data()) !=
+        VK_SUCCESS)
+    {
         throw std::runtime_error("failed to allocate descriptor sets");
+    }
+
+    VkDescriptorSetLayout playerLayout = m_PipelineCache->getPlayerDescriptorSetLayout();
+    VkDescriptorSetAllocateInfo playerAllocInfo{};
+    playerAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    playerAllocInfo.descriptorPool = m_DescriptorPool.get();
+    playerAllocInfo.descriptorSetCount = 1;
+    playerAllocInfo.pSetLayouts = &playerLayout;
+
+    if (vkAllocateDescriptorSets(m_DeviceContext->getDevice(), &playerAllocInfo, &m_playerDescriptorSet) != VK_SUCCESS)
+    {
+        throw std::runtime_error("failed to allocate player descriptor set");
+    }
+}
+
+void VulkanRenderer::updatePlayerDescriptorSet()
+{
+    VkDescriptorImageInfo playerSkinInfo{m_TextureManager->getTextureSampler(), m_playerSkinTextureView.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkDescriptorBufferInfo mainUboInfo{m_UniformBuffers[m_CurrentFrame].get(), 0, sizeof(UniformBufferObject)};
+
+    std::array<VkWriteDescriptorSet, 2> writes{};
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = m_playerDescriptorSet;
+    writes[0].dstBinding = 0;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    writes[0].descriptorCount = 1;
+    writes[0].pBufferInfo = &mainUboInfo;
+
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = m_playerDescriptorSet;
+    writes[1].dstBinding = 1;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[1].descriptorCount = 1;
+    writes[1].pImageInfo = &playerSkinInfo;
+
+    vkUpdateDescriptorSets(m_DeviceContext->getDevice(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 }
 
 void VulkanRenderer::updateDescriptorSets()
