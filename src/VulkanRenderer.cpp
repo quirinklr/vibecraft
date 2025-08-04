@@ -1024,7 +1024,7 @@ glm::vec3 VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &cam
 
     glm::vec3 dayColor(0.5f, 0.7f, 1.0f);
 
-    glm::vec3 nightColor(0.04f, 0.06f, 0.1f);
+    glm::vec3 nightColor(0.002f, 0.002f, 0.007f);
     glm::vec3 sunsetColor(1.0f, 0.45f, 0.15f);
 
     glm::vec3 skyColor = glm::mix(nightColor, dayColor, sunUpFactor);
