@@ -205,21 +205,36 @@ void CommandManager::recordCommandBuffer(
     vkCmdEndRenderPass(cb);
 }
 
-void CommandManager::recordPlayer(VkCommandBuffer cb, Player *player, VkDescriptorSet descriptorSet, class PlayerModel &model)
+void CommandManager::recordPlayer(VkCommandBuffer cb, Player *player, VkDescriptorSet descriptorSet, PlayerModel &model)
 {
-
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getPlayerPipeline());
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getPlayerPipelineLayout(), 0, 1, &descriptorSet, 0, nullptr);
 
-    float yaw, pitch;
-    player->get_orientation(yaw, pitch);
+    float bodyYaw = player->getRenderYawOffset();
+    float headYaw = player->getNetHeadYaw();
+    float headPitch = player->getHeadPitch();
 
-    glm::mat4 modelMatrix = glm::translate(glm::mat4(1.0f), player->get_render_position());
-    
-    modelMatrix = glm::rotate(modelMatrix, yaw + glm::pi<float>(), glm::vec3(0.0f, 1.0f, 0.0f));
-    vkCmdPushConstants(cb, m_PipelineCache.getPlayerPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &modelMatrix);
+    glm::mat4 baseTransform = glm::translate(glm::mat4(1.0f), player->get_render_position());
+    baseTransform = glm::rotate(baseTransform, bodyYaw + glm::pi<float>(), glm::vec3(0.0f, 1.0f, 0.0f));
 
-    model.draw(cb);
+    vkCmdPushConstants(cb, m_PipelineCache.getPlayerPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &baseTransform);
+    model.drawBody(cb);
+    model.drawLeftArm(cb);
+    model.drawRightArm(cb);
+    model.drawLeftLeg(cb);
+    model.drawRightLeg(cb);
+
+    glm::mat4 headTransform = baseTransform;
+
+    glm::vec3 headPivot = glm::vec3(0.0f, 24.0f / 16.0f, 0.0f);
+
+    headTransform = glm::translate(headTransform, headPivot);
+    headTransform = glm::rotate(headTransform, wrapDegrees(headYaw - bodyYaw), glm::vec3(0.0f, 1.0f, 0.0f));
+    headTransform = glm::rotate(headTransform, headPitch, glm::vec3(1.0f, 0.0f, 0.0f));
+    headTransform = glm::translate(headTransform, -headPivot);
+
+    vkCmdPushConstants(cb, m_PipelineCache.getPlayerPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &headTransform);
+    model.drawHead(cb);
 }
 
 void CommandManager::createCommandPool()

@@ -146,6 +146,8 @@ void Engine::run()
 			m_physicsAccumulator -= FIXED_TIMESTEP;
 		}
 
+		m_player_ptr->updateModelRotations();
+
 		const float alpha = m_physicsAccumulator / FIXED_TIMESTEP;
 
 		m_player_ptr->update_camera_interpolated(this, alpha);

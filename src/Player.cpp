@@ -9,6 +9,11 @@
 Player::Player(Engine *engine, glm::vec3 position, const Settings &settings)
     : Entity(engine, position), m_settings(settings)
 {
+    m_cameraYaw = m_yaw;
+    m_cameraPitch = m_pitch;
+    m_netHeadYaw = m_yaw;
+    m_headPitch = m_pitch;
+    m_renderYawOffset = m_yaw;
 }
 
 void Player::toggle_flight()
@@ -31,12 +36,35 @@ void Player::update(float dt)
     Entity::update(dt);
 }
 
+void Player::updateModelRotations()
+{
+
+    m_headPitch = m_cameraPitch;
+    m_netHeadYaw = m_cameraYaw;
+
+    const float maxNeckTurn = 85.0f;
+
+    float deltaYaw = wrapDegrees(m_netHeadYaw - m_renderYawOffset);
+
+    if (deltaYaw < -maxNeckTurn)
+    {
+        deltaYaw = -maxNeckTurn;
+    }
+    if (deltaYaw > maxNeckTurn)
+    {
+        deltaYaw = maxNeckTurn;
+    }
+
+    m_renderYawOffset += deltaYaw;
+}
+
 void Player::process_keyboard(GLFWwindow *window, float dt)
 {
 
     if (m_is_flying)
     {
-        glm::vec3 forward{cos(m_yaw) * cos(m_pitch), sin(m_pitch), sin(m_yaw) * cos(m_pitch)};
+
+        glm::vec3 forward{cos(m_cameraYaw) * cos(m_cameraPitch), sin(m_cameraPitch), sin(m_cameraYaw) * cos(m_cameraPitch)};
         glm::vec3 right = glm::normalize(glm::cross(forward, {0.f, 1.f, 0.f}));
         glm::vec3 up = {0.f, 1.f, 0.f};
         glm::vec3 move_direction{0.f};
@@ -54,16 +82,20 @@ void Player::process_keyboard(GLFWwindow *window, float dt)
         if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
             move_direction -= up;
 
-        if (glm::length(move_direction) > 0.0f)
+        bool is_moving = glm::length(move_direction) > 0.001f;
+
+        if (is_moving)
         {
             move_direction = glm::normalize(move_direction);
+
+            m_yaw = m_cameraYaw;
         }
         m_velocity = move_direction * FLY_SPEED;
     }
-
     else if (m_is_in_water)
     {
-        glm::vec3 forward{cos(m_yaw), 0, sin(m_yaw)};
+
+        glm::vec3 forward{cos(m_cameraYaw), 0, sin(m_cameraYaw)};
         glm::vec3 right = glm::normalize(glm::cross(forward, {0.f, 1.f, 0.f}));
         glm::vec3 move_direction{0.f};
 
@@ -76,9 +108,13 @@ void Player::process_keyboard(GLFWwindow *window, float dt)
         if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
             move_direction += right;
 
-        if (glm::length(move_direction) > 0.0f)
+        bool is_moving = glm::length(move_direction) > 0.001f;
+
+        if (is_moving)
         {
             move_direction = glm::normalize(move_direction);
+
+            m_yaw = m_cameraYaw;
         }
         m_velocity += move_direction * SWIM_ACCELERATION * dt;
 
@@ -91,7 +127,7 @@ void Player::process_keyboard(GLFWwindow *window, float dt)
     else
     {
 
-        glm::vec3 forward{cos(m_yaw), 0, sin(m_yaw)};
+        glm::vec3 forward{cos(m_cameraYaw), 0, sin(m_cameraYaw)};
         glm::vec3 right = glm::normalize(glm::cross(forward, {0.f, 1.f, 0.f}));
         glm::vec3 move_direction{0.f};
 
@@ -103,6 +139,18 @@ void Player::process_keyboard(GLFWwindow *window, float dt)
             move_direction -= right;
         if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
             move_direction += right;
+
+        bool is_moving = glm::length(move_direction) > 0.001f;
+
+        if (is_moving)
+        {
+            move_direction = glm::normalize(move_direction);
+
+            if (m_cameraMode != CameraMode::FIRST_PERSON)
+            {
+                m_yaw = m_cameraYaw;
+            }
+        }
 
         if (glm::length(move_direction) > 0.0f)
         {
@@ -217,10 +265,11 @@ void Player::update_camera_interpolated(Engine *engine, float alpha)
     glm::vec3 interpolated_pos = glm::mix(m_previousPosition, m_position, alpha);
     m_renderPosition = interpolated_pos;
     glm::vec3 eye_pos = m_renderPosition + glm::vec3(0.f, m_hitbox.max.y * 0.9f, 0.f);
-    glm::vec3 look_direction{
-        cos(m_yaw) * cos(m_pitch),
-        sin(m_pitch),
-        sin(m_yaw) * cos(m_pitch)};
+
+    glm::vec3 camera_look_direction{
+        cos(m_cameraYaw) * cos(m_cameraPitch),
+        sin(m_cameraPitch),
+        sin(m_cameraYaw) * cos(m_cameraPitch)};
 
     glm::vec3 final_cam_pos;
     glm::vec3 final_look_dir;
@@ -229,12 +278,13 @@ void Player::update_camera_interpolated(Engine *engine, float alpha)
     {
     case CameraMode::FIRST_PERSON:
         final_cam_pos = eye_pos;
-        final_look_dir = look_direction;
+        final_look_dir = camera_look_direction;
         break;
 
     case CameraMode::THIRD_PERSON:
     {
-        glm::vec3 ideal_cam_pos = eye_pos - look_direction * THIRD_PERSON_DISTANCE;
+
+        glm::vec3 ideal_cam_pos = eye_pos - camera_look_direction * THIRD_PERSON_DISTANCE;
         final_cam_pos = ideal_cam_pos;
         engine->raycast_camera_occlusion(eye_pos, final_cam_pos);
         final_look_dir = glm::normalize(eye_pos - final_cam_pos);
@@ -243,7 +293,8 @@ void Player::update_camera_interpolated(Engine *engine, float alpha)
 
     case CameraMode::FOURTH_PERSON:
     {
-        glm::vec3 ideal_cam_pos = eye_pos + look_direction * THIRD_PERSON_DISTANCE;
+
+        glm::vec3 ideal_cam_pos = eye_pos + camera_look_direction * THIRD_PERSON_DISTANCE;
         final_cam_pos = ideal_cam_pos;
         engine->raycast_camera_occlusion(eye_pos, final_cam_pos);
         final_look_dir = glm::normalize(eye_pos - final_cam_pos);
@@ -267,7 +318,15 @@ void Player::update_camera_interpolated(Engine *engine, float alpha)
 void Player::process_mouse_movement(float dx, float dy)
 {
     float processed_dy = m_settings.invertMouseY ? dy : -dy;
-    m_yaw += dx * m_settings.mouseSensitivityX * MOUSE_SENSITIVITY;
-    m_pitch += processed_dy * m_settings.mouseSensitivityY * MOUSE_SENSITIVITY;
-    m_pitch = glm::clamp(m_pitch, -glm::half_pi<float>() + 0.01f, glm::half_pi<float>() - 0.01f);
+
+    m_cameraYaw += dx * m_settings.mouseSensitivityX * MOUSE_SENSITIVITY;
+    m_cameraPitch += processed_dy * m_settings.mouseSensitivityY * MOUSE_SENSITIVITY;
+
+    m_cameraPitch = glm::clamp(m_cameraPitch, -glm::half_pi<float>() + 0.01f, glm::half_pi<float>() - 0.01f);
+
+    if (m_cameraMode == CameraMode::FIRST_PERSON)
+    {
+        m_yaw = m_cameraYaw;
+        m_pitch = m_cameraPitch;
+    }
 }

@@ -14,6 +14,16 @@ enum class CameraMode
     FOURTH_PERSON
 };
 
+inline float wrapDegrees(float degrees)
+{
+    float result = fmod(degrees + 180.0f, 360.0f);
+    if (result < 0.0f)
+    {
+        result += 360.0f;
+    }
+    return result - 180.0f;
+}
+
 class Player : public Entity
 {
 public:
@@ -33,12 +43,26 @@ public:
 
     void update_camera_interpolated(Engine *engine, float alpha);
 
+    void updateModelRotations();
+
+    float getNetHeadYaw() const { return m_netHeadYaw; }
+    float getHeadPitch() const { return m_headPitch; }
+    float getRenderYawOffset() const { return m_renderYawOffset; }
+
 private:
     CameraMode m_cameraMode = CameraMode::FIRST_PERSON;
-
     Camera m_camera;
+
     float m_yaw = -glm::half_pi<float>();
     float m_pitch = 0.f;
+
+    float m_cameraYaw;
+    float m_cameraPitch;
+
+    float m_netHeadYaw;
+    float m_headPitch;
+    float m_renderYawOffset;
+
     bool m_is_sprinting = false;
 
     const Settings &m_settings;
