@@ -214,7 +214,8 @@ void CommandManager::recordPlayer(VkCommandBuffer cb, Player *player, VkDescript
     float yaw, pitch;
     player->get_orientation(yaw, pitch);
 
-    glm::mat4 modelMatrix = glm::translate(glm::mat4(1.0f), player->get_position());
+    glm::mat4 modelMatrix = glm::translate(glm::mat4(1.0f), player->get_render_position());
+    
     modelMatrix = glm::rotate(modelMatrix, yaw + glm::pi<float>(), glm::vec3(0.0f, 1.0f, 0.0f));
     vkCmdPushConstants(cb, m_PipelineCache.getPlayerPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &modelMatrix);
 

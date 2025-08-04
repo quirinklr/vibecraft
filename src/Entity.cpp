@@ -6,7 +6,8 @@
 Entity::Entity(Engine *engine, glm::vec3 position)
     : m_engine(engine),
       m_position(position),
-      m_previousPosition(position)
+      m_previousPosition(position),
+      m_renderPosition(position)
 {
     const float width = 0.6f;
     const float height = 1.8f;
