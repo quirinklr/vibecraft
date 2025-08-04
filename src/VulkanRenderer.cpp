@@ -12,6 +12,7 @@
 #include <numeric>
 #include "renderer/RayTracingPushConstants.h"
 #include <unordered_map>
+#include "BlockAtlas.h"
 
 VulkanRenderer::VulkanRenderer(Window &window,
                                Settings &settings,
@@ -68,6 +69,7 @@ VulkanRenderer::VulkanRenderer(Window &window,
     recreateCrosshairVertexBuffer();
     createOutlineVertexBuffer();
     createDebugCubeMesh();
+    createItemMesh();
 
     if (m_DeviceContext->isRayTracingSupported())
     {
@@ -194,7 +196,8 @@ bool VulkanRenderer::drawFrame(Camera &camera,
                                const std::vector<AABB> &debugAABBs,
                                bool showDebugOverlay,
                                const std::vector<glm::vec3> &outlineVertices,
-                               const std::optional<glm::ivec3> &hoveredBlockPos)
+                               const std::optional<glm::ivec3> &hoveredBlockPos,
+                               const std::vector<std::unique_ptr<Item>> &items)
 
 {
     const uint32_t slot = m_CurrentFrame;
@@ -409,7 +412,8 @@ bool VulkanRenderer::drawFrame(Camera &camera,
         m_CrosshairVertexBuffer.get(), m_CrosshairIndexBuffer.get(), m_CrosshairDescriptorSet,
         m_DebugCubeVertexBuffer.get(), m_DebugCubeIndexBuffer.get(), m_DebugCubeIndexCount,
         m_Settings, debugAABBs,
-        m_outlineVertexBuffer.get(), static_cast<uint32_t>(outlineVertices.size()), hoveredBlockPos);
+        m_outlineVertexBuffer.get(), static_cast<uint32_t>(outlineVertices.size()), hoveredBlockPos,
+        items, m_itemVertexBuffer.get(), m_itemIndexBuffer.get(), m_itemIndexCount);
 
     if (showDebugOverlay && m_debugOverlay)
     {
@@ -937,7 +941,7 @@ void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &
         VkAccelerationStructureBuildRangeInfoKHR range{.primitiveCount = primCount};
         const VkAccelerationStructureBuildRangeInfoKHR *pRange = &range;
 
-        vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build, &pRange);
+            vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build, &pRange);
 
         VkMemoryBarrier tlasBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
         tlasBarrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
@@ -1433,6 +1437,66 @@ void VulkanRenderer::createDebugCubeMesh()
     m_DebugCubeIndexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
         *m_DeviceContext, m_CommandManager->getCommandPool(),
         indices.data(), indexSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+}
+
+void VulkanRenderer::createItemMesh()
+{
+    const float s = 0.25f;
+    std::vector<Vertex> vertices = {
+
+        {{-s, -s, s}, {0, 0, 0}, {0, 0}},
+        {{s, -s, s}, {0, 0, 0}, {1, 0}},
+        {{s, s, s}, {0, 0, 0}, {1, 1}},
+        {{-s, s, s}, {0, 0, 0}, {0, 1}},
+
+        {{-s, -s, -s}, {0, 0, 0}, {0, 0}},
+        {{-s, s, -s}, {0, 0, 0}, {1, 0}},
+        {{s, s, -s}, {0, 0, 0}, {1, 1}},
+        {{s, -s, -s}, {0, 0, 0}, {0, 1}},
+
+        {{-s, s, -s}, {0, 0, 0}, {0, 0}},
+        {{-s, s, s}, {0, 0, 0}, {1, 0}},
+        {{s, s, s}, {0, 0, 0}, {1, 1}},
+        {{s, s, -s}, {0, 0, 0}, {0, 1}},
+
+        {{-s, -s, -s}, {0, 0, 0}, {0, 0}},
+        {{s, -s, -s}, {0, 0, 0}, {1, 0}},
+        {{s, -s, s}, {0, 0, 0}, {1, 1}},
+        {{-s, -s, s}, {0, 0, 0}, {0, 1}},
+
+        {{s, -s, -s}, {0, 0, 0}, {0, 0}},
+        {{s, s, -s}, {0, 0, 0}, {1, 0}},
+        {{s, s, s}, {0, 0, 0}, {1, 1}},
+        {{s, -s, s}, {0, 0, 0}, {0, 1}},
+
+        {{-s, -s, -s}, {0, 0, 0}, {0, 0}},
+        {{-s, -s, s}, {0, 0, 0}, {1, 0}},
+        {{-s, s, s}, {0, 0, 0}, {1, 1}},
+        {{-s, s, -s}, {0, 0, 0}, {0, 1}},
+    };
+
+    std::vector<uint32_t> indices;
+    for (uint32_t i = 0; i < 6; ++i)
+    {
+        uint32_t base = i * 4;
+        indices.push_back(base + 0);
+        indices.push_back(base + 1);
+        indices.push_back(base + 2);
+        indices.push_back(base + 0);
+        indices.push_back(base + 2);
+        indices.push_back(base + 3);
+    }
+    m_itemIndexCount = static_cast<uint32_t>(indices.size());
+
+    m_itemVertexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
+        *m_DeviceContext, m_CommandManager->getCommandPool(),
+        vertices.data(), sizeof(Vertex) * vertices.size(),
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+
+    m_itemIndexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
+        *m_DeviceContext, m_CommandManager->getCommandPool(),
+        indices.data(), sizeof(uint32_t) * indices.size(),
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 }
 
 void VulkanRenderer::generateSphereMesh(float radius, int sectors, int stacks,

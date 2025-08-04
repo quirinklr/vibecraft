@@ -96,6 +96,7 @@ endif()
 
 file(GLOB_RECURSE VIBECRAFT_SRC CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/src/*.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Item.cpp"
 )
 
 add_executable(Vibecraft ${VIBECRAFT_SRC})

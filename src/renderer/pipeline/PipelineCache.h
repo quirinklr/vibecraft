@@ -26,6 +26,8 @@ public:
     VkPipelineLayout getSkyPipelineLayout() const { return m_SkyPipelineLayout.get(); }
     VkPipeline getRayTracingPipeline() const { return m_RayTracingPipeline.get(); }
     VkPipelineLayout getRayTracingPipelineLayout() const { return m_RayTracingPipelineLayout.get(); }
+    VkPipeline getItemPipeline() const { return m_ItemPipeline.get(); }
+    VkPipelineLayout getItemPipelineLayout() const { return m_ItemPipelineLayout.get(); }
 
     void createPipelines();
 
@@ -35,10 +37,7 @@ private:
     void createCrosshairPipeline();
     void createOutlinePipeline();
     void createDebugPipeline();
-
-    static std::vector<char> readFile(const std::string &filename);
-    static VulkanHandle<VkShaderModule, ShaderModuleDeleter>
-    createShaderModule(const std::vector<char> &, VkDevice);
+    void createItemPipeline();
 
     const DeviceContext &m_DeviceContext;
     const SwapChainContext &m_SwapChainContext;
@@ -59,4 +58,6 @@ private:
     VulkanHandle<VkPipeline, PipelineDeleter> m_SkyPipeline;
     VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter> m_RayTracingPipelineLayout;
     VulkanHandle<VkPipeline, PipelineDeleter> m_RayTracingPipeline;
+    VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter> m_ItemPipelineLayout;
+    VulkanHandle<VkPipeline, PipelineDeleter> m_ItemPipeline;
 };

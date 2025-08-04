@@ -144,9 +144,39 @@ PipelineCache::PipelineCache(const DeviceContext &deviceContext,
     {
         createRayTracingPipeline();
     }
+
+    createItemPipeline();
 }
 
 PipelineCache::~PipelineCache() = default;
+
+void PipelineCache::createItemPipeline()
+{
+    VkDevice dev = m_DeviceContext.getDevice();
+    VkRenderPass rp = m_SwapChainContext.getRenderPass();
+
+    struct ItemPushConstant
+    {
+        glm::mat4 model;
+        glm::vec3 tileOrigin;
+    };
+    VkPushConstantRange pcRange{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ItemPushConstant)};
+
+    VkDescriptorSetLayout dsl = m_DescriptorLayout.getDescriptorSetLayout();
+    VkPipelineLayoutCreateInfo plCI{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    plCI.setLayoutCount = 1;
+    plCI.pSetLayouts = &dsl;
+    plCI.pushConstantRangeCount = 1;
+    plCI.pPushConstantRanges = &pcRange;
+
+    VkPipelineLayout layoutRaw{};
+    if (vkCreatePipelineLayout(dev, &plCI, nullptr, &layoutRaw) != VK_SUCCESS)
+        throw std::runtime_error("failed to create item pipeline layout!");
+    m_ItemPipelineLayout = VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter>(layoutRaw, {dev});
+
+    m_ItemPipeline = VulkanHandle<VkPipeline, PipelineDeleter>(
+        buildPipeline(dev, rp, m_ItemPipelineLayout.get(), VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, false, true, true, "shaders/item.vert.spv", "shaders/item.frag.spv"), {dev});
+}
 
 void PipelineCache::createPipelines()
 {

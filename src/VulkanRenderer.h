@@ -21,12 +21,16 @@
 #include "math/Ivec3Less.h"
 #include "renderer/DebugOverlay.h"
 #include "renderer/RayTracingPushConstants.h"
+#include "Item.h"
+#include "Item.h"
 
 #include <map>
 #include <memory>
 #include <mutex>
 #include <glm/glm.hpp>
 #include <optional>
+
+class Item;
 
 class Player;
 class TerrainGenerator;
@@ -49,7 +53,8 @@ public:
                    const std::vector<AABB> &debugAABBs,
                    bool showDebugOverlay,
                    const std::vector<glm::vec3> &outlineVertices,
-                   const std::optional<glm::ivec3> &hoveredBlockPos);
+                                      const std::optional<glm::ivec3> &hoveredBlockPos,
+                   const std::vector<std::unique_ptr<Item>> &items);
 
     void scheduleChunkGpuCleanup(std::shared_ptr<Chunk> chunk);
 
@@ -87,6 +92,7 @@ private:
     void recreateCrosshairVertexBuffer();
     void createModelMatrixSsbos();
     void createDebugCubeMesh();
+    void createItemMesh();
     void loadRayTracingFunctions();
     VkDeviceAddress getBufferDeviceAddress(VkBuffer buffer);
     VmaBuffer createScratchBuffer(VkDeviceSize size);
@@ -171,6 +177,10 @@ private:
     VmaBuffer m_DebugCubeVertexBuffer;
     VmaBuffer m_DebugCubeIndexBuffer;
     uint32_t m_DebugCubeIndexCount = 0;
+
+    VmaBuffer m_itemVertexBuffer;
+    VmaBuffer m_itemIndexBuffer;
+    uint32_t m_itemIndexCount = 0;
 
     uint32_t m_CurrentFrame{0};
     std::vector<VmaBuffer> m_BufferDestroyQueue[MAX_FRAMES_IN_FLIGHT];

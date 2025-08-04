@@ -15,6 +15,7 @@
 #include "Entity.h"
 #include "Player.h"
 #include "DebugController.h"
+#include "Item.h"
 #include <optional>
 
 struct ChunkLodRequestLess
@@ -44,6 +45,7 @@ public:
 
     Block get_block(int x, int y, int z);
     void set_block(int x, int y, int z, BlockId id);
+    void spawn_item(glm::vec3 position, BlockId blockId);
 
     Window &get_window() { return m_Window; }
     Settings &getSettings() { return m_Settings; }
@@ -78,6 +80,8 @@ private:
 
     std::vector<std::unique_ptr<Entity>> m_entities;
     Player *m_player_ptr = nullptr;
+
+    std::vector<std::unique_ptr<Item>> m_items;
 
     TerrainGenerator m_TerrainGen;
     std::optional<glm::ivec3> m_hoveredBlockPos;

@@ -10,6 +10,7 @@
 #include <glm/gtx/norm.hpp>
 
 #include <algorithm>
+#include "Item.h"
 
 Engine::Engine()
     : m_Window(WIDTH, HEIGHT, "Vibecraft", m_Settings),
@@ -64,6 +65,11 @@ Block Engine::get_block(int x, int y, int z)
     return {BlockId::AIR};
 }
 
+void Engine::spawn_item(glm::vec3 position, BlockId blockId)
+{
+    m_items.push_back(std::make_unique<Item>(this, position, blockId));
+}
+
 void Engine::run()
 {
     bool mouse_enabled = true;
@@ -105,6 +111,10 @@ void Engine::run()
             for (auto &entity : m_entities)
             {
                 entity->update(FIXED_TIMESTEP);
+            }
+            for (auto &item : m_items)
+            {
+                item->update(FIXED_TIMESTEP);
             }
             m_physicsAccumulator -= FIXED_TIMESTEP;
         }
@@ -171,7 +181,7 @@ void Engine::run()
         }
 
         if (!m_Renderer.drawFrame(m_player_ptr->get_camera(), player_pos_logic, chunks_copy, playerChunkPos,
-                                  m_gameTicks, debug_aabbs, m_showDebugOverlay, outlineVertices, m_hoveredBlockPos))
+                                  m_gameTicks, debug_aabbs, m_showDebugOverlay, outlineVertices, m_hoveredBlockPos, m_items))
         {
             continue;
         }
@@ -240,9 +250,9 @@ void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
         if (m_player_ptr->raycast(block_pos))
         {
             set_block(
-                static_cast<int>(block_pos.x),
-                static_cast<int>(block_pos.y),
-                static_cast<int>(block_pos.z),
+                static_cast<int>(floor(block_pos.x)),
+                static_cast<int>(floor(block_pos.y)),
+                static_cast<int>(floor(block_pos.z)),
                 BlockId::AIR);
         }
     }
@@ -288,6 +298,15 @@ void Engine::set_block(int x, int y, int z, BlockId id)
 {
     if (y < 0 || y >= Chunk::HEIGHT)
         return;
+
+    if (id == BlockId::AIR)
+    {
+        Block existing_block = get_block(x, y, z);
+        if (existing_block.id != BlockId::AIR && existing_block.id != BlockId::BEDROCK)
+        {
+            spawn_item(glm::vec3(x + 0.5f, y + 0.5f, z + 0.5f), existing_block.id);
+        }
+    }
 
     auto set_chunk_dirty = [&](int block_x, int block_z)
     {

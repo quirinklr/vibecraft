@@ -14,6 +14,7 @@
 #include "../../Camera.h"
 #include "../RendererConfig.h"
 #include "../RayTracingPushConstants.h"
+#include "../../Item.h"
 #include <vulkan/vulkan.h>
 
 struct SkyPushConstant
@@ -44,7 +45,9 @@ public:
         const Settings &settings, const std::vector<AABB> &debugAABBs,
         VkBuffer outlineVB,
         uint32_t outlineVertexCount,
-        const std::optional<glm::ivec3> &hoveredBlockPos);
+        const std::optional<glm::ivec3> &hoveredBlockPos,
+        const std::vector<std::unique_ptr<Item>> &items,
+        VkBuffer itemVB, VkBuffer itemIB, uint32_t itemIndexCount);
 
     VkCommandBuffer getCommandBuffer(uint32_t index) const { return m_CommandBuffers[index]; }
     VkCommandPool getCommandPool() const { return m_CommandPool.get(); }
