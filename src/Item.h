@@ -6,12 +6,13 @@
 class Item : public Entity
 {
 public:
-    Item(Engine* engine, glm::vec3 position, BlockId blockId);
+    Item(Engine *engine, glm::vec3 position, BlockId blockId);
 
     void update(float dt) override;
 
     BlockId get_block_id() const { return m_blockId; }
     float get_rotation() const { return m_rotation; }
+    glm::vec3 get_render_position() const;
 
 private:
     BlockId m_blockId;

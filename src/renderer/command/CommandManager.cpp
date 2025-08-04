@@ -188,7 +188,7 @@ void CommandManager::recordCommandBuffer(
         int tex_idx = blockData.texture_indices[0];
 
         ItemPushConstant pc;
-        pc.model = glm::translate(glm::mat4(1.0f), item->get_position());
+        pc.model = glm::translate(glm::mat4(1.0f), item->get_render_position());
         pc.model = glm::rotate(pc.model, glm::radians(item->get_rotation()), glm::vec3(0.0f, 1.0f, 0.0f));
         pc.tileOrigin = glm::vec3((tex_idx % 16) * ATLAS_INV_SIZE, (tex_idx / 16) * ATLAS_INV_SIZE, 0.f);
 

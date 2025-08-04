@@ -1441,7 +1441,7 @@ void VulkanRenderer::createDebugCubeMesh()
 
 void VulkanRenderer::createItemMesh()
 {
-    const float s = 0.25f;
+    const float s = 0.1f;
     std::vector<Vertex> vertices = {
 
         {{-s, -s, s}, {0, 0, 0}, {0, 0}},

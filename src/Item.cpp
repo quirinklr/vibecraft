@@ -1,11 +1,12 @@
 #include "Item.h"
 #include <random>
 
-Item::Item(Engine* engine, glm::vec3 position, BlockId blockId)
+Item::Item(Engine *engine, glm::vec3 position, BlockId blockId)
     : Entity(engine, position), m_blockId(blockId)
 {
-    m_hitbox.min = {-0.25f, 0.0f, -0.25f};
-    m_hitbox.max = {0.25f, 0.5f, 0.25f};
+    const float size = 0.2f;
+    m_hitbox.min = {-size / 2.0f, 0.0f, -size / 2.0f};
+    m_hitbox.max = {size / 2.0f, size, size / 2.0f};
 
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -19,10 +20,27 @@ Item::Item(Engine* engine, glm::vec3 position, BlockId blockId)
 
 void Item::update(float dt)
 {
-    m_rotation += dt * 180.0f;
+    m_rotation += dt * 90.0f;
     m_time += dt;
 
-    m_position.y += sin(m_time * 5.0f) * 0.005f;
-
     Entity::update(dt);
+}
+
+glm::vec3 Item::get_render_position() const
+{
+
+    glm::vec3 renderPos = m_position;
+
+    renderPos.y += m_hitbox.max.y / 2.0f;
+
+    if (m_is_on_ground)
+    {
+        const float bobble_amplitude = 0.05f;
+        const float bobble_speed = 2.5f;
+
+        float bobbleOffset = (sin(m_time * bobble_speed) + 1.0f) * 0.5f * bobble_amplitude;
+
+        renderPos.y += bobbleOffset;
+    }
+    return renderPos;
 }

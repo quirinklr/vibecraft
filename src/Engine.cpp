@@ -165,6 +165,11 @@ void Engine::run()
                     }
                 }
             }
+
+            for (const auto &item : m_items)
+            {
+                debug_aabbs.push_back(item->get_world_aabb());
+            }
         }
 
         glm::vec3 player_pos_logic = m_player_ptr->get_position();
