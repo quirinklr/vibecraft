@@ -633,9 +633,11 @@ void Chunk::buildMeshGreedy(int lodLevel,
                                 vertices.push_back({v3, tileO, uv(v3)});
 
                                 if (back)
-                                    indices.insert(indices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
-                                else
+
                                     indices.insert(indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
+                                else
+
+                                    indices.insert(indices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
                             }
                         }
                     }
@@ -669,11 +671,12 @@ void Chunk::buildMeshGreedy(int lodLevel,
                         vertices.push_back({v1, tileO, uv(v1)});
                         vertices.push_back({v2, tileO, uv(v2)});
                         vertices.push_back({v3, tileO, uv(v3)});
-
                         if (back)
-                            indices.insert(indices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
-                        else
+
                             indices.insert(indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
+                        else
+
+                            indices.insert(indices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
                     }
 
                     for (int y = 0; y < quadH; ++y)

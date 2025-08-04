@@ -84,16 +84,25 @@ void PlayerModel::addBox(std::vector<Vertex> &vertices, std::vector<uint32_t> &i
     vertices.push_back({{x + w, y, z + d}, {}, {(uv_bottom.x + W) / tex_dims.x, uv_bottom.y / tex_dims.y}});
     vertices.push_back({{x, y, z + d}, {}, {uv_bottom.x / tex_dims.x, uv_bottom.y / tex_dims.y}});
 
-    for (uint32_t i = 0; i < 6; ++i)
-    {
-        uint32_t face_base = base_index + i * 4;
-        indices.push_back(face_base);
-        indices.push_back(face_base + 1);
-        indices.push_back(face_base + 2);
-        indices.push_back(face_base);
-        indices.push_back(face_base + 2);
-        indices.push_back(face_base + 3);
-    }
+    uint32_t bi;
+
+    bi = base_index + 0;
+    indices.insert(indices.end(), {bi, bi + 1, bi + 2, bi, bi + 2, bi + 3});
+
+    bi = base_index + 4;
+    indices.insert(indices.end(), {bi, bi + 1, bi + 2, bi, bi + 2, bi + 3});
+
+    bi = base_index + 8;
+    indices.insert(indices.end(), {bi, bi + 1, bi + 2, bi, bi + 2, bi + 3});
+
+    bi = base_index + 12;
+    indices.insert(indices.end(), {bi, bi + 1, bi + 2, bi, bi + 2, bi + 3});
+
+    bi = base_index + 16;
+    indices.insert(indices.end(), {bi, bi + 1, bi + 2, bi, bi + 2, bi + 3});
+
+    bi = base_index + 20;
+    indices.insert(indices.end(), {bi, bi + 1, bi + 2, bi, bi + 2, bi + 3});
 }
 
 void PlayerModel::draw(VkCommandBuffer cmd) const
