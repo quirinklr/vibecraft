@@ -182,20 +182,26 @@ void CommandManager::recordCommandBuffer(
         glm::vec3 tileOrigin;
     };
 
+    const int textureIndexMap[6] = {2, 3, 0, 1, 5, 4};
+
     for (const auto &item : items)
     {
         const auto &blockData = BlockDatabase::get().get_block_data(item->get_block_id());
-        int tex_idx = blockData.texture_indices[0];
 
         ItemPushConstant pc;
         pc.model = glm::translate(glm::mat4(1.0f), item->get_render_position());
         pc.model = glm::rotate(pc.model, glm::radians(item->get_rotation()), glm::vec3(0.0f, 1.0f, 0.0f));
-        pc.tileOrigin = glm::vec3((tex_idx % 16) * ATLAS_INV_SIZE, (tex_idx / 16) * ATLAS_INV_SIZE, 0.f);
 
-        vkCmdPushConstants(cb, m_PipelineCache.getItemPipelineLayout(),
-                           VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ItemPushConstant), &pc);
+        for (int i = 0; i < 6; ++i)
+        {
+            int tex_idx_for_face = blockData.texture_indices[textureIndexMap[i]];
+            pc.tileOrigin = glm::vec3((tex_idx_for_face % 16) * ATLAS_INV_SIZE, (tex_idx_for_face / 16) * ATLAS_INV_SIZE, 0.f);
 
-        vkCmdDrawIndexed(cb, itemIndexCount, 1, 0, 0, 0);
+            vkCmdPushConstants(cb, m_PipelineCache.getItemPipelineLayout(),
+                               VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ItemPushConstant), &pc);
+
+            vkCmdDrawIndexed(cb, 6, 1, i * 6, 0, 0);
+        }
     }
 
     vkCmdEndRenderPass(cb);

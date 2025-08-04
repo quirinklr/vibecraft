@@ -15,7 +15,7 @@ Item::Item(Engine *engine, glm::vec3 position, BlockId blockId)
     float random_x = dis(gen);
     float random_z = dis(gen);
 
-    m_velocity = glm::vec3(random_x, 5.0f, random_z);
+    m_velocity = glm::vec3(random_x, 3.0f, random_z);
 }
 
 void Item::update(float dt)
@@ -36,7 +36,7 @@ glm::vec3 Item::get_render_position() const
     if (m_is_on_ground)
     {
         const float bobble_amplitude = 0.05f;
-        const float bobble_speed = 2.5f;
+        const float bobble_speed = 2.0f;
 
         float bobbleOffset = (sin(m_time * bobble_speed) + 1.0f) * 0.5f * bobble_amplitude;
 

@@ -941,7 +941,7 @@ void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &
         VkAccelerationStructureBuildRangeInfoKHR range{.primitiveCount = primCount};
         const VkAccelerationStructureBuildRangeInfoKHR *pRange = &range;
 
-            vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build, &pRange);
+        vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build, &pRange);
 
         VkMemoryBarrier tlasBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
         tlasBarrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
@@ -1441,51 +1441,49 @@ void VulkanRenderer::createDebugCubeMesh()
 
 void VulkanRenderer::createItemMesh()
 {
-    const float s = 0.1f;
+    const float s = 0.2f;
+    const float hs = s / 2.0f;
+
     std::vector<Vertex> vertices = {
 
-        {{-s, -s, s}, {0, 0, 0}, {0, 0}},
-        {{s, -s, s}, {0, 0, 0}, {1, 0}},
-        {{s, s, s}, {0, 0, 0}, {1, 1}},
-        {{-s, s, s}, {0, 0, 0}, {0, 1}},
+        {{-hs, 0, hs}, {}, {0, 0}},
+        {{hs, 0, hs}, {}, {1, 0}},
+        {{hs, s, hs}, {}, {1, 1}},
+        {{-hs, s, hs}, {}, {0, 1}},
 
-        {{-s, -s, -s}, {0, 0, 0}, {0, 0}},
-        {{-s, s, -s}, {0, 0, 0}, {1, 0}},
-        {{s, s, -s}, {0, 0, 0}, {1, 1}},
-        {{s, -s, -s}, {0, 0, 0}, {0, 1}},
+        {{-hs, 0, -hs}, {}, {1, 0}},
+        {{hs, 0, -hs}, {}, {0, 0}},
+        {{hs, s, -hs}, {}, {0, 1}},
+        {{-hs, s, -hs}, {}, {1, 1}},
 
-        {{-s, s, -s}, {0, 0, 0}, {0, 0}},
-        {{-s, s, s}, {0, 0, 0}, {1, 0}},
-        {{s, s, s}, {0, 0, 0}, {1, 1}},
-        {{s, s, -s}, {0, 0, 0}, {0, 1}},
+        {{-hs, s, hs}, {}, {0, 0}},
+        {{hs, s, hs}, {}, {1, 0}},
+        {{hs, s, -hs}, {}, {1, 1}},
+        {{-hs, s, -hs}, {}, {0, 1}},
 
-        {{-s, -s, -s}, {0, 0, 0}, {0, 0}},
-        {{s, -s, -s}, {0, 0, 0}, {1, 0}},
-        {{s, -s, s}, {0, 0, 0}, {1, 1}},
-        {{-s, -s, s}, {0, 0, 0}, {0, 1}},
+        {{-hs, 0, -hs}, {}, {0, 0}},
+        {{hs, 0, -hs}, {}, {1, 0}},
+        {{hs, 0, hs}, {}, {1, 1}},
+        {{-hs, 0, hs}, {}, {0, 1}},
 
-        {{s, -s, -s}, {0, 0, 0}, {0, 0}},
-        {{s, s, -s}, {0, 0, 0}, {1, 0}},
-        {{s, s, s}, {0, 0, 0}, {1, 1}},
-        {{s, -s, s}, {0, 0, 0}, {0, 1}},
+        {{hs, 0, hs}, {}, {0, 0}},
+        {{hs, 0, -hs}, {}, {1, 0}},
+        {{hs, s, -hs}, {}, {1, 1}},
+        {{hs, s, hs}, {}, {0, 1}},
 
-        {{-s, -s, -s}, {0, 0, 0}, {0, 0}},
-        {{-s, -s, s}, {0, 0, 0}, {1, 0}},
-        {{-s, s, s}, {0, 0, 0}, {1, 1}},
-        {{-s, s, -s}, {0, 0, 0}, {0, 1}},
+        {{-hs, 0, -hs}, {}, {0, 0}},
+        {{-hs, 0, hs}, {}, {1, 0}},
+        {{-hs, s, hs}, {}, {1, 1}},
+        {{-hs, s, -hs}, {}, {0, 1}},
     };
 
     std::vector<uint32_t> indices;
     for (uint32_t i = 0; i < 6; ++i)
     {
         uint32_t base = i * 4;
-        indices.push_back(base + 0);
-        indices.push_back(base + 1);
-        indices.push_back(base + 2);
-        indices.push_back(base + 0);
-        indices.push_back(base + 2);
-        indices.push_back(base + 3);
+        indices.insert(indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
     }
+
     m_itemIndexCount = static_cast<uint32_t>(indices.size());
 
     m_itemVertexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
