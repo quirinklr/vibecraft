@@ -14,14 +14,14 @@ enum class CameraMode
     FOURTH_PERSON
 };
 
-inline float wrapDegrees(float degrees)
+inline float wrapRadians(float radians)
 {
-    float result = fmod(degrees + 180.0f, 360.0f);
+    float result = fmod(radians + glm::pi<float>(), glm::two_pi<float>());
     if (result < 0.0f)
     {
-        result += 360.0f;
+        result += glm::two_pi<float>();
     }
-    return result - 180.0f;
+    return result - glm::pi<float>();
 }
 
 class Player : public Entity
@@ -63,6 +63,7 @@ private:
     float m_headPitch;
     float m_renderYawOffset;
 
+    bool m_isMoving = false;
     bool m_is_sprinting = false;
 
     const Settings &m_settings;

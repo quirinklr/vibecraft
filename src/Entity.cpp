@@ -54,49 +54,28 @@ void Entity::update(float dt)
     if (m_is_flying)
     {
         m_position += m_velocity * dt;
+
+        return;
     }
-    else
+
+    m_velocity.y += GRAVITY * dt;
+    if (m_is_in_water)
     {
-
-        m_velocity.y += GRAVITY * dt;
-        if (m_is_in_water)
-        {
-            m_velocity.y += BUOYANCY_FORCE * dt;
-
-            m_velocity -= m_velocity * WATER_DRAG_FACTOR * dt;
-        }
-
-        m_position += m_velocity * dt;
-
-        resolve_collisions();
-
-        if (m_is_on_ground && !m_is_in_water)
-        {
-            float ground_friction = 10.0f;
-            m_velocity.x *= std::max(0.0f, 1.0f - dt * ground_friction);
-            m_velocity.z *= std::max(0.0f, 1.0f - dt * ground_friction);
-        }
-
-        else if (!m_is_in_water)
-        {
-            float air_drag = 1.0f;
-            m_velocity.x *= std::max(0.0f, 1.0f - dt * air_drag);
-            m_velocity.z *= std::max(0.0f, 1.0f - dt * air_drag);
-        }
+        m_velocity.y += BUOYANCY_FORCE * dt;
+        m_velocity -= m_velocity * WATER_DRAG_FACTOR * dt;
     }
-}
 
-void Entity::resolve_collisions()
-{
     m_is_on_ground = false;
-    AABB entity_aabb = {m_position + m_hitbox.min, m_position + m_hitbox.max};
 
-    int min_bx = static_cast<int>(floor(entity_aabb.min.x));
-    int max_bx = static_cast<int>(ceil(entity_aabb.max.x));
-    int min_by = static_cast<int>(floor(entity_aabb.min.y));
-    int max_by = static_cast<int>(ceil(entity_aabb.max.y));
-    int min_bz = static_cast<int>(floor(entity_aabb.min.z));
-    int max_bz = static_cast<int>(ceil(entity_aabb.max.z));
+    m_position.y += m_velocity.y * dt;
+    AABB entityAABB = get_world_aabb();
+    int min_by = static_cast<int>(floor(entityAABB.min.y));
+    int max_by = static_cast<int>(ceil(entityAABB.max.y));
+
+    int min_bx = static_cast<int>(floor(entityAABB.min.x));
+    int max_bx = static_cast<int>(ceil(entityAABB.max.x));
+    int min_bz = static_cast<int>(floor(entityAABB.min.z));
+    int max_bz = static_cast<int>(ceil(entityAABB.max.z));
 
     for (int by = min_by; by < max_by; ++by)
     {
@@ -106,50 +85,108 @@ void Entity::resolve_collisions()
             {
                 Block block = m_engine->get_block(bx, by, bz);
                 if (!BlockDatabase::get().get_block_data(block.id).is_solid)
-                {
                     continue;
-                }
 
-                AABB block_aabb = {glm::vec3(bx, by, bz), glm::vec3(bx + 1, by + 1, bz + 1)};
-                AABB current_entity_aabb = {m_position + m_hitbox.min, m_position + m_hitbox.max};
-
-                if (!current_entity_aabb.intersects(block_aabb))
-                {
-                    continue;
-                }
-
-                glm::vec3 overlap;
-                overlap.x = (m_velocity.x > 0) ? (current_entity_aabb.max.x - block_aabb.min.x) : (block_aabb.max.x - current_entity_aabb.min.x);
-                overlap.y = (m_velocity.y > 0) ? (current_entity_aabb.max.y - block_aabb.min.y) : (block_aabb.max.y - current_entity_aabb.min.y);
-                overlap.z = (m_velocity.z > 0) ? (current_entity_aabb.max.z - block_aabb.min.z) : (block_aabb.max.z - current_entity_aabb.min.z);
-
-                if (overlap.x < overlap.y && overlap.x < overlap.z)
-                {
-                    if (m_velocity.x > 0)
-                        m_position.x -= overlap.x;
-                    else
-                        m_position.x += overlap.x;
-                    m_velocity.x = 0;
-                }
-                else if (overlap.y < overlap.z)
+                AABB blockAABB = {glm::vec3(bx, by, bz), glm::vec3(bx + 1, by + 1, bz + 1)};
+                if (get_world_aabb().intersects(blockAABB))
                 {
                     if (m_velocity.y > 0)
-                        m_position.y -= overlap.y;
+                    {
+                        m_position.y = blockAABB.min.y - m_hitbox.max.y;
+                    }
                     else
-                        m_position.y += overlap.y;
-                    if (m_velocity.y < 0)
+                    {
+                        m_position.y = blockAABB.max.y - m_hitbox.min.y;
                         m_is_on_ground = true;
+                    }
                     m_velocity.y = 0;
                 }
-                else
+            }
+        }
+    }
+
+    m_position.x += m_velocity.x * dt;
+    entityAABB = get_world_aabb();
+    min_by = static_cast<int>(floor(entityAABB.min.y));
+    max_by = static_cast<int>(ceil(entityAABB.max.y));
+    min_bx = static_cast<int>(floor(entityAABB.min.x));
+    max_bx = static_cast<int>(ceil(entityAABB.max.x));
+    min_bz = static_cast<int>(floor(entityAABB.min.z));
+    max_bz = static_cast<int>(ceil(entityAABB.max.z));
+
+    for (int by = min_by; by < max_by; ++by)
+    {
+        for (int bx = min_bx; bx < max_bx; ++bx)
+        {
+            for (int bz = min_bz; bz < max_bz; ++bz)
+            {
+                Block block = m_engine->get_block(bx, by, bz);
+                if (!BlockDatabase::get().get_block_data(block.id).is_solid)
+                    continue;
+
+                AABB blockAABB = {glm::vec3(bx, by, bz), glm::vec3(bx + 1, by + 1, bz + 1)};
+                if (get_world_aabb().intersects(blockAABB))
+                {
+                    if (m_velocity.x > 0)
+                    {
+                        m_position.x = blockAABB.min.x - m_hitbox.max.x;
+                    }
+                    else
+                    {
+                        m_position.x = blockAABB.max.x - m_hitbox.min.x;
+                    }
+                    m_velocity.x = 0;
+                }
+            }
+        }
+    }
+
+    m_position.z += m_velocity.z * dt;
+    entityAABB = get_world_aabb();
+    min_by = static_cast<int>(floor(entityAABB.min.y));
+    max_by = static_cast<int>(ceil(entityAABB.max.y));
+    min_bx = static_cast<int>(floor(entityAABB.min.x));
+    max_bx = static_cast<int>(ceil(entityAABB.max.x));
+    min_bz = static_cast<int>(floor(entityAABB.min.z));
+    max_bz = static_cast<int>(ceil(entityAABB.max.z));
+
+    for (int by = min_by; by < max_by; ++by)
+    {
+        for (int bx = min_bx; bx < max_bx; ++bx)
+        {
+            for (int bz = min_bz; bz < max_bz; ++bz)
+            {
+                Block block = m_engine->get_block(bx, by, bz);
+                if (!BlockDatabase::get().get_block_data(block.id).is_solid)
+                    continue;
+
+                AABB blockAABB = {glm::vec3(bx, by, bz), glm::vec3(bx + 1, by + 1, bz + 1)};
+                if (get_world_aabb().intersects(blockAABB))
                 {
                     if (m_velocity.z > 0)
-                        m_position.z -= overlap.z;
+                    {
+                        m_position.z = blockAABB.min.z - m_hitbox.max.z;
+                    }
                     else
-                        m_position.z += overlap.z;
+                    {
+                        m_position.z = blockAABB.max.z - m_hitbox.min.z;
+                    }
                     m_velocity.z = 0;
                 }
             }
         }
+    }
+
+    if (m_is_on_ground && !m_is_in_water)
+    {
+        float ground_friction = 10.0f;
+        m_velocity.x *= std::max(0.0f, 1.0f - dt * ground_friction);
+        m_velocity.z *= std::max(0.0f, 1.0f - dt * ground_friction);
+    }
+    else if (!m_is_in_water)
+    {
+        float air_drag = 1.0f;
+        m_velocity.x *= std::max(0.0f, 1.0f - dt * air_drag);
+        m_velocity.z *= std::max(0.0f, 1.0f - dt * air_drag);
     }
 }

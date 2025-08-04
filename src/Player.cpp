@@ -39,35 +39,49 @@ void Player::update(float dt)
 void Player::updateModelRotations()
 {
 
-    m_headPitch = m_cameraPitch;
     m_netHeadYaw = m_cameraYaw;
+    m_headPitch = m_cameraPitch;
 
-    const float maxNeckTurn = 85.0f;
-
-    float deltaYaw = wrapDegrees(m_netHeadYaw - m_renderYawOffset);
-
-    if (deltaYaw < -maxNeckTurn)
+    if (m_cameraMode == CameraMode::FIRST_PERSON)
     {
-        deltaYaw = -maxNeckTurn;
-    }
-    if (deltaYaw > maxNeckTurn)
-    {
-        deltaYaw = maxNeckTurn;
+        m_renderYawOffset = m_netHeadYaw;
+        return;
     }
 
-    m_renderYawOffset += deltaYaw;
+    float targetBodyYaw = m_renderYawOffset;
+
+    if (m_isMoving)
+    {
+
+        targetBodyYaw = atan2(m_velocity.x, m_velocity.z);
+    }
+
+    float bodyTurnSpeed = 8.0f;
+    float deltaYaw = wrapRadians(targetBodyYaw - m_renderYawOffset);
+
+    m_renderYawOffset += deltaYaw * bodyTurnSpeed * (1.0f / 60.0f);
+
+    const float maxNeckTurn = glm::radians(85.0f);
+    float deltaHeadYaw = wrapRadians(m_netHeadYaw - m_renderYawOffset);
+
+    if (deltaHeadYaw < -maxNeckTurn)
+    {
+        m_netHeadYaw = m_renderYawOffset - maxNeckTurn;
+    }
+    if (deltaHeadYaw > maxNeckTurn)
+    {
+        m_netHeadYaw = m_renderYawOffset + maxNeckTurn;
+    }
 }
 
 void Player::process_keyboard(GLFWwindow *window, float dt)
 {
+    glm::vec3 move_direction{0.f};
 
     if (m_is_flying)
     {
-
         glm::vec3 forward{cos(m_cameraYaw) * cos(m_cameraPitch), sin(m_cameraPitch), sin(m_cameraYaw) * cos(m_cameraPitch)};
         glm::vec3 right = glm::normalize(glm::cross(forward, {0.f, 1.f, 0.f}));
-        glm::vec3 up = {0.f, 1.f, 0.f};
-        glm::vec3 move_direction{0.f};
 
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
             move_direction += forward;
@@ -78,58 +92,17 @@ void Player::process_keyboard(GLFWwindow *window, float dt)
         if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
             move_direction += right;
         if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
-            move_direction += up;
+            move_direction += glm::vec3(0.f, 1.f, 0.f);
         if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
-            move_direction -= up;
+            move_direction -= glm::vec3(0.f, 1.f, 0.f);
 
-        bool is_moving = glm::length(move_direction) > 0.001f;
-
-        if (is_moving)
-        {
-            move_direction = glm::normalize(move_direction);
-
-            m_yaw = m_cameraYaw;
-        }
-        m_velocity = move_direction * FLY_SPEED;
-    }
-    else if (m_is_in_water)
-    {
-
-        glm::vec3 forward{cos(m_cameraYaw), 0, sin(m_cameraYaw)};
-        glm::vec3 right = glm::normalize(glm::cross(forward, {0.f, 1.f, 0.f}));
-        glm::vec3 move_direction{0.f};
-
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-            move_direction += forward;
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-            move_direction -= forward;
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-            move_direction -= right;
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-            move_direction += right;
-
-        bool is_moving = glm::length(move_direction) > 0.001f;
-
-        if (is_moving)
-        {
-            move_direction = glm::normalize(move_direction);
-
-            m_yaw = m_cameraYaw;
-        }
-        m_velocity += move_direction * SWIM_ACCELERATION * dt;
-
-        if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
-        {
-            m_velocity.y += SWIM_UP_ACCELERATION * dt;
-        }
+        m_velocity = glm::length(move_direction) > 0.001f ? glm::normalize(move_direction) * FLY_SPEED : glm::vec3(0.f);
     }
 
     else
     {
-
         glm::vec3 forward{cos(m_cameraYaw), 0, sin(m_cameraYaw)};
         glm::vec3 right = glm::normalize(glm::cross(forward, {0.f, 1.f, 0.f}));
-        glm::vec3 move_direction{0.f};
 
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
             move_direction += forward;
@@ -140,46 +113,30 @@ void Player::process_keyboard(GLFWwindow *window, float dt)
         if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
             move_direction += right;
 
-        bool is_moving = glm::length(move_direction) > 0.001f;
-
-        if (is_moving)
-        {
-            move_direction = glm::normalize(move_direction);
-
-            if (m_cameraMode != CameraMode::FIRST_PERSON)
-            {
-                m_yaw = m_cameraYaw;
-            }
-        }
-
-        if (glm::length(move_direction) > 0.0f)
+        if (glm::length(move_direction) > 0.001f)
         {
             move_direction = glm::normalize(move_direction);
         }
 
-        const float GROUND_ACCELERATION = 80.0f;
-        const float AIR_ACCELERATION = 15.0f;
-        float acceleration = m_is_on_ground ? GROUND_ACCELERATION : AIR_ACCELERATION;
-
-        m_velocity.x += move_direction.x * acceleration * dt;
-        m_velocity.z += move_direction.z * acceleration * dt;
-
-        m_is_sprinting = (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS);
-        float current_speed_limit = m_is_sprinting ? SPRINT_SPEED : WALK_SPEED;
-
-        glm::vec3 horizontal_velocity = {m_velocity.x, 0.0f, m_velocity.z};
-        if (glm::length(horizontal_velocity) > current_speed_limit)
+        if (m_is_in_water)
         {
-            glm::vec3 limited_velocity = glm::normalize(horizontal_velocity) * current_speed_limit;
-            m_velocity.x = limited_velocity.x;
-            m_velocity.z = limited_velocity.z;
+            m_velocity += move_direction * SWIM_ACCELERATION * dt;
+            if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+                m_velocity.y += SWIM_UP_ACCELERATION * dt;
         }
-
-        if (m_is_on_ground && glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+        else
         {
-            m_velocity.y = JUMP_FORCE;
+            const float GROUND_ACCELERATION = 80.0f;
+            const float AIR_ACCELERATION = 15.0f;
+            float acceleration = m_is_on_ground ? GROUND_ACCELERATION : AIR_ACCELERATION;
+            m_velocity.x += move_direction.x * acceleration * dt;
+            m_velocity.z += move_direction.z * acceleration * dt;
+            if (m_is_on_ground && glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+                m_velocity.y = JUMP_FORCE;
         }
     }
+
+    m_isMoving = glm::length(move_direction) > 0.001f;
 }
 
 bool Player::raycast(glm::vec3 &out_block_pos) const

@@ -225,11 +225,12 @@ void CommandManager::recordPlayer(VkCommandBuffer cb, Player *player, VkDescript
     model.drawRightLeg(cb);
 
     glm::mat4 headTransform = baseTransform;
-
     glm::vec3 headPivot = glm::vec3(0.0f, 24.0f / 16.0f, 0.0f);
 
     headTransform = glm::translate(headTransform, headPivot);
-    headTransform = glm::rotate(headTransform, wrapDegrees(headYaw - bodyYaw), glm::vec3(0.0f, 1.0f, 0.0f));
+
+    headTransform = glm::rotate(headTransform, headYaw - bodyYaw, glm::vec3(0.0f, 1.0f, 0.0f));
+
     headTransform = glm::rotate(headTransform, headPitch, glm::vec3(1.0f, 0.0f, 0.0f));
     headTransform = glm::translate(headTransform, -headPivot);
 
