@@ -75,6 +75,17 @@ public:
     DebugOverlay *getDebugOverlay() const { return m_debugOverlay.get(); }
 
 private:
+    static const uint32_t MAX_INDIRECT_DRAWS = 4096;
+
+    std::vector<VmaBuffer> m_IndirectDrawBuffers;
+    std::vector<void *> m_IndirectDrawBuffersMapped;
+
+    std::vector<VmaBuffer> m_ChunkRenderDataSsbos;
+    std::vector<void *> m_ChunkRenderDataSsbosMapped;
+
+    std::vector<VmaBuffer> m_MegaVertexBuffers;
+    std::vector<VmaBuffer> m_MegaIndexBuffers;
+
     glm::vec3 updateUniformBuffer(uint32_t currentImage, Camera &camera, const glm::vec3 &playerPos);
     void updateLightUbo(uint32_t currentImage, uint32_t gameTicks);
     void buildBlas(const std::vector<std::pair<Chunk *, int>> &chunksToBuild, VkCommandBuffer cmd);

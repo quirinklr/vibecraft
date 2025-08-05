@@ -26,7 +26,7 @@ const float TILE_SIZE = 1.0 / 16.0;
 
 const vec3 AMBIENT_NIGHT = vec3(0.05, 0.1, 0.15);
 const vec3 SUNLIGHT = vec3(0.8, 0.9, 1.0);
-const vec3 FOG_COLOR = vec3(0.05, 0.18, 0.25);
+const vec3 FOG_COLOR = vec3(0.05, 0.15, 0.25);
 
 void main() {
     vec2 uv = tileOrigin + fract(localUV) * TILE_SIZE;
@@ -43,7 +43,7 @@ void main() {
     if (cameraUbo.isUnderwater == 1) {
         
         float dist = distance(cameraUbo.cameraPos, fragWorldPos);
-        float fogDensity = 0.15; 
+        float fogDensity = 0.75; 
         fogFactor = exp(-dist * fogDensity);
 
     } else {

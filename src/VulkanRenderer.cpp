@@ -93,6 +93,46 @@ VulkanRenderer::VulkanRenderer(Window &window,
 
         createShaderBindingTable();
     }
+
+    VkDeviceSize indirectBufferSize = sizeof(VkDrawIndexedIndirectCommand) * MAX_INDIRECT_DRAWS;
+
+    struct ChunkRenderData
+    {
+        glm::mat4 model;
+    };
+    VkDeviceSize chunkRenderDataBufferSize = sizeof(ChunkRenderData) * MAX_INDIRECT_DRAWS;
+
+    VkDeviceSize megaVbSize = 128 * 1024 * 1024;
+    VkDeviceSize megaIbSize = 64 * 1024 * 1024;
+
+    m_IndirectDrawBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+    m_IndirectDrawBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
+    m_ChunkRenderDataSsbos.resize(MAX_FRAMES_IN_FLIGHT);
+    m_ChunkRenderDataSsbosMapped.resize(MAX_FRAMES_IN_FLIGHT);
+    m_MegaVertexBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+    m_MegaIndexBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+    {
+
+        m_IndirectDrawBuffers[i] = VmaBuffer(
+            m_DeviceContext->getAllocator(),
+            {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, indirectBufferSize, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT},
+            {VMA_ALLOCATION_CREATE_MAPPED_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU});
+        VmaAllocationInfo allocInfo;
+        vmaGetAllocationInfo(m_DeviceContext->getAllocator(), m_IndirectDrawBuffers[i].getAllocation(), &allocInfo);
+        m_IndirectDrawBuffersMapped[i] = allocInfo.pMappedData;
+
+        m_ChunkRenderDataSsbos[i] = VmaBuffer(
+            m_DeviceContext->getAllocator(),
+            {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, chunkRenderDataBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT},
+            {VMA_ALLOCATION_CREATE_MAPPED_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU});
+        vmaGetAllocationInfo(m_DeviceContext->getAllocator(), m_ChunkRenderDataSsbos[i].getAllocation(), &allocInfo);
+        m_ChunkRenderDataSsbosMapped[i] = allocInfo.pMappedData;
+
+        m_MegaVertexBuffers[i] = VmaBuffer();
+        m_MegaIndexBuffers[i] = VmaBuffer();
+    }
 }
 
 void VulkanRenderer::createBreakOverlayResources()

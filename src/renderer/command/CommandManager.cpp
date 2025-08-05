@@ -94,11 +94,12 @@ void CommandManager::recordCommandBuffer(
                             m_PipelineCache.getGraphicsPipelineLayout(),
                             0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
-    uint32_t instanceOffset = 0;
     for (uint32_t i = 0; i < opaqueChunks.size(); ++i)
     {
         const auto &[chunk, lod] = opaqueChunks[i];
         const ChunkMesh *mesh = chunk->getMesh(lod);
+        if (!mesh)
+            continue;
 
         VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
         VkDeviceSize chunk_offsets[] = {0};
@@ -106,7 +107,8 @@ void CommandManager::recordCommandBuffer(
         vkCmdBindIndexBuffer(cb, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(cb, mesh->indexCount, 1, 0, 0, i);
     }
-    instanceOffset += static_cast<uint32_t>(opaqueChunks.size());
+
+    uint32_t instanceOffset = static_cast<uint32_t>(opaqueChunks.size());
 
     if (breakingBlockPos.has_value() && breakingStage > 0)
     {
@@ -160,6 +162,9 @@ void CommandManager::recordCommandBuffer(
         {
             const auto &[chunk, lod] = transparentChunks[i];
             const ChunkMesh *mesh = chunk->getTransparentMesh(lod);
+            if (!mesh)
+                continue;
+
             VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
             VkDeviceSize chunk_offsets[] = {0};
             vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, chunk_offsets);
@@ -170,7 +175,6 @@ void CommandManager::recordCommandBuffer(
 
     if (settings.showCollisionBoxes && !debugAABBs.empty())
     {
-
         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getDebugPipeline());
         vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 m_PipelineCache.getDebugPipelineLayout(),
