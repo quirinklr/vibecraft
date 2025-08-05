@@ -55,7 +55,9 @@ public:
                    bool showDebugOverlay,
                    const std::vector<glm::vec3> &outlineVertices,
                    const std::optional<glm::ivec3> &hoveredBlockPos,
-                   const std::vector<std::unique_ptr<Item>> &items);
+                   const std::vector<std::unique_ptr<Item>> &items,
+                   const std::optional<glm::ivec3> &breakingBlockPos,
+                   int breakingStage);
 
     void scheduleChunkGpuCleanup(std::shared_ptr<Chunk> chunk);
 
@@ -95,6 +97,7 @@ private:
     void createModelMatrixSsbos();
     void createDebugCubeMesh();
     void createItemMesh();
+    void createBreakOverlayResources();
     void loadRayTracingFunctions();
     VkDeviceAddress getBufferDeviceAddress(VkBuffer buffer);
     VmaBuffer createScratchBuffer(VkDeviceSize size);
@@ -182,6 +185,12 @@ private:
     VmaBuffer m_itemVertexBuffer;
     VmaBuffer m_itemIndexBuffer;
     uint32_t m_itemIndexCount = 0;
+
+    VmaBuffer m_breakOverlayVertexBuffer;
+    VmaBuffer m_breakOverlayIndexBuffer;
+    uint32_t m_breakOverlayIndexCount = 0;
+    VmaImage m_breakOverlayTexture;
+    VulkanHandle<VkImageView, ImageViewDeleter> m_breakOverlayTextureView;
 
     uint32_t m_CurrentFrame{0};
     std::vector<VmaBuffer> m_BufferDestroyQueue[MAX_FRAMES_IN_FLIGHT];

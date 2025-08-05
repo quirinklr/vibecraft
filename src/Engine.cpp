@@ -97,6 +97,61 @@ void Engine::spawn_item(glm::vec3 position, BlockId blockId)
 	m_items.push_back(std::make_unique<Item>(this, position, blockId));
 }
 
+void Engine::updateBlockBreaking(float now, bool is_mouse_pressed, bool mouse_enabled)
+{
+	glm::vec3 hit_block_pos;
+	bool is_looking_at_block = m_player_ptr->raycast(hit_block_pos);
+
+	if (is_mouse_pressed && mouse_enabled && is_looking_at_block)
+	{
+		glm::ivec3 current_hovered_block = {floor(hit_block_pos.x), floor(hit_block_pos.y), floor(hit_block_pos.z)};
+
+		if (!m_breakingBlockPos.has_value() || m_breakingBlockPos.value() != current_hovered_block)
+		{
+			const auto &block_data = BlockDatabase::get().get_block_data(get_block(current_hovered_block.x, current_hovered_block.y, current_hovered_block.z).id);
+
+			if (block_data.hardness >= 0)
+			{
+				m_breakingBlockPos = current_hovered_block;
+				m_breakingStartTime = now;
+
+				float blockHardness = block_data.hardness;
+				float toolEfficiency = 1.0f;
+				int tickDurationMs = 50;
+
+				float totalTicks = ceil((blockHardness * 20.0f) / toolEfficiency);
+
+				m_breakingTotalTimeMs = totalTicks * tickDurationMs;
+
+				if (m_breakingTotalTimeMs < tickDurationMs)
+				{
+					m_breakingTotalTimeMs = static_cast<float>(tickDurationMs);
+				}
+			}
+		}
+	}
+	else
+	{
+		m_breakingBlockPos.reset();
+		m_breakingStage = 0;
+	}
+
+	if (m_breakingBlockPos.has_value())
+	{
+		float elapsed_ms = (now - m_breakingStartTime) * 1000.0f;
+		if (elapsed_ms >= m_breakingTotalTimeMs)
+		{
+			set_block(m_breakingBlockPos->x, m_breakingBlockPos->y, m_breakingBlockPos->z, BlockId::AIR);
+			m_breakingBlockPos.reset();
+			m_breakingStage = 0;
+		}
+		else
+		{
+			m_breakingStage = static_cast<int>(floor((elapsed_ms / m_breakingTotalTimeMs) * 10.0f));
+		}
+	}
+}
+
 void Engine::run()
 {
 	bool mouse_enabled = true;
@@ -123,6 +178,7 @@ void Engine::run()
 
 		glfwPollEvents();
 		processInput(dt, mouse_enabled, last_cursor_x, last_cursor_y);
+		updateBlockBreaking(now, glfwGetMouseButton(m_Window.getGLFWwindow(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS, mouse_enabled);
 
 		m_timeAccumulator += dt;
 		while (m_timeAccumulator >= 1.0f / m_ticksPerSecond)
@@ -169,6 +225,7 @@ void Engine::run()
 		}
 
 		std::vector<glm::vec3> outlineVertices;
+		
 		if (m_hoveredBlockPos)
 		{
 			generateBlockOutline(*m_hoveredBlockPos, outlineVertices);
@@ -215,7 +272,7 @@ void Engine::run()
 		}
 
 		if (!m_Renderer.drawFrame(m_player_ptr, m_player_ptr->get_camera(), player_pos_logic, chunks_copy, playerChunkPos,
-								  m_gameTicks, debug_aabbs, m_showDebugOverlay, outlineVertices, m_hoveredBlockPos, m_items))
+								  m_gameTicks, debug_aabbs, m_showDebugOverlay, outlineVertices, m_hoveredBlockPos, m_items, m_breakingBlockPos, m_breakingStage))
 		{
 			continue;
 		}
@@ -281,23 +338,6 @@ void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
 
 		m_player_ptr->process_mouse_movement(dx, dy);
 	}
-
-	static bool was_mouse_pressed = false;
-	bool is_mouse_pressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
-
-	if (is_mouse_pressed && !was_mouse_pressed && mouse_enabled)
-	{
-		glm::vec3 block_pos;
-		if (m_player_ptr->raycast(block_pos))
-		{
-			set_block(
-				static_cast<int>(floor(block_pos.x)),
-				static_cast<int>(floor(block_pos.y)),
-				static_cast<int>(floor(block_pos.z)),
-				BlockId::AIR);
-		}
-	}
-	was_mouse_pressed = is_mouse_pressed;
 
 	static bool gLast = false;
 	bool gNow = glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS;

@@ -36,10 +36,12 @@ void CommandManager::recordCommandBuffer(
     const std::optional<glm::ivec3> &hoveredBlockPos,
     const std::vector<std::unique_ptr<Item>> &items,
     VkBuffer itemVB, VkBuffer itemIB, uint32_t itemIndexCount,
-
     Player *player,
     VkDescriptorSet playerDescriptorSet,
-    PlayerModel &playerModel)
+    PlayerModel &playerModel,
+    const std::optional<glm::ivec3> &breakingBlockPos,
+    int breakingStage,
+    VkBuffer breakOverlayVB, VkBuffer breakOverlayIB, uint32_t breakOverlayIndexCount)
 {
     VkCommandBuffer cb = m_CommandBuffers[currentFrame];
 
@@ -105,6 +107,31 @@ void CommandManager::recordCommandBuffer(
         vkCmdDrawIndexed(cb, mesh->indexCount, 1, 0, 0, i);
     }
     instanceOffset += static_cast<uint32_t>(opaqueChunks.size());
+
+    if (breakingBlockPos.has_value() && breakingStage > 0)
+    {
+        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getBreakOverlayPipeline());
+
+        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                m_PipelineCache.getBreakOverlayPipelineLayout(),
+                                0, 1, &descriptorSets[currentFrame], 0, nullptr);
+
+        struct PushConstants
+        {
+            glm::mat4 model;
+            int stage;
+        } pc;
+        pc.model = glm::translate(glm::mat4(1.0f), glm::vec3(*breakingBlockPos) + glm::vec3(0.5f));
+        pc.stage = breakingStage;
+
+        vkCmdPushConstants(cb, m_PipelineCache.getBreakOverlayPipelineLayout(),
+                           VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+
+        VkDeviceSize break_offsets[] = {0};
+        vkCmdBindVertexBuffers(cb, 0, 1, &breakOverlayVB, break_offsets);
+        vkCmdBindIndexBuffer(cb, breakOverlayIB, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(cb, breakOverlayIndexCount, 1, 0, 0, 0);
+    }
 
     if (player->getCameraMode() != CameraMode::FIRST_PERSON)
     {

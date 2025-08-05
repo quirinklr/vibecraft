@@ -147,9 +147,39 @@ PipelineCache::PipelineCache(const DeviceContext &deviceContext,
 
     createItemPipeline();
     createPlayerPipeline();
+    createBreakOverlayPipeline();
 }
 
 PipelineCache::~PipelineCache() = default;
+
+void PipelineCache::createBreakOverlayPipeline()
+{
+    VkDevice dev = m_DeviceContext.getDevice();
+    VkRenderPass rp = m_SwapChainContext.getRenderPass();
+
+    struct PushConstants
+    {
+        glm::mat4 model;
+        int stage;
+    };
+    VkPushConstantRange pcRange{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants)};
+
+    VkDescriptorSetLayout dsls[] = {m_DescriptorLayout.getDescriptorSetLayout()};
+
+    VkPipelineLayoutCreateInfo plCI{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    plCI.setLayoutCount = 1;
+    plCI.pSetLayouts = dsls;
+    plCI.pushConstantRangeCount = 1;
+    plCI.pPushConstantRanges = &pcRange;
+
+    VkPipelineLayout layoutRaw{};
+    if (vkCreatePipelineLayout(dev, &plCI, nullptr, &layoutRaw) != VK_SUCCESS)
+        throw std::runtime_error("failed to create break overlay pipeline layout!");
+    m_BreakOverlayPipelineLayout = VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter>(layoutRaw, {dev});
+
+    m_BreakOverlayPipeline = VulkanHandle<VkPipeline, PipelineDeleter>(
+        buildPipeline(dev, rp, m_BreakOverlayPipelineLayout.get(), VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, true, false, true, "shaders/break_overlay.vert.spv", "shaders/break_overlay.frag.spv"), {dev});
+}
 
 void PipelineCache::createPlayerPipeline()
 {

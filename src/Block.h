@@ -18,6 +18,7 @@ enum class BlockId : uint8_t
 struct BlockData
 {
     bool is_solid;
+    float hardness = 1.0f;
 
     std::array<uint8_t, 6> texture_indices;
 };

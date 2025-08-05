@@ -32,6 +32,9 @@ public:
     VkPipelineLayout getPlayerPipelineLayout() const { return m_PlayerPipelineLayout.get(); }
     VkDescriptorSetLayout getPlayerDescriptorSetLayout() const { return m_PlayerDescriptorSetLayout.get(); }
 
+    VkPipeline getBreakOverlayPipeline() const { return m_BreakOverlayPipeline.get(); }
+    VkPipelineLayout getBreakOverlayPipelineLayout() const { return m_BreakOverlayPipelineLayout.get(); }
+
     void createPipelines();
 
 private:
@@ -42,6 +45,7 @@ private:
     void createOutlinePipeline();
     void createDebugPipeline();
     void createItemPipeline();
+    void createBreakOverlayPipeline();
 
     const DeviceContext &m_DeviceContext;
     const SwapChainContext &m_SwapChainContext;
@@ -67,4 +71,6 @@ private:
     VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter> m_PlayerPipelineLayout;
     VulkanHandle<VkPipeline, PipelineDeleter> m_PlayerPipeline;
     VulkanHandle<VkDescriptorSetLayout, DescriptorSetLayoutDeleter> m_PlayerDescriptorSetLayout;
+    VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter> m_BreakOverlayPipelineLayout;
+    VulkanHandle<VkPipeline, PipelineDeleter> m_BreakOverlayPipeline;
 };

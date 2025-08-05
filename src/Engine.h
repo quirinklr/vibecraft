@@ -60,6 +60,8 @@ private:
     void updateWindowTitle(float now, float &fpsTime, int &frames, const glm::vec3 &player_pos);
     void updateChunks(const glm::vec3 &cameraPos);
 
+    void updateBlockBreaking(float now, bool is_mouse_pressed, bool mouse_enabled);
+
     void unloadDistantChunks(const glm::ivec3 &playerChunkPos);
     void processGarbage();
     void loadVisibleChunks(const glm::ivec3 &playerChunkPos);
@@ -88,6 +90,11 @@ private:
 
     TerrainGenerator m_TerrainGen;
     std::optional<glm::ivec3> m_hoveredBlockPos;
+
+    std::optional<glm::ivec3> m_breakingBlockPos;
+    float m_breakingStartTime = 0.0f;
+    float m_breakingTotalTimeMs = 0.0f;
+    int m_breakingStage = 0;
 
     double m_FrameEMA = 0.004;
 

@@ -69,6 +69,7 @@ VulkanRenderer::VulkanRenderer(Window &window,
     recreateCrosshairVertexBuffer();
     createDebugCubeMesh();
     createItemMesh();
+    createBreakOverlayResources();
 
     m_playerModel = std::make_unique<PlayerModel>(*m_DeviceContext, m_CommandManager->getCommandPool());
 
@@ -92,6 +93,59 @@ VulkanRenderer::VulkanRenderer(Window &window,
 
         createShaderBindingTable();
     }
+}
+
+void VulkanRenderer::createBreakOverlayResources()
+{
+    m_breakOverlayTextureView = createTexture("textures/destroy_stage.png", m_breakOverlayTexture);
+
+    const float s = 0.501f;
+
+    std::vector<Vertex> vertices = {
+
+        {{-s, -s, s}, {}, {0, 1}}, {{s, -s, s}, {}, {1, 1}}, {{s, s, s}, {}, {1, 0}}, {{-s, s, s}, {}, {0, 0}},
+
+        {{s, -s, -s}, {}, {1, 1}},
+        {{-s, -s, -s}, {}, {0, 1}},
+        {{-s, s, -s}, {}, {0, 0}},
+        {{s, s, -s}, {}, {1, 0}},
+
+        {{-s, -s, -s}, {}, {0, 1}},
+        {{-s, -s, s}, {}, {1, 1}},
+        {{-s, s, s}, {}, {1, 0}},
+        {{-s, s, -s}, {}, {0, 0}},
+
+        {{s, -s, s}, {}, {1, 1}},
+        {{s, -s, -s}, {}, {0, 1}},
+        {{s, s, -s}, {}, {0, 0}},
+        {{s, s, s}, {}, {1, 0}},
+
+        {{-s, s, s}, {}, {0, 1}},
+        {{s, s, s}, {}, {1, 1}},
+        {{s, s, -s}, {}, {1, 0}},
+        {{-s, s, -s}, {}, {0, 0}},
+
+        {{-s, -s, -s}, {}, {0, 1}},
+        {{s, -s, -s}, {}, {1, 1}},
+        {{s, -s, s}, {}, {1, 0}},
+        {{-s, -s, s}, {}, {0, 0}}};
+
+    std::vector<uint32_t> indices;
+    for (uint32_t i = 0; i < 6; ++i)
+    {
+        uint32_t base = i * 4;
+        indices.push_back(base + 0);
+        indices.push_back(base + 1);
+        indices.push_back(base + 2);
+        indices.push_back(base + 2);
+        indices.push_back(base + 3);
+        indices.push_back(base + 0);
+    }
+
+    m_breakOverlayIndexCount = static_cast<uint32_t>(indices.size());
+
+    m_breakOverlayVertexBuffer = UploadHelpers::createDeviceLocalBufferFromData(*m_DeviceContext, m_CommandManager->getCommandPool(), vertices.data(), vertices.size() * sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    m_breakOverlayIndexBuffer = UploadHelpers::createDeviceLocalBufferFromData(*m_DeviceContext, m_CommandManager->getCommandPool(), indices.data(), indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 }
 
 VulkanRenderer::~VulkanRenderer()
@@ -191,7 +245,6 @@ void VulkanRenderer::createModelMatrixSsbos()
 
 bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
                                const glm::vec3 &playerPos,
-
                                std::unordered_map<glm::ivec3, std::shared_ptr<Chunk>, ivec3_hasher> &chunks,
                                const glm::ivec3 &playerChunkPos,
                                uint32_t gameTicks,
@@ -199,8 +252,9 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
                                bool showDebugOverlay,
                                const std::vector<glm::vec3> &outlineVertices,
                                const std::optional<glm::ivec3> &hoveredBlockPos,
-                               const std::vector<std::unique_ptr<Item>> &items)
-
+                               const std::vector<std::unique_ptr<Item>> &items,
+                               const std::optional<glm::ivec3> &breakingBlockPos,
+                               int breakingStage)
 {
     const uint32_t slot = m_CurrentFrame;
 
@@ -230,7 +284,6 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
         recreateCrosshairVertexBuffer();
         return false;
     }
-
     else if (res != VK_SUCCESS)
     {
         throw std::runtime_error("failed to acquire swap chain image");
@@ -247,7 +300,6 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
     {
         as.destroy(m_DeviceContext->getDevice());
     }
-
     m_AsDestroyQueue[slot].clear();
 
     updateLightUbo(slot, gameTicks);
@@ -255,13 +307,9 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
 
     if (!outlineVertices.empty())
     {
-
         const size_t bufferMaxSize = sizeof(glm::vec3) * MAX_OUTLINE_VERTICES;
-
         size_t dataToCopySize = outlineVertices.size() * sizeof(glm::vec3);
-
         size_t copySize = std::min(dataToCopySize, bufferMaxSize);
-
         memcpy(m_outlineVertexBufferMapped, outlineVertices.data(), copySize);
     }
 
@@ -290,15 +338,12 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
         if (best != -1)
         {
             Chunk *ch = ch_ptr.get();
-
             renderChunks.emplace_back(ch, best);
-
             const ChunkMesh *opaqueMesh = ch->getMesh(best);
             if (opaqueMesh && opaqueMesh->indexCount > 0)
             {
                 opaqueChunks.emplace_back(ch, best);
             }
-
             const ChunkMesh *transparentMesh = ch->getTransparentMesh(best);
             if (transparentMesh && transparentMesh->indexCount > 0)
             {
@@ -321,11 +366,8 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
     if (!modelMatrices.empty())
     {
         size_t dataToCopySize = modelMatrices.size() * sizeof(glm::mat4);
-
         const size_t bufferSize = sizeof(glm::mat4) * MAX_CHUNKS_PER_FRAME;
-
         size_t copySize = std::min(dataToCopySize, bufferSize);
-
         memcpy(m_ModelMatrixSsbosMapped[slot], modelMatrices.data(), copySize);
     }
 
@@ -349,22 +391,18 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
             if (m_tlas.handle != VK_NULL_HANDLE)
             {
                 updateRtDescriptorSet(slot);
-
                 RayTracePushConstants pc{};
                 pc.viewInverse = glm::inverse(camera.getViewMatrix());
                 pc.projInverse = glm::inverse(camera.getProjectionMatrix());
                 pc.cameraPos = playerPos + glm::vec3(0, 1.8f * 0.9f, 0);
                 memcpy(&pc.lightDirection, m_LightUbosMapped[slot], sizeof(glm::vec3));
-
                 m_CommandManager->recordRayTraceCommand(
                     cmd, slot, m_rtDescriptorSets[slot],
                     &m_rgenRegion, &m_missRegion, &m_hitRegion, &m_callRegion,
                     &pc, m_rtShadowImage.get());
-
                 VkMemoryBarrier memoryBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
                 memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
                 memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
                 vkCmdPipelineBarrier(
                     cmd,
                     VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
@@ -390,13 +428,10 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
     float time_of_day = static_cast<float>(gameTicks) / 24000.0f;
     float sun_angle = time_of_day * 2.0f * glm::pi<float>() - glm::half_pi<float>();
     float moon_angle = sun_angle + glm::pi<float>();
-
     glm::mat4 invView = glm::inverse(camera.getViewMatrix());
     glm::vec3 camPos = glm::vec3(invView[3]);
-
     glm::vec3 sunDir = glm::normalize(glm::vec3(sin(sun_angle), cos(sun_angle), 0.2f));
     glm::vec3 moonDir = glm::normalize(glm::vec3(sin(moon_angle), cos(moon_angle), 0.2f));
-
     auto makeBillboard = [&](const glm::vec3 &objPos, const glm::vec3 &cam, const glm::vec3 &up)
     {
         glm::vec3 look = glm::normalize(cam - objPos);
@@ -405,20 +440,16 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
         glm::mat4 M(glm::vec4(right, 0), glm::vec4(up2, 0), glm::vec4(look, 0), glm::vec4(objPos, 1));
         return M;
     };
-
     constexpr float DIST = 400.f;
     constexpr float SIZE = 50.f;
     glm::vec3 sunPos = camPos + sunDir * DIST;
     glm::vec3 moonPos = camPos + moonDir * DIST;
-
     SkyPushConstant sun_pc;
     sun_pc.model = makeBillboard(sunPos, camPos, {0, 1, 0}) * glm::scale(glm::mat4(1.f), glm::vec3(SIZE));
     sun_pc.is_sun = 1;
-
     SkyPushConstant moon_pc;
     moon_pc.model = makeBillboard(moonPos, camPos, {0, 1, 0}) * glm::scale(glm::mat4(1.f), glm::vec3(SIZE));
     moon_pc.is_sun = 0;
-
     bool isSunVisible = sunDir.y > -0.1f;
     bool isMoonVisible = moonDir.y > -0.1f;
 
@@ -431,8 +462,9 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
         m_Settings, debugAABBs,
         m_outlineVertexBuffer.get(), static_cast<uint32_t>(outlineVertices.size()), hoveredBlockPos,
         items, m_itemVertexBuffer.get(), m_itemIndexBuffer.get(), m_itemIndexCount,
-
-        player, m_playerDescriptorSet, *m_playerModel);
+        player, m_playerDescriptorSet, *m_playerModel,
+        breakingBlockPos, breakingStage,
+        m_breakOverlayVertexBuffer.get(), m_breakOverlayIndexBuffer.get(), m_breakOverlayIndexCount);
 
     if (showDebugOverlay && m_debugOverlay)
     {
@@ -456,7 +488,6 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
 
     {
         std::scoped_lock lk(gGraphicsQueueMutex);
-
         if (vkQueueSubmit(m_DeviceContext->getGraphicsQueue(), 1, &si, m_SyncPrimitives->getInFlightFence(slot)) != VK_SUCCESS)
         {
             throw std::runtime_error("vkQueueSubmit failed");
@@ -488,6 +519,7 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
     m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     return true;
 }
+
 void VulkanRenderer::scheduleChunkGpuCleanup(std::shared_ptr<Chunk> chunk)
 {
     if (chunk)
@@ -1329,11 +1361,13 @@ void VulkanRenderer::updatePlayerDescriptorSet()
 
 void VulkanRenderer::updateDescriptorSets()
 {
+
     VkDescriptorBufferInfo mainUboInfo{m_UniformBuffers[m_CurrentFrame].get(), 0, sizeof(UniformBufferObject)};
     VkDescriptorImageInfo atlasInfo{m_TextureManager->getTextureSampler(), m_TextureManager->getTextureImageView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkDescriptorImageInfo sunInfo{m_TextureManager->getTextureSampler(), m_SunTextureView.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkDescriptorBufferInfo lightUboInfo{m_LightUbos[m_CurrentFrame].get(), 0, sizeof(LightUbo)};
     VkDescriptorImageInfo moonInfo{m_TextureManager->getTextureSampler(), m_MoonTextureView.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkDescriptorImageInfo breakOverlayInfo{m_TextureManager->getTextureSampler(), m_breakOverlayTextureView.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
     VkDescriptorImageInfo shadowImageInfo{};
     shadowImageInfo.sampler = m_TextureManager->getTextureSampler();
@@ -1371,7 +1405,7 @@ void VulkanRenderer::updateDescriptorSets()
     writes[2].dstBinding = 2;
     writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     writes[2].descriptorCount = 1;
-    writes[2].pImageInfo = &sunInfo;
+    writes[2].pImageInfo = &breakOverlayInfo;
 
     writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[3].dstSet = m_DescriptorSets[m_CurrentFrame];

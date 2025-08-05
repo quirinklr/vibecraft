@@ -53,10 +53,12 @@ public:
         const std::optional<glm::ivec3> &hoveredBlockPos,
         const std::vector<std::unique_ptr<Item>> &items,
         VkBuffer itemVB, VkBuffer itemIB, uint32_t itemIndexCount,
-
         Player *player,
         VkDescriptorSet playerDescriptorSet,
-        PlayerModel &playerModel);
+        PlayerModel &playerModel,
+        const std::optional<glm::ivec3> &breakingBlockPos,
+        int breakingStage,
+        VkBuffer breakOverlayVB, VkBuffer breakOverlayIB, uint32_t breakOverlayIndexCount);
 
     VkCommandBuffer getCommandBuffer(uint32_t index) const { return m_CommandBuffers[index]; }
     VkCommandPool getCommandPool() const { return m_CommandPool.get(); }
