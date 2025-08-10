@@ -431,15 +431,20 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
             if (m_tlas.handle != VK_NULL_HANDLE)
             {
                 updateRtDescriptorSet(slot);
+
                 RayTracePushConstants pc{};
-                pc.viewInverse = glm::inverse(camera.getViewMatrix());
-                pc.projInverse = glm::inverse(camera.getProjectionMatrix());
+                pc.invViewProj = glm::inverse(camera.getProjectionMatrix() * camera.getViewMatrix());
                 pc.cameraPos = playerPos + glm::vec3(0, 1.8f * 0.9f, 0);
-                memcpy(&pc.lightDirection, m_LightUbosMapped[slot], sizeof(glm::vec3));
+
+                memcpy(&pc.sunDirWS, m_LightUbosMapped[slot], sizeof(glm::vec3));
+                pc.tMin = 0.001f;
+                pc.tMax = 1e16f;
+
                 m_CommandManager->recordRayTraceCommand(
                     cmd, slot, m_rtDescriptorSets[slot],
                     &m_rgenRegion, &m_missRegion, &m_hitRegion, &m_callRegion,
                     &pc, m_rtShadowImage.get());
+
                 VkMemoryBarrier memoryBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
                 memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
                 memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
@@ -616,7 +621,6 @@ void VulkanRenderer::loadRayTracingFunctions()
     vkCmdTraceRaysKHR = (PFN_vkCmdTraceRaysKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkCmdTraceRaysKHR");
     m_rtFunctionsLoaded = true;
 }
-
 void VulkanRenderer::createRayTracingResources()
 {
     VkExtent2D extent = m_SwapChainContext->getSwapChainExtent();
@@ -634,7 +638,8 @@ void VulkanRenderer::createRayTracingResources()
     imgInfo.arrayLayers = 1;
     imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+    imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     VmaAllocationCreateInfo allocCI{};
@@ -671,8 +676,7 @@ void VulkanRenderer::createRayTracingResources()
     b[0].binding = 0;
     b[0].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
     b[0].descriptorCount = 1;
-    b[0].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
-                      VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+    b[0].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
 
     b[1].binding = 1;
     b[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -684,12 +688,8 @@ void VulkanRenderer::createRayTracingResources()
     li.pBindings = b.data();
 
     VkDescriptorSetLayout tmpLayout;
-    vkCreateDescriptorSetLayout(
-        m_DeviceContext->getDevice(), &li, nullptr, &tmpLayout);
-
-    m_rtDescriptorSetLayout = VulkanHandle<
-        VkDescriptorSetLayout, DescriptorSetLayoutDeleter>(
-        tmpLayout, {m_DeviceContext->getDevice()});
+    vkCreateDescriptorSetLayout(m_DeviceContext->getDevice(), &li, nullptr, &tmpLayout);
+    m_rtDescriptorSetLayout = VulkanHandle<VkDescriptorSetLayout, DescriptorSetLayoutDeleter>(tmpLayout, {m_DeviceContext->getDevice()});
 
     std::array<VkDescriptorPoolSize, 2> ps{};
     ps[0].type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
@@ -704,10 +704,7 @@ void VulkanRenderer::createRayTracingResources()
 
     VkDescriptorPool pool;
     vkCreateDescriptorPool(m_DeviceContext->getDevice(), &pi, nullptr, &pool);
-
-    m_rtDescriptorPool = VulkanHandle<
-        VkDescriptorPool, DescriptorPoolDeleter>(
-        pool, {m_DeviceContext->getDevice()});
+    m_rtDescriptorPool = VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter>(pool, {m_DeviceContext->getDevice()});
 }
 
 void VulkanRenderer::createShaderBindingTable()
@@ -1140,12 +1137,12 @@ glm::vec3 VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &cam
 
     return skyColor;
 }
-
 void VulkanRenderer::enqueueDestroy(AccelerationStructure &&as)
 {
     if (as.handle != VK_NULL_HANDLE)
     {
-        m_AsDestroyQueue[m_CurrentFrame].push_back(std::move(as));
+        const uint32_t idx = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+        m_AsDestroyQueue[idx].push_back(std::move(as));
     }
 }
 
@@ -1153,7 +1150,8 @@ void VulkanRenderer::enqueueDestroy(VmaBuffer &&buffer)
 {
     if (buffer.get() != VK_NULL_HANDLE)
     {
-        m_BufferDestroyQueue[m_CurrentFrame].push_back(std::move(buffer));
+        const uint32_t idx = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+        m_BufferDestroyQueue[idx].push_back(std::move(buffer));
     }
 }
 
@@ -1161,7 +1159,8 @@ void VulkanRenderer::enqueueDestroy(VmaImage &&image)
 {
     if (image.get() != VK_NULL_HANDLE)
     {
-        m_ImageDestroyQueue[m_CurrentFrame].push_back(std::move(image));
+        const uint32_t idx = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+        m_ImageDestroyQueue[idx].push_back(std::move(image));
     }
 }
 
@@ -1169,7 +1168,8 @@ void VulkanRenderer::enqueueDestroy(VkBuffer buffer, VmaAllocation allocation)
 {
     if (buffer != VK_NULL_HANDLE)
     {
-        m_BufferDestroyQueue[m_CurrentFrame].emplace_back(m_DeviceContext->getAllocator(), buffer, allocation);
+        const uint32_t idx = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+        m_BufferDestroyQueue[idx].emplace_back(m_DeviceContext->getAllocator(), buffer, allocation);
     }
 }
 

@@ -1,8 +1,15 @@
 #version 460
-#extension GL_EXT_ray_tracing : enable
+#extension GL_EXT_ray_tracing : require
 
-layout(location = 0) rayPayloadInEXT vec3 hitValue;
+struct PrimaryPayload {
+    vec3  hitPos;
+    float t;
+    uint  hit;
+};
+layout(location = 0) rayPayloadInEXT PrimaryPayload prd;
 
-void main() {
-    hitValue = vec3(1.0);
+void main()
+{
+    prd.hit = 0u;
+    prd.t   = 1e30;
 }

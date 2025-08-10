@@ -70,18 +70,23 @@ void CommandManager::recordCommandBuffer(
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             m_PipelineCache.getSkyPipelineLayout(),
                             0, 1, &descriptorSets[currentFrame], 0, nullptr);
+
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cb, 0, 1, &skySphereVB, offsets);
     vkCmdBindIndexBuffer(cb, skySphereIB, 0, VK_INDEX_TYPE_UINT32);
 
     if (isSunVisible)
     {
-        vkCmdPushConstants(cb, m_PipelineCache.getSkyPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SkyPushConstant), &sun_pc);
+        vkCmdPushConstants(cb, m_PipelineCache.getSkyPipelineLayout(),
+                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(SkyPushConstant), &sun_pc);
         vkCmdDrawIndexed(cb, skySphereIndexCount, 1, 0, 0, 0);
     }
     if (isMoonVisible)
     {
-        vkCmdPushConstants(cb, m_PipelineCache.getSkyPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SkyPushConstant), &moon_pc);
+        vkCmdPushConstants(cb, m_PipelineCache.getSkyPipelineLayout(),
+                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(SkyPushConstant), &moon_pc);
         vkCmdDrawIndexed(cb, skySphereIndexCount, 1, 0, 0, 0);
     }
 
@@ -101,10 +106,11 @@ void CommandManager::recordCommandBuffer(
         if (!mesh)
             continue;
 
-        VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
+        VkBuffer vb = mesh->vertexBuffer;
         VkDeviceSize chunk_offsets[] = {0};
-        vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, chunk_offsets);
+        vkCmdBindVertexBuffers(cb, 0, 1, &vb, chunk_offsets);
         vkCmdBindIndexBuffer(cb, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
         vkCmdDrawIndexed(cb, mesh->indexCount, 1, 0, 0, i);
     }
 
@@ -113,7 +119,6 @@ void CommandManager::recordCommandBuffer(
     if (breakingBlockPos.has_value() && breakingStage > 0)
     {
         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getBreakOverlayPipeline());
-
         vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 m_PipelineCache.getBreakOverlayPipelineLayout(),
                                 0, 1, &descriptorSets[currentFrame], 0, nullptr);
@@ -147,17 +152,25 @@ void CommandManager::recordCommandBuffer(
         vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 m_PipelineCache.getOutlinePipelineLayout(),
                                 0, 1, &descriptorSets[currentFrame], 0, nullptr);
+
         VkDeviceSize outline_offsets[] = {0};
         vkCmdBindVertexBuffers(cb, 0, 1, &outlineVB, outline_offsets);
+
         glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(*hoveredBlockPos));
         vkCmdPushConstants(cb, m_PipelineCache.getOutlinePipelineLayout(),
                            VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
+
         vkCmdDraw(cb, outlineVertexCount, 1, 0, 0);
     }
 
     if (!settings.wireframe)
     {
         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getWaterPipeline());
+
+        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                m_PipelineCache.getGraphicsPipelineLayout(),
+                                0, 1, &descriptorSets[currentFrame], 0, nullptr);
+
         for (uint32_t i = 0; i < transparentChunks.size(); ++i)
         {
             const auto &[chunk, lod] = transparentChunks[i];
@@ -165,9 +178,9 @@ void CommandManager::recordCommandBuffer(
             if (!mesh)
                 continue;
 
-            VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
+            VkBuffer vb = mesh->vertexBuffer;
             VkDeviceSize chunk_offsets[] = {0};
-            vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, chunk_offsets);
+            vkCmdBindVertexBuffers(cb, 0, 1, &vb, chunk_offsets);
             vkCmdBindIndexBuffer(cb, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
             vkCmdDrawIndexed(cb, mesh->indexCount, 1, 0, 0, instanceOffset + i);
         }
@@ -179,9 +192,10 @@ void CommandManager::recordCommandBuffer(
         vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 m_PipelineCache.getDebugPipelineLayout(),
                                 0, 1, &descriptorSets[currentFrame], 0, nullptr);
-        VkBuffer vertexBuffers[] = {debugCubeVB};
+
+        VkBuffer vb = debugCubeVB;
         VkDeviceSize debug_offsets[] = {0};
-        vkCmdBindVertexBuffers(cb, 0, 1, vertexBuffers, debug_offsets);
+        vkCmdBindVertexBuffers(cb, 0, 1, &vb, debug_offsets);
         vkCmdBindIndexBuffer(cb, debugCubeIB, 0, VK_INDEX_TYPE_UINT32);
 
         for (const auto &aabb : debugAABBs)
@@ -208,6 +222,7 @@ void CommandManager::recordCommandBuffer(
         glm::mat4 model;
         glm::vec3 tileOrigin;
     };
+
     const int textureIndexMap[6] = {2, 3, 0, 1, 5, 4};
     for (const auto &item : items)
     {
@@ -227,7 +242,10 @@ void CommandManager::recordCommandBuffer(
     }
 
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getCrosshairPipeline());
-    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineCache.getCrosshairPipelineLayout(), 0, 1, &crosshairDS, 0, nullptr);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            m_PipelineCache.getCrosshairPipelineLayout(),
+                            0, 1, &crosshairDS, 0, nullptr);
+
     VkDeviceSize crosshair_offsets[] = {0};
     vkCmdBindVertexBuffers(cb, 0, 1, &crosshairVB, crosshair_offsets);
     vkCmdBindIndexBuffer(cb, crosshairIB, 0, VK_INDEX_TYPE_UINT32);
@@ -296,22 +314,21 @@ void CommandManager::createCommandBuffers()
         throw std::runtime_error("failed to allocate graphics command buffers");
 }
 
-void CommandManager::recordRayTraceCommand(VkCommandBuffer cb, uint32_t currentFrame, VkDescriptorSet rtDescriptorSet,
-                                           const VkStridedDeviceAddressRegionKHR *rgenRegion,
-                                           const VkStridedDeviceAddressRegionKHR *missRegion,
-                                           const VkStridedDeviceAddressRegionKHR *hitRegion,
-                                           const VkStridedDeviceAddressRegionKHR *callRegion,
-                                           const void *pushConstants, VkImage shadowImage)
+void CommandManager::recordRayTraceCommand(
+    VkCommandBuffer cb, uint32_t currentFrame, VkDescriptorSet rtDescriptorSet,
+    const VkStridedDeviceAddressRegionKHR *rgenRegion,
+    const VkStridedDeviceAddressRegionKHR *missRegion,
+    const VkStridedDeviceAddressRegionKHR *hitRegion,
+    const VkStridedDeviceAddressRegionKHR *callRegion,
+    const void *pushConstants, VkImage shadowImage)
 {
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_PipelineCache.getRayTracingPipeline());
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_PipelineCache.getRayTracingPipelineLayout(), 0, 1, &rtDescriptorSet, 0, 0);
-    vkCmdPushConstants(
-        cb,
-        m_PipelineCache.getRayTracingPipelineLayout(),
-        VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
-        0,
-        sizeof(RayTracePushConstants),
-        pushConstants);
+
+    vkCmdPushConstants(cb, m_PipelineCache.getRayTracingPipelineLayout(),
+                       VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
+                       0, sizeof(RayTracePushConstants), pushConstants);
+
     VkExtent2D extent = m_SwapChainContext.getSwapChainExtent();
     auto vkCmdTraceRaysKHR = (PFN_vkCmdTraceRaysKHR)vkGetDeviceProcAddr(m_DeviceContext.getDevice(), "vkCmdTraceRaysKHR");
 
@@ -325,8 +342,11 @@ void CommandManager::recordRayTraceCommand(VkCommandBuffer cb, uint32_t currentF
     toGeneral.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     toGeneral.image = shadowImage;
     toGeneral.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    toGeneral.subresourceRange.baseMipLevel = 0;
     toGeneral.subresourceRange.levelCount = 1;
+    toGeneral.subresourceRange.baseArrayLayer = 0;
     toGeneral.subresourceRange.layerCount = 1;
+
     vkCmdPipelineBarrier(
         cb,
         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
@@ -336,18 +356,31 @@ void CommandManager::recordRayTraceCommand(VkCommandBuffer cb, uint32_t currentF
         0, nullptr,
         1, &toGeneral);
 
-    VkImageMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image = shadowImage;
-    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.levelCount = 1;
-    barrier.subresourceRange.layerCount = 1;
+    const VkClearColorValue clearLit = {{1.f, 1.f, 1.f, 1.f}};
+    VkImageSubresourceRange range{};
+    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    range.baseMipLevel = 0;
+    range.levelCount = 1;
+    range.baseArrayLayer = 0;
+    range.layerCount = 1;
+
+    vkCmdTraceRaysKHR(cb, rgenRegion, missRegion, hitRegion, callRegion, extent.width, extent.height, 1);
+
+    VkImageMemoryBarrier toRead{};
+    toRead.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    toRead.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    toRead.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    toRead.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    toRead.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    toRead.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toRead.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toRead.image = shadowImage;
+    toRead.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    toRead.subresourceRange.baseMipLevel = 0;
+    toRead.subresourceRange.levelCount = 1;
+    toRead.subresourceRange.baseArrayLayer = 0;
+    toRead.subresourceRange.layerCount = 1;
+
     vkCmdPipelineBarrier(
         cb,
         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
@@ -355,5 +388,5 @@ void CommandManager::recordRayTraceCommand(VkCommandBuffer cb, uint32_t currentF
         0,
         0, nullptr,
         0, nullptr,
-        1, &barrier);
+        1, &toRead);
 }

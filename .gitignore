@@ -15,6 +15,7 @@ cmake-build-*/
 *.sln.docstates
 tree-skel.bat
 tree-skel-output.txt
+Raytracing Project Files.txt
 TODO.md
 
 # IDE-specific settings folder
