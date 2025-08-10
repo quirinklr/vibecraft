@@ -3,73 +3,20 @@
 #include <Globals.h>
 #include <iostream>
 
-void UploadHelpers::copyBuffer(const DeviceContext &dc,
-                               VkCommandPool pool,
-                               VkBuffer src,
-                               VkBuffer dst,
-                               VkDeviceSize size,
-                               VkFence *outFence)
-{
-    std::scoped_lock lock(gGraphicsQueueMutex);
-
-    VkCommandBuffer cmd{};
-    VkCommandBufferAllocateInfo allocInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    allocInfo.commandPool = pool;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = 1;
-    vkAllocateCommandBuffers(dc.getDevice(), &allocInfo, &cmd);
-
-    VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &beginInfo);
-
-    VkBufferCopy region{0, 0, size};
-    vkCmdCopyBuffer(cmd, src, dst, 1, &region);
-    vkEndCommandBuffer(cmd);
-
-    VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-
-    VkQueue queue = dc.getGraphicsQueue();
-
-    if (outFence)
-    {
-
-        if (*outFence == VK_NULL_HANDLE)
-        {
-            VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-            vkCreateFence(dc.getDevice(), &fenceInfo, nullptr, outFence);
-        }
-        vkQueueSubmit(queue, 1, &submitInfo, *outFence);
-        DeferredFreeQueue::push(dc.getDevice(), pool, cmd, *outFence);
-    }
-    else
-    {
-
-        vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
-        vkQueueWaitIdle(queue);
-        vkFreeCommandBuffers(dc.getDevice(), pool, 1, &cmd);
-    }
-}
-
-VmaBuffer UploadHelpers::createDeviceLocalBufferFromDataWithStaging(
+VmaBuffer UploadHelpers::createDeviceLocalBuffer(
     const DeviceContext &dc,
     VkCommandBuffer cmd,
     const void *data,
     VkDeviceSize size,
     VkBufferUsageFlags usage,
-    std::vector<VmaBuffer> &frameStagingBuffers)
+    std::vector<VmaBuffer> &stagingBuffers)
 {
 
     VmaBuffer stagingBuffer;
     {
         VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0,
                                       size,
-                                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                          usage |
-                                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT};
+                                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
         allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
@@ -84,10 +31,7 @@ VmaBuffer UploadHelpers::createDeviceLocalBufferFromDataWithStaging(
     {
         VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0,
                                       size,
-                                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                          usage |
-                                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT};
+                                      VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT};
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
         deviceLocalBuffer = VmaBuffer(dc.getAllocator(), bufferInfo, allocInfo);
@@ -97,7 +41,7 @@ VmaBuffer UploadHelpers::createDeviceLocalBufferFromDataWithStaging(
     copyRegion.size = size;
     vkCmdCopyBuffer(cmd, stagingBuffer.get(), deviceLocalBuffer.get(), 1, &copyRegion);
 
-    frameStagingBuffers.push_back(std::move(stagingBuffer));
+    stagingBuffers.push_back(std::move(stagingBuffer));
 
     return deviceLocalBuffer;
 }
@@ -307,42 +251,4 @@ void UploadHelpers::submitChunkMeshUpload(const DeviceContext &dc,
     {
         throw std::runtime_error("Failed to create fence for chunk mesh upload");
     }
-}
-
-VmaBuffer UploadHelpers::createDeviceLocalBufferFromData(
-    const DeviceContext &dc, VkCommandPool pool,
-    const void *data, VkDeviceSize size, VkBufferUsageFlags usage)
-{
-
-    VmaBuffer stagingBuffer;
-    {
-        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0,
-                                      size,
-                                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                          usage |
-                                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT};
-        VmaAllocationCreateInfo allocInfo{VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VMA_MEMORY_USAGE_CPU_ONLY};
-        stagingBuffer = VmaBuffer(dc.getAllocator(), bufferInfo, allocInfo);
-        void *mappedData;
-        vmaMapMemory(dc.getAllocator(), stagingBuffer.getAllocation(), &mappedData);
-        memcpy(mappedData, data, size);
-        vmaUnmapMemory(dc.getAllocator(), stagingBuffer.getAllocation());
-    }
-
-    VmaBuffer deviceLocalBuffer;
-    {
-        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0,
-                                      size,
-                                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                          usage |
-                                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT};
-        VmaAllocationCreateInfo allocInfo{0, VMA_MEMORY_USAGE_GPU_ONLY};
-        deviceLocalBuffer = VmaBuffer(dc.getAllocator(), bufferInfo, allocInfo);
-    }
-
-    copyBuffer(dc, pool, stagingBuffer.get(), deviceLocalBuffer.get(), size);
-
-    return deviceLocalBuffer;
 }

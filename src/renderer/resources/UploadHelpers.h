@@ -31,13 +31,13 @@ public:
     static VmaBuffer createDeviceLocalBufferFromData(
         const DeviceContext &dc, VkCommandPool pool,
         const void *data, VkDeviceSize size, VkBufferUsageFlags usage);
-    static VmaBuffer createDeviceLocalBufferFromDataWithStaging(
+    static VmaBuffer createDeviceLocalBuffer(
         const DeviceContext &dc,
         VkCommandBuffer cmd,
         const void *data,
         VkDeviceSize size,
         VkBufferUsageFlags usage,
-        std::vector<VmaBuffer> &frameStagingBuffers);
+        std::vector<VmaBuffer> &stagingBuffers);
 
     static VkCommandBuffer beginSingleTimeCommands(const DeviceContext &dc, VkCommandPool pool);
     static void endSingleTimeCommands(const DeviceContext &dc, VkCommandPool pool, VkCommandBuffer cmd);

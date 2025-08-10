@@ -58,18 +58,20 @@ VulkanRenderer::VulkanRenderer(Window &window,
     m_TextureManager->createTextureImageView();
     m_TextureManager->createTextureSampler();
 
-    createSkyResources();
+    VkCommandBuffer initCmd = UploadHelpers::beginSingleTimeCommands(*m_DeviceContext, m_CommandManager->getCommandPool());
+
+    createSkyResources(initCmd, m_initStagingBuffers);
     createLightUbo();
     createUniformBuffers();
     createModelMatrixSsbos();
     createDescriptorPool();
     createDescriptorSets();
-    createCrosshairResources();
+    createCrosshairResources(initCmd, m_initStagingBuffers);
     createOutlineVertexBuffer();
-    recreateCrosshairVertexBuffer();
-    createDebugCubeMesh();
-    createItemMesh();
-    createBreakOverlayResources();
+    recreateCrosshairVertexBuffer(initCmd, m_initStagingBuffers);
+    createDebugCubeMesh(initCmd, m_initStagingBuffers);
+    createItemMesh(initCmd, m_initStagingBuffers);
+    createBreakOverlayResources(initCmd, m_initStagingBuffers);
 
     m_playerModel = std::make_unique<PlayerModel>(*m_DeviceContext, m_CommandManager->getCommandPool());
 
@@ -91,8 +93,11 @@ VulkanRenderer::VulkanRenderer(Window &window,
                                      &ai, m_rtDescriptorSets.data()) != VK_SUCCESS)
             throw std::runtime_error("failed to allocate RT descriptor sets");
 
-        createShaderBindingTable();
+        createShaderBindingTable(initCmd, m_initStagingBuffers);
     }
+
+    UploadHelpers::endSingleTimeCommands(*m_DeviceContext, m_CommandManager->getCommandPool(), initCmd);
+    m_initStagingBuffers.clear();
 
     VkDeviceSize indirectBufferSize = sizeof(VkDrawIndexedIndirectCommand) * MAX_INDIRECT_DRAWS;
 
@@ -135,9 +140,9 @@ VulkanRenderer::VulkanRenderer(Window &window,
     }
 }
 
-void VulkanRenderer::createBreakOverlayResources()
+void VulkanRenderer::createBreakOverlayResources(VkCommandBuffer cmd, std::vector<VmaBuffer> &stagingBuffers)
 {
-    m_breakOverlayTextureView = createTexture("textures/destroy_stage.png", m_breakOverlayTexture);
+    m_breakOverlayTextureView = createTexture(cmd, "textures/destroy_stage.png", m_breakOverlayTexture, stagingBuffers);
 
     const float s = 0.501f;
 
@@ -184,8 +189,8 @@ void VulkanRenderer::createBreakOverlayResources()
 
     m_breakOverlayIndexCount = static_cast<uint32_t>(indices.size());
 
-    m_breakOverlayVertexBuffer = UploadHelpers::createDeviceLocalBufferFromData(*m_DeviceContext, m_CommandManager->getCommandPool(), vertices.data(), vertices.size() * sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-    m_breakOverlayIndexBuffer = UploadHelpers::createDeviceLocalBufferFromData(*m_DeviceContext, m_CommandManager->getCommandPool(), indices.data(), indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+    m_breakOverlayVertexBuffer = UploadHelpers::createDeviceLocalBuffer(*m_DeviceContext, cmd, vertices.data(), vertices.size() * sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, stagingBuffers);
+    m_breakOverlayIndexBuffer = UploadHelpers::createDeviceLocalBuffer(*m_DeviceContext, cmd, indices.data(), indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, stagingBuffers);
 }
 
 VulkanRenderer::~VulkanRenderer()
@@ -205,6 +210,10 @@ VulkanRenderer::~VulkanRenderer()
     m_CrosshairTextureView = {nullptr, {}};
     m_CrosshairTexture = {};
 
+    if (m_rtDescriptorPool.get() != VK_NULL_HANDLE)
+    {
+        vkResetDescriptorPool(m_DeviceContext->getDevice(), m_rtDescriptorPool.get(), 0);
+    }
     m_tlas.destroy(m_DeviceContext->getDevice());
 
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
@@ -228,7 +237,7 @@ VulkanRenderer::~VulkanRenderer()
     }
 }
 
-void VulkanRenderer::recreateCrosshairVertexBuffer()
+void VulkanRenderer::recreateCrosshairVertexBuffer(VkCommandBuffer cmd, std::vector<VmaBuffer> &stagingBuffers)
 {
     m_CrosshairVertexBuffer = {};
 
@@ -252,10 +261,10 @@ void VulkanRenderer::recreateCrosshairVertexBuffer()
         {{-halfWidthNdc, halfHeightNdc}, {0.0f, 0.0f}},
     };
 
-    m_CrosshairVertexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
-        *m_DeviceContext, m_CommandManager->getCommandPool(),
+    m_CrosshairVertexBuffer = UploadHelpers::createDeviceLocalBuffer(
+        *m_DeviceContext, cmd,
         vertices.data(), sizeof(Vertex) * vertices.size(),
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, stagingBuffers);
 }
 
 void VulkanRenderer::createModelMatrixSsbos()
@@ -321,7 +330,13 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
             m_debugOverlay->recreate(m_SwapChainContext->getRenderPass(), m_SwapChainContext->getSwapChainExtent());
 
         recreateRayTracingShadowImage();
-        recreateCrosshairVertexBuffer();
+
+        VkCommandBuffer cmd = UploadHelpers::beginSingleTimeCommands(*m_DeviceContext, m_CommandManager->getCommandPool());
+        std::vector<VmaBuffer> stagingBuffers;
+        recreateCrosshairVertexBuffer(cmd, stagingBuffers);
+        UploadHelpers::endSingleTimeCommands(*m_DeviceContext, m_CommandManager->getCommandPool(), cmd);
+        stagingBuffers.clear();
+
         return false;
     }
     else if (res != VK_SUCCESS)
@@ -707,7 +722,7 @@ void VulkanRenderer::createRayTracingResources()
     m_rtDescriptorPool = VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter>(pool, {m_DeviceContext->getDevice()});
 }
 
-void VulkanRenderer::createShaderBindingTable()
+void VulkanRenderer::createShaderBindingTable(VkCommandBuffer cmd, std::vector<VmaBuffer> &stagingBuffers)
 {
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
     VkPhysicalDeviceProperties2 props2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
@@ -723,9 +738,9 @@ void VulkanRenderer::createShaderBindingTable()
     std::vector<uint8_t> shaderHandleStorage(sbtSize);
     vkGetRayTracingShaderGroupHandlesKHR(m_DeviceContext->getDevice(), m_PipelineCache->getRayTracingPipeline(), 0, groupCount, sbtSize, shaderHandleStorage.data());
 
-    m_shaderBindingTable = UploadHelpers::createDeviceLocalBufferFromData(
-        *m_DeviceContext, m_CommandManager->getCommandPool(), shaderHandleStorage.data(), sbtSize,
-        VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+    m_shaderBindingTable = UploadHelpers::createDeviceLocalBuffer(
+        *m_DeviceContext, cmd, shaderHandleStorage.data(), sbtSize,
+        VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, stagingBuffers);
 
     VkDeviceAddress sbtAddress = getBufferDeviceAddress(m_shaderBindingTable.get());
 
@@ -985,7 +1000,7 @@ void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &
             enqueueDestroy(std::move(m_tlasInstanceBuffer));
         }
 
-        m_tlasInstanceBuffer = UploadHelpers::createDeviceLocalBufferFromDataWithStaging(
+        m_tlasInstanceBuffer = UploadHelpers::createDeviceLocalBuffer(
             *m_DeviceContext, cmd,
             instances.data(), sizeBytes,
             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
@@ -1141,7 +1156,7 @@ void VulkanRenderer::enqueueDestroy(AccelerationStructure &&as)
 {
     if (as.handle != VK_NULL_HANDLE)
     {
-        const uint32_t idx = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+        const uint32_t idx = m_CurrentFrame;
         m_AsDestroyQueue[idx].push_back(std::move(as));
     }
 }
@@ -1150,7 +1165,7 @@ void VulkanRenderer::enqueueDestroy(VmaBuffer &&buffer)
 {
     if (buffer.get() != VK_NULL_HANDLE)
     {
-        const uint32_t idx = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+        const uint32_t idx = m_CurrentFrame;
         m_BufferDestroyQueue[idx].push_back(std::move(buffer));
     }
 }
@@ -1159,7 +1174,7 @@ void VulkanRenderer::enqueueDestroy(VmaImage &&image)
 {
     if (image.get() != VK_NULL_HANDLE)
     {
-        const uint32_t idx = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+        const uint32_t idx = m_CurrentFrame;
         m_ImageDestroyQueue[idx].push_back(std::move(image));
     }
 }
@@ -1168,7 +1183,7 @@ void VulkanRenderer::enqueueDestroy(VkBuffer buffer, VmaAllocation allocation)
 {
     if (buffer != VK_NULL_HANDLE)
     {
-        const uint32_t idx = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+        const uint32_t idx = m_CurrentFrame;
         m_BufferDestroyQueue[idx].emplace_back(m_DeviceContext->getAllocator(), buffer, allocation);
     }
 }
@@ -1235,7 +1250,7 @@ void VulkanRenderer::createLightUbo()
     }
 }
 
-VulkanHandle<VkImageView, ImageViewDeleter> VulkanRenderer::createTexture(const char *path, VmaImage &outImage)
+VulkanHandle<VkImageView, ImageViewDeleter> VulkanRenderer::createTexture(VkCommandBuffer cmd, const char *path, VmaImage &outImage, std::vector<VmaBuffer> &stagingBuffers)
 {
     int texWidth, texHeight, texChannels;
     stbi_uc *pixels = stbi_load(path, &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
@@ -1275,8 +1290,6 @@ VulkanHandle<VkImageView, ImageViewDeleter> VulkanRenderer::createTexture(const 
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
     outImage = VmaImage(m_DeviceContext->getAllocator(), imageInfo, allocInfo);
 
-    VkCommandBuffer cmd = UploadHelpers::beginSingleTimeCommands(*m_DeviceContext, m_CommandManager->getCommandPool());
-
     VkImageSubresourceRange range{};
     range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     range.levelCount = 1;
@@ -1296,16 +1309,16 @@ VulkanHandle<VkImageView, ImageViewDeleter> VulkanRenderer::createTexture(const 
         cmd, outImage.get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         range, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
-    UploadHelpers::endSingleTimeCommands(*m_DeviceContext, m_CommandManager->getCommandPool(), cmd);
+    stagingBuffers.push_back(std::move(stagingBuffer));
 
     return TextureManager::createImageView(m_DeviceContext->getDevice(), outImage.get(), VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
 }
 
-void VulkanRenderer::createSkyResources()
+void VulkanRenderer::createSkyResources(VkCommandBuffer cmd, std::vector<VmaBuffer> &stagingBuffers)
 {
-    m_SunTextureView = createTexture("textures/sun.png", m_SunTexture);
-    m_MoonTextureView = createTexture("textures/moon.png", m_MoonTexture);
-    m_playerSkinTextureView = createTexture("textures/player_skin.png", m_playerSkinTexture);
+    m_SunTextureView = createTexture(cmd, "textures/sun.png", m_SunTexture, stagingBuffers);
+    m_MoonTextureView = createTexture(cmd, "textures/moon.png", m_MoonTexture, stagingBuffers);
+    m_playerSkinTextureView = createTexture(cmd, "textures/player_skin.png", m_playerSkinTexture, stagingBuffers);
 
     std::vector<Vertex> vertices = {
         {{-0.5f, -0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
@@ -1315,14 +1328,14 @@ void VulkanRenderer::createSkyResources()
     std::vector<uint32_t> indices = {0, 1, 2, 2, 3, 0};
     m_SkySphereIndexCount = static_cast<uint32_t>(indices.size());
 
-    m_SkySphereVertexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
-        *m_DeviceContext, m_CommandManager->getCommandPool(),
+    m_SkySphereVertexBuffer = UploadHelpers::createDeviceLocalBuffer(
+        *m_DeviceContext, cmd,
         vertices.data(), sizeof(Vertex) * vertices.size(),
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-    m_SkySphereIndexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
-        *m_DeviceContext, m_CommandManager->getCommandPool(),
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, stagingBuffers);
+    m_SkySphereIndexBuffer = UploadHelpers::createDeviceLocalBuffer(
+        *m_DeviceContext, cmd,
         indices.data(), sizeof(uint32_t) * indices.size(),
-        VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT, stagingBuffers);
 }
 
 void VulkanRenderer::createDescriptorPool()
@@ -1495,9 +1508,9 @@ void VulkanRenderer::createOutlineVertexBuffer()
     m_outlineVertexBufferMapped = allocationInfo.pMappedData;
 }
 
-void VulkanRenderer::createCrosshairResources()
+void VulkanRenderer::createCrosshairResources(VkCommandBuffer cmd, std::vector<VmaBuffer> &stagingBuffers)
 {
-    m_CrosshairTextureView = createTexture("textures/crosshair.png", m_CrosshairTexture);
+    m_CrosshairTextureView = createTexture(cmd, "textures/crosshair.png", m_CrosshairTexture, stagingBuffers);
 
     VkDevice device = m_DeviceContext->getDevice();
     VkDescriptorSetLayoutBinding binding{};
@@ -1543,13 +1556,13 @@ void VulkanRenderer::createCrosshairResources()
     vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
 
     std::vector<uint32_t> indices = {0, 1, 2, 2, 3, 0};
-    m_CrosshairIndexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
-        *m_DeviceContext, m_CommandManager->getCommandPool(),
+    m_CrosshairIndexBuffer = UploadHelpers::createDeviceLocalBuffer(
+        *m_DeviceContext, cmd,
         indices.data(), sizeof(uint32_t) * indices.size(),
-        VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT, stagingBuffers);
 }
 
-void VulkanRenderer::createDebugCubeMesh()
+void VulkanRenderer::createDebugCubeMesh(VkCommandBuffer cmd, std::vector<VmaBuffer> &stagingBuffers)
 {
     std::vector<glm::vec3> vertices = {
         {0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}, {0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}};
@@ -1562,15 +1575,15 @@ void VulkanRenderer::createDebugCubeMesh()
     VkDeviceSize vertexSize = sizeof(vertices[0]) * vertices.size();
     VkDeviceSize indexSize = sizeof(indices[0]) * indices.size();
 
-    m_DebugCubeVertexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
-        *m_DeviceContext, m_CommandManager->getCommandPool(),
-        vertices.data(), vertexSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-    m_DebugCubeIndexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
-        *m_DeviceContext, m_CommandManager->getCommandPool(),
-        indices.data(), indexSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+    m_DebugCubeVertexBuffer = UploadHelpers::createDeviceLocalBuffer(
+        *m_DeviceContext, cmd,
+        vertices.data(), vertexSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, stagingBuffers);
+    m_DebugCubeIndexBuffer = UploadHelpers::createDeviceLocalBuffer(
+        *m_DeviceContext, cmd,
+        indices.data(), indexSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, stagingBuffers);
 }
 
-void VulkanRenderer::createItemMesh()
+void VulkanRenderer::createItemMesh(VkCommandBuffer cmd, std::vector<VmaBuffer> &stagingBuffers)
 {
     const float s = 0.2f;
     const float hs = s / 2.0f;
@@ -1617,15 +1630,15 @@ void VulkanRenderer::createItemMesh()
 
     m_itemIndexCount = static_cast<uint32_t>(indices.size());
 
-    m_itemVertexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
-        *m_DeviceContext, m_CommandManager->getCommandPool(),
+    m_itemVertexBuffer = UploadHelpers::createDeviceLocalBuffer(
+        *m_DeviceContext, cmd,
         vertices.data(), sizeof(Vertex) * vertices.size(),
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, stagingBuffers);
 
-    m_itemIndexBuffer = UploadHelpers::createDeviceLocalBufferFromData(
-        *m_DeviceContext, m_CommandManager->getCommandPool(),
+    m_itemIndexBuffer = UploadHelpers::createDeviceLocalBuffer(
+        *m_DeviceContext, cmd,
         indices.data(), sizeof(uint32_t) * indices.size(),
-        VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT, stagingBuffers);
 }
 
 void VulkanRenderer::generateSphereMesh(float radius, int sectors, int stacks,

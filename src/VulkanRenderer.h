@@ -90,9 +90,9 @@ private:
     void updateLightUbo(uint32_t currentImage, uint32_t gameTicks);
     void buildBlas(const std::vector<std::pair<Chunk *, int>> &chunksToBuild, VkCommandBuffer cmd);
     void buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &drawList, VkCommandBuffer cmd, uint32_t frame);
-    void createRayTracingResources();
+    void createRayTracingResources(VkCommandBuffer cmd, std::vector<VmaBuffer> &stagingBuffers);
     void recreateRayTracingShadowImage();
-    void createShaderBindingTable();
+    void createShaderBindingTable(VkCommandBuffer cmd, std::vector<VmaBuffer> &stagingBuffers);
     void updateRtDescriptorSet(uint32_t frame);
     void updatePlayerDescriptorSet();
 
@@ -103,18 +103,18 @@ private:
     void updateDescriptorSets();
 
     void createOutlineVertexBuffer();
-    void createCrosshairResources();
-    void recreateCrosshairVertexBuffer();
+    void createCrosshairResources(VkCommandBuffer cmd, std::vector<VmaBuffer> &stagingBuffers);
+    void recreateCrosshairVertexBuffer(VkCommandBuffer cmd, std::vector<VmaBuffer> &stagingBuffers);
     void createModelMatrixSsbos();
-    void createDebugCubeMesh();
-    void createItemMesh();
-    void createBreakOverlayResources();
+    void createDebugCubeMesh(VkCommandBuffer cmd, std::vector<VmaBuffer> &stagingBuffers);
+    void createItemMesh(VkCommandBuffer cmd, std::vector<VmaBuffer> &stagingBuffers);
+    void createBreakOverlayResources(VkCommandBuffer cmd, std::vector<VmaBuffer> &stagingBuffers);
     void loadRayTracingFunctions();
     VkDeviceAddress getBufferDeviceAddress(VkBuffer buffer);
     VmaBuffer createScratchBuffer(VkDeviceSize size);
 
-    void createSkyResources();
-    VulkanHandle<VkImageView, ImageViewDeleter> createTexture(const char *path, VmaImage &outImage);
+    void createSkyResources(VkCommandBuffer cmd, std::vector<VmaBuffer> &stagingBuffers);
+    VulkanHandle<VkImageView, ImageViewDeleter> createTexture(VkCommandBuffer cmd, const char *path, VmaImage &outImage, std::vector<VmaBuffer> &stagingBuffers);
     void generateSphereMesh(float radius, int sectors, int stacks,
                             std::vector<Vertex> &outVertices,
                             std::vector<uint32_t> &outIndices);
@@ -204,6 +204,7 @@ private:
     VulkanHandle<VkImageView, ImageViewDeleter> m_breakOverlayTextureView;
 
     uint32_t m_CurrentFrame{0};
+    std::vector<VmaBuffer> m_initStagingBuffers;
     std::vector<VmaBuffer> m_BufferDestroyQueue[MAX_FRAMES_IN_FLIGHT];
     std::vector<VmaImage> m_ImageDestroyQueue[MAX_FRAMES_IN_FLIGHT];
     std::vector<VmaBuffer> m_asBuildStagingBuffers[MAX_FRAMES_IN_FLIGHT];
