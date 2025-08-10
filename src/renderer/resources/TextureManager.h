@@ -9,7 +9,7 @@ public:
     TextureManager(const DeviceContext &deviceContext, VkCommandPool commandPool);
     ~TextureManager();
 
-    void createTextureImage(const char *path);
+    void createTextureImage(VkCommandBuffer cmd, std::vector<VmaBuffer> &stagingBuffers, const char *path);
     void createTextureImageView();
     void createTextureSampler();
 

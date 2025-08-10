@@ -54,11 +54,11 @@ VulkanRenderer::VulkanRenderer(Window &window,
 
     m_TextureManager = std::make_unique<TextureManager>(
         *m_DeviceContext, m_CommandManager->getCommandPool());
-    m_TextureManager->createTextureImage("textures/blocks_atlas.png");
-    m_TextureManager->createTextureImageView();
-    m_TextureManager->createTextureSampler();
 
     VkCommandBuffer initCmd = UploadHelpers::beginSingleTimeCommands(*m_DeviceContext, m_CommandManager->getCommandPool());
+    m_TextureManager->createTextureImage(initCmd, m_initStagingBuffers, "textures/blocks_atlas.png");
+    m_TextureManager->createTextureImageView();
+    m_TextureManager->createTextureSampler();
 
     createSkyResources(initCmd, m_initStagingBuffers);
     createLightUbo();
@@ -78,7 +78,7 @@ VulkanRenderer::VulkanRenderer(Window &window,
     if (m_DeviceContext->isRayTracingSupported())
     {
         loadRayTracingFunctions();
-        createRayTracingResources(initCmd, m_initStagingBuffers);
+        createRayTracingResources();
 
         m_rtDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
 
@@ -460,14 +460,25 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
                     &m_rgenRegion, &m_missRegion, &m_hitRegion, &m_callRegion,
                     &pc, m_rtShadowImage.get());
 
-                VkMemoryBarrier memoryBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-                memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-                memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                VkImageMemoryBarrier imageMemoryBarrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+                imageMemoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+                imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+                imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                imageMemoryBarrier.image = m_rtShadowImage.get();
+                imageMemoryBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                imageMemoryBarrier.subresourceRange.baseMipLevel = 0;
+                imageMemoryBarrier.subresourceRange.levelCount = 1;
+                imageMemoryBarrier.subresourceRange.baseArrayLayer = 0;
+                imageMemoryBarrier.subresourceRange.layerCount = 1;
+                imageMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                imageMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
                 vkCmdPipelineBarrier(
                     cmd,
                     VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                    0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
+                    0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
             }
             else
             {
@@ -601,11 +612,7 @@ void VulkanRenderer::recreateRayTracingShadowImage()
     m_rtDescriptorPool = {};
     m_rtDescriptorSetLayout = {};
 
-    VkCommandBuffer cmd = UploadHelpers::beginSingleTimeCommands(*m_DeviceContext, m_CommandManager->getCommandPool());
-    std::vector<VmaBuffer> stagingBuffers;
-    createRayTracingResources(cmd, stagingBuffers);
-    UploadHelpers::endSingleTimeCommands(*m_DeviceContext, m_CommandManager->getCommandPool(), cmd);
-    stagingBuffers.clear();
+    createRayTracingResources();
 
     m_rtDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
     VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
@@ -640,7 +647,7 @@ void VulkanRenderer::loadRayTracingFunctions()
     vkCmdTraceRaysKHR = (PFN_vkCmdTraceRaysKHR)vkGetDeviceProcAddr(m_DeviceContext->getDevice(), "vkCmdTraceRaysKHR");
     m_rtFunctionsLoaded = true;
 }
-void VulkanRenderer::createRayTracingResources(VkCommandBuffer cmd, std::vector<VmaBuffer> &stagingBuffers)
+void VulkanRenderer::createRayTracingResources()
 {
     VkExtent2D extent = m_SwapChainContext->getSwapChainExtent();
     VkFormat shadowFormat = VK_FORMAT_R32_SFLOAT;
@@ -671,6 +678,9 @@ void VulkanRenderer::createRayTracingResources(VkCommandBuffer cmd, std::vector<
         m_DeviceContext->getDevice(), m_rtShadowImage.get(),
         shadowFormat, VK_IMAGE_ASPECT_COLOR_BIT);
 
+    VkCommandBuffer cmd = UploadHelpers::beginSingleTimeCommands(
+        *m_DeviceContext, m_CommandManager->getCommandPool());
+
     VkImageSubresourceRange rng{};
     rng.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     rng.baseMipLevel = 0;
@@ -685,7 +695,10 @@ void VulkanRenderer::createRayTracingResources(VkCommandBuffer cmd, std::vector<
         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
 
-    std::array<VkDescriptorSetLayoutBinding, 2> b {};
+    UploadHelpers::endSingleTimeCommands(
+        *m_DeviceContext, m_CommandManager->getCommandPool(), cmd);
+
+    std::array<VkDescriptorSetLayoutBinding, 2> b{};
     b[0].binding = 0;
     b[0].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
     b[0].descriptorCount = 1;
@@ -704,7 +717,7 @@ void VulkanRenderer::createRayTracingResources(VkCommandBuffer cmd, std::vector<
     vkCreateDescriptorSetLayout(m_DeviceContext->getDevice(), &li, nullptr, &tmpLayout);
     m_rtDescriptorSetLayout = VulkanHandle<VkDescriptorSetLayout, DescriptorSetLayoutDeleter>(tmpLayout, {m_DeviceContext->getDevice()});
 
-    std::array<VkDescriptorPoolSize, 2> ps {};
+    std::array<VkDescriptorPoolSize, 2> ps{};
     ps[0].type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
     ps[0].descriptorCount = MAX_FRAMES_IN_FLIGHT;
     ps[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -777,7 +790,7 @@ void VulkanRenderer::updateRtDescriptorSet(uint32_t frame)
     asWrite.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
     asWrite.descriptorCount = 1;
 
-    VkDescriptorImageInfo img {};
+    VkDescriptorImageInfo img{};
     img.imageView = m_rtShadowImageView.get();
     img.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
@@ -971,7 +984,7 @@ void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &
             if (!m || m->blas.handle == VK_NULL_HANDLE || c->m_blas_dirty.load(std::memory_order_acquire))
                 continue;
 
-            VkAccelerationStructureInstanceKHR inst {};
+            VkAccelerationStructureInstanceKHR inst{};
             glm::mat4 tr = glm::transpose(c->getModelMatrix());
             memcpy(&inst.transform, &tr, sizeof(inst.transform));
             inst.mask = 0xFF;
@@ -1136,7 +1149,7 @@ glm::vec3 VulkanRenderer::updateUniformBuffer(uint32_t currentImage, Camera &cam
     float sunsetFactor = pow(1.0f - abs(lightUbo.lightDirection.y), 16.0f);
     skyColor = glm::mix(skyColor, sunsetColor, sunsetFactor);
 
-    UniformBufferObject ubo {};
+    UniformBufferObject ubo{};
     ubo.view = camera.getViewMatrix();
     ubo.proj = camera.getProjectionMatrix();
     ubo.cameraPos = cameraWorldPos;
@@ -1188,7 +1201,7 @@ void VulkanRenderer::enqueueDestroy(VkBuffer buffer, VmaAllocation allocation)
 
 void VulkanRenderer::updateLightUbo(uint32_t currentImage, uint32_t gameTicks)
 {
-    LightUbo ubo {};
+    LightUbo ubo{};
 
     float time_of_day = static_cast<float>(gameTicks) / 24000.0f;
     float sun_angle = time_of_day * 2.0f * glm::pi<float>() - glm::half_pi<float>();
@@ -1288,7 +1301,7 @@ VulkanHandle<VkImageView, ImageViewDeleter> VulkanRenderer::createTexture(VkComm
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
     outImage = VmaImage(m_DeviceContext->getAllocator(), imageInfo, allocInfo);
 
-    VkImageSubresourceRange range {};
+    VkImageSubresourceRange range{};
     range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     range.levelCount = 1;
     range.layerCount = 1;
@@ -1297,7 +1310,7 @@ VulkanHandle<VkImageView, ImageViewDeleter> VulkanRenderer::createTexture(VkComm
         cmd, outImage.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         range, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
-    VkBufferImageCopy region {};
+    VkBufferImageCopy region{};
     region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     region.imageSubresource.layerCount = 1;
     region.imageExtent = {(uint32_t)texWidth, (uint32_t)texHeight, 1};
@@ -1338,7 +1351,7 @@ void VulkanRenderer::createSkyResources(VkCommandBuffer cmd, std::vector<VmaBuff
 
 void VulkanRenderer::createDescriptorPool()
 {
-    std::array<VkDescriptorPoolSize, 3> poolSizes {};
+    std::array<VkDescriptorPoolSize, 3> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = (MAX_FRAMES_IN_FLIGHT * 2) + 1;
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -1346,7 +1359,7 @@ void VulkanRenderer::createDescriptorPool()
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
-    VkDescriptorPoolCreateInfo poolInfo {};
+    VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
@@ -1362,7 +1375,7 @@ void VulkanRenderer::createDescriptorPool()
 void VulkanRenderer::createDescriptorSets()
 {
     std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, m_DescriptorLayout->getDescriptorSetLayout());
-    VkDescriptorSetAllocateInfo alloc {};
+    VkDescriptorSetAllocateInfo alloc{};
     alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     alloc.descriptorPool = m_DescriptorPool.get();
     alloc.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
@@ -1375,7 +1388,7 @@ void VulkanRenderer::createDescriptorSets()
     }
 
     VkDescriptorSetLayout playerLayout = m_PipelineCache->getPlayerDescriptorSetLayout();
-    VkDescriptorSetAllocateInfo playerAllocInfo {};
+    VkDescriptorSetAllocateInfo playerAllocInfo{};
     playerAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     playerAllocInfo.descriptorPool = m_DescriptorPool.get();
     playerAllocInfo.descriptorSetCount = 1;
@@ -1392,7 +1405,7 @@ void VulkanRenderer::updatePlayerDescriptorSet()
     VkDescriptorImageInfo playerSkinInfo{m_TextureManager->getTextureSampler(), m_playerSkinTextureView.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkDescriptorBufferInfo mainUboInfo{m_UniformBuffers[m_CurrentFrame].get(), 0, sizeof(UniformBufferObject)};
 
-    std::array<VkWriteDescriptorSet, 2> writes {};
+    std::array<VkWriteDescriptorSet, 2> writes{};
     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = m_playerDescriptorSet;
     writes[0].dstBinding = 0;
@@ -1420,7 +1433,7 @@ void VulkanRenderer::updateDescriptorSets()
     VkDescriptorImageInfo moonInfo{m_TextureManager->getTextureSampler(), m_MoonTextureView.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkDescriptorImageInfo breakOverlayInfo{m_TextureManager->getTextureSampler(), m_breakOverlayTextureView.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
-    VkDescriptorImageInfo shadowImageInfo {};
+    VkDescriptorImageInfo shadowImageInfo{};
     shadowImageInfo.sampler = m_TextureManager->getTextureSampler();
     if (m_rtShadowImageView.get() != VK_NULL_HANDLE)
     {
@@ -1433,7 +1446,7 @@ void VulkanRenderer::updateDescriptorSets()
         shadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     }
 
-    std::array<VkWriteDescriptorSet, 7> writes {};
+    std::array<VkWriteDescriptorSet, 7> writes{};
 
     VkDescriptorBufferInfo modelMatrixInfo{m_ModelMatrixSsbos[m_CurrentFrame].get(), 0, VK_WHOLE_SIZE};
 
@@ -1511,7 +1524,7 @@ void VulkanRenderer::createCrosshairResources(VkCommandBuffer cmd, std::vector<V
     m_CrosshairTextureView = createTexture(cmd, "textures/crosshair.png", m_CrosshairTexture, stagingBuffers);
 
     VkDevice device = m_DeviceContext->getDevice();
-    VkDescriptorSetLayoutBinding binding {};
+    VkDescriptorSetLayoutBinding binding{};
     binding.binding = 0;
     binding.descriptorCount = 1;
     binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -1539,7 +1552,7 @@ void VulkanRenderer::createCrosshairResources(VkCommandBuffer cmd, std::vector<V
     allocInfo.pSetLayouts = &layout;
     vkAllocateDescriptorSets(device, &allocInfo, &m_CrosshairDescriptorSet);
 
-    VkDescriptorImageInfo imageInfo {};
+    VkDescriptorImageInfo imageInfo{};
     imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     imageInfo.imageView = m_CrosshairTextureView.get();
     imageInfo.sampler = m_TextureManager->getTextureSampler();
