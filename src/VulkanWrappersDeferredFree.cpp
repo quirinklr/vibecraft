@@ -1,5 +1,21 @@
 #include "VulkanWrappers.h"
 
+DestructionQueue g_DestructionQueue;
+
+void DestructionQueue::enqueue(std::function<void()>&& function)
+{
+    m_deletors.push_back(std::move(function));
+}
+
+void DestructionQueue::flush()
+{
+    for (auto& func : m_deletors)
+    {
+        func();
+    }
+    m_deletors.clear();
+}
+
 std::mutex DeferredFreeQueue::mtx;
 std::vector<std::tuple<VkDevice, VkCommandPool, VkCommandBuffer, VkFence>>
     DeferredFreeQueue::items;

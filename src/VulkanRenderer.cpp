@@ -133,6 +133,8 @@ VulkanRenderer::VulkanRenderer(Window &window,
         m_MegaVertexBuffers[i] = VmaBuffer();
         m_MegaIndexBuffers[i] = VmaBuffer();
     }
+
+    vkDeviceWaitIdle(m_DeviceContext->getDevice());
 }
 
 void VulkanRenderer::createBreakOverlayResources()
@@ -193,6 +195,7 @@ VulkanRenderer::~VulkanRenderer()
     if (m_DeviceContext && m_DeviceContext->getDevice() != VK_NULL_HANDLE)
     {
         vkDeviceWaitIdle(m_DeviceContext->getDevice());
+        g_DestructionQueue.flush();
     }
 
     m_playerSkinTextureView = {nullptr, {}};
@@ -230,7 +233,7 @@ VulkanRenderer::~VulkanRenderer()
 
 void VulkanRenderer::recreateCrosshairVertexBuffer()
 {
-    m_CrosshairVertexBuffer = {};
+    enqueueDestroy(std::move(m_CrosshairVertexBuffer));
 
     const float sizeInPixels = 32.0f;
     float w = static_cast<float>(m_SwapChainContext->getSwapChainExtent().width);
@@ -299,12 +302,25 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
     const uint32_t slot = m_CurrentFrame;
 
     vkWaitForFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(slot), VK_TRUE, UINT64_MAX);
+    g_DestructionQueue.flush();
 
     VkResult deviceStatus = vkGetFenceStatus(m_DeviceContext->getDevice(), m_SyncPrimitives->getInFlightFence(slot));
     if (deviceStatus == VK_ERROR_DEVICE_LOST)
     {
         throw std::runtime_error("Vulkan device lost detected after fence wait!");
     }
+
+    m_asBuildStagingBuffers[slot].clear();
+    m_blasBuildScratchBuffers[slot].clear();
+    m_BufferDestroyQueue[slot].clear();
+    m_ImageDestroyQueue[slot].clear();
+    m_ChunkCleanupQueue[slot].clear();
+
+    for (auto &as : m_AsDestroyQueue[slot])
+    {
+        as.destroy(m_DeviceContext->getDevice());
+    }
+    m_AsDestroyQueue[slot].clear();
 
     uint32_t imageIndex;
     VkResult res = vkAcquireNextImageKHR(
@@ -330,17 +346,6 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
     }
 
     vkResetFences(m_DeviceContext->getDevice(), 1, m_SyncPrimitives->getInFlightFencePtr(slot));
-
-    m_asBuildStagingBuffers[slot].clear();
-    m_blasBuildScratchBuffers[slot].clear();
-    m_BufferDestroyQueue[slot].clear();
-    m_ImageDestroyQueue[slot].clear();
-
-    for (auto &as : m_AsDestroyQueue[slot])
-    {
-        as.destroy(m_DeviceContext->getDevice());
-    }
-    m_AsDestroyQueue[slot].clear();
 
     updateLightUbo(slot, gameTicks);
     glm::vec3 skyColor = updateUniformBuffer(slot, camera, playerPos);
@@ -413,7 +418,7 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
 
     if (player->getCameraMode() != CameraMode::FIRST_PERSON)
     {
-        updatePlayerDescriptorSet();
+        updatePlayerDescriptorSet(slot);
     }
 
     VkCommandBuffer cmd = m_CommandManager->getCommandBuffer(slot);
@@ -507,7 +512,7 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
         m_Settings, debugAABBs,
         m_outlineVertexBuffer.get(), static_cast<uint32_t>(outlineVertices.size()), hoveredBlockPos,
         items, m_itemVertexBuffer.get(), m_itemIndexBuffer.get(), m_itemIndexCount,
-        player, m_playerDescriptorSet, *m_playerModel,
+        player, m_playerDescriptorSets[slot], *m_playerModel,
         breakingBlockPos, breakingStage,
         m_breakOverlayVertexBuffer.get(), m_breakOverlayIndexBuffer.get(), m_breakOverlayIndexCount);
 
@@ -1141,8 +1146,7 @@ void VulkanRenderer::enqueueDestroy(AccelerationStructure &&as)
 {
     if (as.handle != VK_NULL_HANDLE)
     {
-        const uint32_t idx = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
-        m_AsDestroyQueue[idx].push_back(std::move(as));
+        m_AsDestroyQueue[m_CurrentFrame].push_back(std::move(as));
     }
 }
 
@@ -1150,8 +1154,7 @@ void VulkanRenderer::enqueueDestroy(VmaBuffer &&buffer)
 {
     if (buffer.get() != VK_NULL_HANDLE)
     {
-        const uint32_t idx = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
-        m_BufferDestroyQueue[idx].push_back(std::move(buffer));
+        m_BufferDestroyQueue[m_CurrentFrame].push_back(std::move(buffer));
     }
 }
 
@@ -1159,8 +1162,7 @@ void VulkanRenderer::enqueueDestroy(VmaImage &&image)
 {
     if (image.get() != VK_NULL_HANDLE)
     {
-        const uint32_t idx = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
-        m_ImageDestroyQueue[idx].push_back(std::move(image));
+        m_ImageDestroyQueue[m_CurrentFrame].push_back(std::move(image));
     }
 }
 
@@ -1168,8 +1170,7 @@ void VulkanRenderer::enqueueDestroy(VkBuffer buffer, VmaAllocation allocation)
 {
     if (buffer != VK_NULL_HANDLE)
     {
-        const uint32_t idx = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
-        m_BufferDestroyQueue[idx].emplace_back(m_DeviceContext->getAllocator(), buffer, allocation);
+        m_BufferDestroyQueue[m_CurrentFrame].emplace_back(m_DeviceContext->getAllocator(), buffer, allocation);
     }
 }
 
@@ -1327,11 +1328,12 @@ void VulkanRenderer::createSkyResources()
 
 void VulkanRenderer::createDescriptorPool()
 {
+
     std::array<VkDescriptorPoolSize, 3> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = (MAX_FRAMES_IN_FLIGHT * 2) + 1;
+    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 3);
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 5);
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 6);
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
@@ -1339,7 +1341,8 @@ void VulkanRenderer::createDescriptorPool()
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) + 1;
+
+    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 2);
 
     VkDescriptorPool pool;
     if (vkCreateDescriptorPool(m_DeviceContext->getDevice(), &poolInfo, nullptr, &pool) != VK_SUCCESS)
@@ -1363,34 +1366,35 @@ void VulkanRenderer::createDescriptorSets()
         throw std::runtime_error("failed to allocate descriptor sets");
     }
 
-    VkDescriptorSetLayout playerLayout = m_PipelineCache->getPlayerDescriptorSetLayout();
+    std::vector<VkDescriptorSetLayout> playerLayouts(MAX_FRAMES_IN_FLIGHT, m_PipelineCache->getPlayerDescriptorSetLayout());
     VkDescriptorSetAllocateInfo playerAllocInfo{};
     playerAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     playerAllocInfo.descriptorPool = m_DescriptorPool.get();
-    playerAllocInfo.descriptorSetCount = 1;
-    playerAllocInfo.pSetLayouts = &playerLayout;
+    playerAllocInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+    playerAllocInfo.pSetLayouts = playerLayouts.data();
 
-    if (vkAllocateDescriptorSets(m_DeviceContext->getDevice(), &playerAllocInfo, &m_playerDescriptorSet) != VK_SUCCESS)
+    m_playerDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+    if (vkAllocateDescriptorSets(m_DeviceContext->getDevice(), &playerAllocInfo, m_playerDescriptorSets.data()) != VK_SUCCESS)
     {
-        throw std::runtime_error("failed to allocate player descriptor set");
+        throw std::runtime_error("failed to allocate player descriptor sets");
     }
 }
 
-void VulkanRenderer::updatePlayerDescriptorSet()
+void VulkanRenderer::updatePlayerDescriptorSet(uint32_t currentFrame)
 {
     VkDescriptorImageInfo playerSkinInfo{m_TextureManager->getTextureSampler(), m_playerSkinTextureView.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkDescriptorBufferInfo mainUboInfo{m_UniformBuffers[m_CurrentFrame].get(), 0, sizeof(UniformBufferObject)};
+    VkDescriptorBufferInfo mainUboInfo{m_UniformBuffers[currentFrame].get(), 0, sizeof(UniformBufferObject)};
 
     std::array<VkWriteDescriptorSet, 2> writes{};
     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[0].dstSet = m_playerDescriptorSet;
+    writes[0].dstSet = m_playerDescriptorSets[currentFrame];
     writes[0].dstBinding = 0;
     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     writes[0].descriptorCount = 1;
     writes[0].pBufferInfo = &mainUboInfo;
 
     writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[1].dstSet = m_playerDescriptorSet;
+    writes[1].dstSet = m_playerDescriptorSets[currentFrame];
     writes[1].dstBinding = 1;
     writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     writes[1].descriptorCount = 1;

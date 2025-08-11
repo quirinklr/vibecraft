@@ -6,6 +6,19 @@
 #include <vector>
 #include <mutex>
 #include <tuple>
+#include <functional>
+
+class DestructionQueue
+{
+public:
+    void enqueue(std::function<void()>&& function);
+    void flush();
+
+private:
+    std::vector<std::function<void()>> m_deletors;
+};
+
+extern DestructionQueue g_DestructionQueue;
 
 struct DeviceDeleter
 {
@@ -231,7 +244,9 @@ public:
     {
         if (m_Allocator && m_Buffer)
         {
-            vmaDestroyBuffer(m_Allocator, m_Buffer, m_Allocation);
+            g_DestructionQueue.enqueue([allocator = m_Allocator, buffer = m_Buffer, allocation = m_Allocation]() {
+                vmaDestroyBuffer(allocator, buffer, allocation);
+            });
         }
     }
 
@@ -253,7 +268,9 @@ public:
         {
             if (m_Allocator && m_Buffer)
             {
-                vmaDestroyBuffer(m_Allocator, m_Buffer, m_Allocation);
+                g_DestructionQueue.enqueue([allocator = m_Allocator, buffer = m_Buffer, allocation = m_Allocation]() {
+                    vmaDestroyBuffer(allocator, buffer, allocation);
+                });
             }
             m_Allocator = other.m_Allocator;
             m_Buffer = other.m_Buffer;
@@ -288,7 +305,9 @@ public:
     {
         if (m_Allocator && m_Image)
         {
-            vmaDestroyImage(m_Allocator, m_Image, m_Allocation);
+            g_DestructionQueue.enqueue([allocator = m_Allocator, image = m_Image, allocation = m_Allocation]() {
+                vmaDestroyImage(allocator, image, allocation);
+            });
         }
     }
 
@@ -310,7 +329,9 @@ public:
         {
             if (m_Allocator && m_Image)
             {
-                vmaDestroyImage(m_Allocator, m_Image, m_Allocation);
+                g_DestructionQueue.enqueue([allocator = m_Allocator, image = m_Image, allocation = m_Allocation]() {
+                    vmaDestroyImage(allocator, image, allocation);
+                });
             }
             m_Allocator = other.m_Allocator;
             m_Image = other.m_Image;

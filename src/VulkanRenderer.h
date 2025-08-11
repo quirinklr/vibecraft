@@ -94,7 +94,7 @@ private:
     void recreateRayTracingShadowImage();
     void createShaderBindingTable();
     void updateRtDescriptorSet(uint32_t frame);
-    void updatePlayerDescriptorSet();
+    void updatePlayerDescriptorSet(uint32_t currentFrame);
 
     void createUniformBuffers();
     void createLightUbo();
@@ -221,5 +221,5 @@ private:
     std::unique_ptr<PlayerModel> m_playerModel;
     VmaImage m_playerSkinTexture;
     VulkanHandle<VkImageView, ImageViewDeleter> m_playerSkinTextureView;
-    VkDescriptorSet m_playerDescriptorSet;
+    std::vector<VkDescriptorSet> m_playerDescriptorSets;
 };

@@ -48,7 +48,7 @@ void UploadHelpers::copyBuffer(const DeviceContext &dc,
     {
 
         vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
-        vkQueueWaitIdle(queue);
+        vkDeviceWaitIdle(dc.getDevice());
         vkFreeCommandBuffers(dc.getDevice(), pool, 1, &cmd);
     }
 }
@@ -132,7 +132,7 @@ void UploadHelpers::endSingleTimeCommands(const DeviceContext &dc, VkCommandPool
     submitInfo.pCommandBuffers = &cmd;
 
     vkQueueSubmit(dc.getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(dc.getGraphicsQueue());
+    vkDeviceWaitIdle(dc.getDevice());
 
     vkFreeCommandBuffers(dc.getDevice(), pool, 1, &cmd);
 }
