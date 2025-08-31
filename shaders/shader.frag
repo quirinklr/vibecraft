@@ -54,6 +54,11 @@ void main() {
         outColor = vec4(finalColor, 1.0);
 
     } else {
+        // If RT full rendering enabled (reflections or GI), display RT output directly
+        if (((cameraUbo.flags & 2u) != 0u) || ((cameraUbo.flags & 4u) != 0u)) {
+            outColor = texture(shadowMap, gl_FragCoord.xy / textureSize(shadowMap, 0));
+            return;
+        }
         float sunUpFactor = smoothstep(-0.1, 0.1, uboLight.lightDirection.y);
         
         

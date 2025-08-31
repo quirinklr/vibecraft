@@ -316,16 +316,17 @@ void CommandManager::createCommandBuffers()
 
 void CommandManager::recordRayTraceCommand(
     VkCommandBuffer cb, uint32_t currentFrame, VkDescriptorSet rtDescriptorSet,
+    VkPipeline rtPipeline, VkPipelineLayout rtLayout,
     const VkStridedDeviceAddressRegionKHR *rgenRegion,
     const VkStridedDeviceAddressRegionKHR *missRegion,
     const VkStridedDeviceAddressRegionKHR *hitRegion,
     const VkStridedDeviceAddressRegionKHR *callRegion,
     const void *pushConstants, VkImage shadowImage)
 {
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_PipelineCache.getRayTracingPipeline());
-    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_PipelineCache.getRayTracingPipelineLayout(), 0, 1, &rtDescriptorSet, 0, 0);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtLayout, 0, 1, &rtDescriptorSet, 0, 0);
 
-    vkCmdPushConstants(cb, m_PipelineCache.getRayTracingPipelineLayout(),
+    vkCmdPushConstants(cb, rtLayout,
                        VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
                        0, sizeof(RayTracePushConstants), pushConstants);
 

@@ -63,6 +63,7 @@ public:
     VkCommandBuffer getCommandBuffer(uint32_t index) const { return m_CommandBuffers[index]; }
     VkCommandPool getCommandPool() const { return m_CommandPool.get(); }
     void recordRayTraceCommand(VkCommandBuffer cb, uint32_t currentFrame, VkDescriptorSet rtDescriptorSet,
+                               VkPipeline rtPipeline, VkPipelineLayout rtLayout,
                                const VkStridedDeviceAddressRegionKHR *rgenRegion,
                                const VkStridedDeviceAddressRegionKHR *missRegion,
                                const VkStridedDeviceAddressRegionKHR *hitRegion,

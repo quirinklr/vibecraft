@@ -92,7 +92,12 @@ private:
     void buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &drawList, VkCommandBuffer cmd, uint32_t frame);
     void createRayTracingResources();
     void recreateRayTracingShadowImage();
-    void createShaderBindingTable();
+    void createShaderBindingTableForPipeline(VkPipeline pipeline,
+                                             VmaBuffer &outSbt,
+                                             VkStridedDeviceAddressRegionKHR &outRgen,
+                                             VkStridedDeviceAddressRegionKHR &outMiss,
+                                             VkStridedDeviceAddressRegionKHR &outHit,
+                                             VkStridedDeviceAddressRegionKHR &outCall);
     void updateRtDescriptorSet(uint32_t frame);
     void updatePlayerDescriptorSet(uint32_t currentFrame);
 
@@ -160,11 +165,18 @@ private:
     VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter> m_rtDescriptorPool;
     VkDescriptorSet m_rtDescriptorSet = VK_NULL_HANDLE;
 
-    VmaBuffer m_shaderBindingTable;
-    VkStridedDeviceAddressRegionKHR m_rgenRegion{};
-    VkStridedDeviceAddressRegionKHR m_missRegion{};
-    VkStridedDeviceAddressRegionKHR m_hitRegion{};
-    VkStridedDeviceAddressRegionKHR m_callRegion{};
+    // Shader Binding Tables and regions for shadow/full pipelines
+    VmaBuffer m_sbtShadow;
+    VkStridedDeviceAddressRegionKHR m_rgenRegionShadow{};
+    VkStridedDeviceAddressRegionKHR m_missRegionShadow{};
+    VkStridedDeviceAddressRegionKHR m_hitRegionShadow{};
+    VkStridedDeviceAddressRegionKHR m_callRegionShadow{};
+
+    VmaBuffer m_sbtFull;
+    VkStridedDeviceAddressRegionKHR m_rgenRegionFull{};
+    VkStridedDeviceAddressRegionKHR m_missRegionFull{};
+    VkStridedDeviceAddressRegionKHR m_hitRegionFull{};
+    VkStridedDeviceAddressRegionKHR m_callRegionFull{};
 
     std::vector<VmaBuffer> m_UniformBuffers;
     std::vector<void *> m_UniformBuffersMapped;
@@ -209,6 +221,11 @@ private:
     std::vector<VmaBuffer> m_asBuildStagingBuffers[MAX_FRAMES_IN_FLIGHT];
     std::vector<std::shared_ptr<Chunk>> m_ChunkCleanupQueue[MAX_FRAMES_IN_FLIGHT];
     std::vector<AccelerationStructure> m_AsDestroyQueue[MAX_FRAMES_IN_FLIGHT];
+
+    // DDGI resources
+    VmaBuffer m_ddgiUbo;
+    void *m_ddgiUboMapped = nullptr;
+    VmaBuffer m_ddgiProbes;
 
     VmaImage m_CrosshairTexture;
     VulkanHandle<VkImageView, ImageViewDeleter> m_CrosshairTextureView;

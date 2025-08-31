@@ -1,0 +1,71 @@
+#version 460 core
+#extension GL_EXT_ray_tracing : require
+
+// Updates DDGI probes by tracing rays from a slice of the grid.
+// Writes SH coefficients into ddgiBuf; simple example derived from sample.
+
+layout(set = 0, binding = 1) uniform accelerationStructureEXT topLevelAS;
+layout(set = 0, binding = 4) uniform DDGIUbo { int gsx; int gsy; int gsz; float spacing; float hysteresis; int raysPerProbe; int sliceAxis; int sliceIndex; float originX; float originY; float originZ; float rotation; } ddgi;
+layout(set = 0, binding = 5) buffer DDGIProbes { float data[]; } ddgiBuf;
+
+layout(push_constant) uniform Push {
+  vec3 camPos; float fovYTan;
+  vec3 camRight; float pad0;
+  vec3 camUp; float pad1;
+  vec3 camForward; float pad2;
+  vec3 lightDir; float pad3;
+  vec4 shadowParams;
+  vec4 renderParams;
+} pc;
+
+layout(location = 0) rayPayloadEXT vec3 payloadGI; // rgb irradiance sample
+
+void main() {
+  // Compute probe index within selected slice
+  uvec3 gid = gl_LaunchIDEXT.xyz;
+  uint ix = gid.x;
+  uint iy = gid.y;
+  uint iz = gid.z;
+  if (ddgi.sliceAxis == 0) ix = uint(ddgi.sliceIndex);
+  else if (ddgi.sliceAxis == 1) iy = uint(ddgi.sliceIndex);
+  else iz = uint(ddgi.sliceIndex);
+
+  uint pi = ix + iy * uint(ddgi.gsx) + iz * uint(ddgi.gsx * ddgi.gsy);
+  int stride = 9*3 + 4;
+  int base = int(pi) * stride;
+
+  // Probe world position
+  vec3 origin = vec3(ddgi.originX, ddgi.originY, ddgi.originZ);
+  vec3 Pw = origin + vec3(ix, iy, iz) * ddgi.spacing;
+
+  // Integrate N directions (simple uniform hemisphere around up)
+  int N = max(1, ddgi.raysPerProbe);
+  vec3 up = vec3(0,1,0);
+  vec3 sum = vec3(0);
+  for (int i=0;i<N;++i) {
+    float u = (float(i)+0.5)/float(N);
+    float r = sqrt(u);
+    float phi = 6.2831853*u;
+    float z = 1.0 - u;
+    float x = r*cos(phi);
+    float y = r*sin(phi);
+    vec3 t = normalize(cross(up, vec3(0,0,1)));
+    vec3 b = normalize(cross(up, t));
+    vec3 dir = normalize(z*up + x*t + y*b);
+    payloadGI = vec3(0);
+    traceRayEXT(topLevelAS,
+                gl_RayFlagsOpaqueEXT,
+                0xFF,
+                0, 1, 0,
+                Pw, 0.01,
+                dir, 10000.0,
+                0);
+    sum += payloadGI;
+  }
+  vec3 irrad = sum / float(N);
+  // Store as first SH coefficient (others left unchanged here)
+  ddgiBuf.data[base+0] = mix(ddgiBuf.data[base+0], irrad.r, 1.0 - ddgi.hysteresis);
+  ddgiBuf.data[base+1] = mix(ddgiBuf.data[base+1], irrad.g, 1.0 - ddgi.hysteresis);
+  ddgiBuf.data[base+2] = mix(ddgiBuf.data[base+2], irrad.b, 1.0 - ddgi.hysteresis);
+}
+

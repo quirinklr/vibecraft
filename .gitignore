@@ -17,6 +17,7 @@ tree-skel.bat
 tree-skel-output.txt
 Raytracing Project Files.txt
 TODO.md
+RaytracingSample/
 
 # IDE-specific settings folder
 .vs/

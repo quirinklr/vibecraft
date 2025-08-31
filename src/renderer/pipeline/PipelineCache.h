@@ -24,7 +24,8 @@ public:
     VkPipeline getWaterPipeline() const { return m_WaterPipeline.get(); }
     VkPipeline getSkyPipeline() const { return m_SkyPipeline.get(); }
     VkPipelineLayout getSkyPipelineLayout() const { return m_SkyPipelineLayout.get(); }
-    VkPipeline getRayTracingPipeline() const { return m_RayTracingPipeline.get(); }
+    VkPipeline getRayTracingShadowPipeline() const { return m_RayTracingShadowPipeline.get(); }
+    VkPipeline getRayTracingFullPipeline() const { return m_RayTracingFullPipeline.get(); }
     VkPipelineLayout getRayTracingPipelineLayout() const { return m_RayTracingPipelineLayout.get(); }
     VkPipeline getItemPipeline() const { return m_ItemPipeline.get(); }
     VkPipelineLayout getItemPipelineLayout() const { return m_ItemPipelineLayout.get(); }
@@ -65,7 +66,8 @@ private:
     VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter> m_SkyPipelineLayout;
     VulkanHandle<VkPipeline, PipelineDeleter> m_SkyPipeline;
     VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter> m_RayTracingPipelineLayout;
-    VulkanHandle<VkPipeline, PipelineDeleter> m_RayTracingPipeline;
+    VulkanHandle<VkPipeline, PipelineDeleter> m_RayTracingShadowPipeline;
+    VulkanHandle<VkPipeline, PipelineDeleter> m_RayTracingFullPipeline;
     VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter> m_ItemPipelineLayout;
     VulkanHandle<VkPipeline, PipelineDeleter> m_ItemPipeline;
     VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter> m_PlayerPipelineLayout;

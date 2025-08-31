@@ -3,15 +3,16 @@
 
 struct RayTracePushConstants
 {
-
-    glm::mat4 invViewProj;
-
-    glm::vec3 cameraPos;
-    float _pad0 = 0.0f;
-
-    glm::vec3 sunDirWS;
-    float tMin = 0.001f;
-
-    float tMax = 1e16f;
-    glm::vec3 _pad1 = glm::vec3(0.0f);
+    glm::vec3 camPos;
+    float fovYTan;
+    glm::vec3 camRight;
+    float pad0 = 0.0f;
+    glm::vec3 camUp;
+    float pad1 = 0.0f;
+    glm::vec3 camForward;
+    float pad2 = 0.0f;
+    glm::vec3 lightDir;
+    float pad3 = 0.0f;
+    glm::vec4 shadowParams;   // x: shadowMode (0 off,1 soft), y: angular radius, z: samples, w: denoise mode
+    glm::vec4 renderParams;   // x: reflectionMode (0 off..3 high), y: nightBrightness, z: shadowMinVisibility, w: GI mode
 };

@@ -373,6 +373,30 @@ void Engine::processInput(float dt, bool &mouse_enabled, double &lx, double &ly)
 		}
 	}
 	lLast = lNow;
+
+	// Toggle reflections with K
+	static bool kLast = false;
+	bool kNow = glfwGetKey(window, GLFW_KEY_K) == GLFW_PRESS;
+	if (kNow && !kLast)
+	{
+		if (m_Settings.rayTracingFlags & SettingsEnums::REFLECTIONS)
+			m_Settings.rayTracingFlags &= ~SettingsEnums::REFLECTIONS;
+		else if (m_Renderer.getDeviceContext()->isRayTracingSupported())
+			m_Settings.rayTracingFlags |= SettingsEnums::REFLECTIONS;
+	}
+	kLast = kNow;
+
+	// Toggle GI with I
+	static bool iLast = false;
+	bool iNow = glfwGetKey(window, GLFW_KEY_I) == GLFW_PRESS;
+	if (iNow && !iLast)
+	{
+		if (m_Settings.rayTracingFlags & SettingsEnums::GI)
+			m_Settings.rayTracingFlags &= ~SettingsEnums::GI;
+		else if (m_Renderer.getDeviceContext()->isRayTracingSupported())
+			m_Settings.rayTracingFlags |= SettingsEnums::GI;
+	}
+	iLast = iNow;
 }
 
 void Engine::set_block(int x, int y, int z, BlockId id)
