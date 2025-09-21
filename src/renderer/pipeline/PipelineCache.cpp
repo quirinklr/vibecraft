@@ -295,7 +295,6 @@ void PipelineCache::createRayTracingPipeline()
 {
     VkDevice device = m_DeviceContext.getDevice();
 
-    // Unified descriptor set layout for RT (6 bindings)
     std::array<VkDescriptorSetLayoutBinding, 6> bindings{};
     bindings[0] = {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR};
     bindings[1] = {1, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR};
@@ -312,8 +311,13 @@ void PipelineCache::createRayTracingPipeline()
     if (vkCreateDescriptorSetLayout(device, &setLayoutInfo, nullptr, &rtDescriptorSetLayout) != VK_SUCCESS)
         throw std::runtime_error("Failed to create ray tracing descriptor set layout!");
 
+    m_RtDescriptorSetLayout = VulkanHandle<VkDescriptorSetLayout, DescriptorSetLayoutDeleter>(rtDescriptorSetLayout, {device});
+
     VkPushConstantRange pcRange{};
-    pcRange.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+
+    pcRange.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+                         VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+                         VK_SHADER_STAGE_MISS_BIT_KHR;
     pcRange.offset = 0;
     pcRange.size = sizeof(RayTracePushConstants);
 
@@ -330,7 +334,6 @@ void PipelineCache::createRayTracingPipeline()
 
     auto vkCreateRayTracingPipelinesKHR = (PFN_vkCreateRayTracingPipelinesKHR)vkGetDeviceProcAddr(device, "vkCreateRayTracingPipelinesKHR");
 
-    // Shadow pipeline using minimal shaders
     {
         auto rgen = makeShader(device, "shaders/raytracing/shadow.rgen.spv");
         auto rmiss_primary = makeShader(device, "shaders/raytracing/shadow_primary.rmiss.spv");
@@ -366,7 +369,6 @@ void PipelineCache::createRayTracingPipeline()
         m_RayTracingShadowPipeline = VulkanHandle<VkPipeline, PipelineDeleter>(pipeline, {device});
     }
 
-    // Full pipeline using sample shaders
     {
         auto rgen = makeShader(device, "shaders/raytracing/raygen.rgen.spv");
         auto rmiss = makeShader(device, "shaders/raytracing/miss.rmiss.spv");
@@ -401,8 +403,6 @@ void PipelineCache::createRayTracingPipeline()
             throw std::runtime_error("Failed to create full RT pipeline!");
         m_RayTracingFullPipeline = VulkanHandle<VkPipeline, PipelineDeleter>(pipeline, {device});
     }
-
-    vkDestroyDescriptorSetLayout(device, rtDescriptorSetLayout, nullptr);
 }
 
 void PipelineCache::createSkyPipeline()

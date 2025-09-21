@@ -48,7 +48,7 @@ void main() {
     float shade = 1.0;
     if (prd.hit == 1u) {
         vec3 L = normalize(-pc.lightDir);
-        vec3 hitPos = prd.hitPos + L * 0.01;
+        vec3 hitPos = prd.hitPos - rd * 0.01;
         traceShadow(hitPos, L);
         shade = (occluded == 1u) ? 0.0 : 1.0;
     }

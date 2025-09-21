@@ -161,7 +161,7 @@ private:
 
     VmaImage m_rtShadowImage;
     VulkanHandle<VkImageView, ImageViewDeleter> m_rtShadowImageView;
-    VulkanHandle<VkDescriptorSetLayout, DescriptorSetLayoutDeleter> m_rtDescriptorSetLayout;
+    // RT descriptor set layout is owned by PipelineCache
     VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter> m_rtDescriptorPool;
     VkDescriptorSet m_rtDescriptorSet = VK_NULL_HANDLE;
 

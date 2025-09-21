@@ -27,6 +27,7 @@ public:
     VkPipeline getRayTracingShadowPipeline() const { return m_RayTracingShadowPipeline.get(); }
     VkPipeline getRayTracingFullPipeline() const { return m_RayTracingFullPipeline.get(); }
     VkPipelineLayout getRayTracingPipelineLayout() const { return m_RayTracingPipelineLayout.get(); }
+    VkDescriptorSetLayout getRayTracingDescriptorSetLayout() const { return m_RtDescriptorSetLayout.get(); }
     VkPipeline getItemPipeline() const { return m_ItemPipeline.get(); }
     VkPipelineLayout getItemPipelineLayout() const { return m_ItemPipelineLayout.get(); }
     VkPipeline getPlayerPipeline() const { return m_PlayerPipeline.get(); }
@@ -68,6 +69,7 @@ private:
     VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter> m_RayTracingPipelineLayout;
     VulkanHandle<VkPipeline, PipelineDeleter> m_RayTracingShadowPipeline;
     VulkanHandle<VkPipeline, PipelineDeleter> m_RayTracingFullPipeline;
+    VulkanHandle<VkDescriptorSetLayout, DescriptorSetLayoutDeleter> m_RtDescriptorSetLayout;
     VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter> m_ItemPipelineLayout;
     VulkanHandle<VkPipeline, PipelineDeleter> m_ItemPipeline;
     VulkanHandle<VkPipelineLayout, PipelineLayoutDeleter> m_PlayerPipelineLayout;

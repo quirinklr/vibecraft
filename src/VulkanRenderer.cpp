@@ -84,14 +84,13 @@ VulkanRenderer::VulkanRenderer(Window &window,
         ai.descriptorPool = m_rtDescriptorPool.get();
         ai.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
         std::vector<VkDescriptorSetLayout> layouts(
-            MAX_FRAMES_IN_FLIGHT, m_rtDescriptorSetLayout.get());
+            MAX_FRAMES_IN_FLIGHT, m_PipelineCache->getRayTracingDescriptorSetLayout());
         ai.pSetLayouts = layouts.data();
 
         if (vkAllocateDescriptorSets(m_DeviceContext->getDevice(),
                                      &ai, m_rtDescriptorSets.data()) != VK_SUCCESS)
             throw std::runtime_error("failed to allocate RT descriptor sets");
 
-        // Create SBTs for both pipelines
         createShaderBindingTableForPipeline(m_PipelineCache->getRayTracingShadowPipeline(),
                                             m_sbtShadow, m_rgenRegionShadow, m_missRegionShadow, m_hitRegionShadow, m_callRegionShadow);
         createShaderBindingTableForPipeline(m_PipelineCache->getRayTracingFullPipeline(),
@@ -198,7 +197,7 @@ VulkanRenderer::~VulkanRenderer()
 {
     if (m_DeviceContext && m_DeviceContext->getDevice() != VK_NULL_HANDLE)
     {
-        // Proactively destroy RT extra buffers before allocator goes away
+
         m_ddgiUbo = VmaBuffer();
         m_ddgiProbes = VmaBuffer();
         vkDeviceWaitIdle(m_DeviceContext->getDevice());
@@ -433,7 +432,8 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     vkBeginCommandBuffer(cmd, &bi);
 
-    if (m_DeviceContext->isRayTracingSupported() && (m_Settings.rayTracingFlags & SettingsEnums::SHADOWS))
+    const uint32_t anyRtMask = (SettingsEnums::SHADOWS | SettingsEnums::REFLECTIONS | SettingsEnums::GI);
+    if (m_DeviceContext->isRayTracingSupported() && (m_Settings.rayTracingFlags & anyRtMask))
     {
         try
         {
@@ -451,17 +451,17 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
                 pc.camRight = glm::vec3(invView[0]);
                 pc.camUp = glm::vec3(invView[1]);
                 pc.camForward = -glm::vec3(invView[2]);
-                // fovY from projection matrix
+
                 float fovYTan = 1.0f / camera.getProjectionMatrix()[1][1];
                 pc.fovYTan = fovYTan;
                 memcpy(&pc.lightDir, m_LightUbosMapped[slot], sizeof(glm::vec3));
-                // Shadow params: mode, angular radius, samples, denoise mode
+
                 pc.shadowParams = glm::vec4(
-                    1.0f,            // soft shadow mode
-                    glm::radians(0.5f), // small angular radius
-                    8.0f,            // samples
-                    0.0f);           // denoise OFF
-                // Render params: reflection mode, night brightness, shadow min visibility, GI mode
+                    1.0f,
+                    glm::radians(0.5f),
+                    8.0f,
+                    0.0f);
+
                 float reflMode = (m_Settings.rayTracingFlags & SettingsEnums::REFLECTIONS) ? 3.0f : 0.0f;
                 float giMode = (m_Settings.rayTracingFlags & SettingsEnums::GI) ? 1.0f : 0.0f;
                 pc.renderParams = glm::vec4(reflMode, 0.2f, 0.05f, giMode);
@@ -471,7 +471,7 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
                 auto layout = m_PipelineCache->getRayTracingPipelineLayout();
                 const VkStridedDeviceAddressRegionKHR *rgen = useFullRT ? &m_rgenRegionFull : &m_rgenRegionShadow;
                 const VkStridedDeviceAddressRegionKHR *miss = useFullRT ? &m_missRegionFull : &m_missRegionShadow;
-                const VkStridedDeviceAddressRegionKHR *hit  = useFullRT ? &m_hitRegionFull  : &m_hitRegionShadow;
+                const VkStridedDeviceAddressRegionKHR *hit = useFullRT ? &m_hitRegionFull : &m_hitRegionShadow;
                 const VkStridedDeviceAddressRegionKHR *call = useFullRT ? &m_callRegionFull : &m_callRegionShadow;
                 m_CommandManager->recordRayTraceCommand(
                     cmd, slot, m_rtDescriptorSets[slot], pipeline, layout,
@@ -489,16 +489,14 @@ bool VulkanRenderer::drawFrame(Player *player, Camera &camera,
             }
             else
             {
-                if (m_Settings.rayTracingFlags & SettingsEnums::SHADOWS)
-                {
-                    m_Settings.rayTracingFlags &= ~SettingsEnums::SHADOWS;
-                }
+
+                m_Settings.rayTracingFlags &= ~anyRtMask;
             }
         }
         catch (const std::exception &e)
         {
             std::cerr << "Exception during ray tracing setup: " << e.what() << ", disabling shadows.\n";
-            m_Settings.rayTracingFlags &= ~SettingsEnums::SHADOWS;
+            m_Settings.rayTracingFlags &= ~anyRtMask;
             m_tlas.handle = VK_NULL_HANDLE;
         }
     }
@@ -617,7 +615,6 @@ void VulkanRenderer::recreateRayTracingShadowImage()
     m_rtShadowImage = {};
     m_rtDescriptorSets.clear();
     m_rtDescriptorPool = {};
-    m_rtDescriptorSetLayout = {};
 
     createRayTracingResources();
 
@@ -625,7 +622,7 @@ void VulkanRenderer::recreateRayTracingShadowImage()
     VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
     ai.descriptorPool = m_rtDescriptorPool.get();
     ai.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
-    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, m_rtDescriptorSetLayout.get());
+    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, m_PipelineCache->getRayTracingDescriptorSetLayout());
     ai.pSetLayouts = layouts.data();
 
     if (vkAllocateDescriptorSets(m_DeviceContext->getDevice(), &ai, m_rtDescriptorSets.data()) != VK_SUCCESS)
@@ -657,7 +654,8 @@ void VulkanRenderer::loadRayTracingFunctions()
 void VulkanRenderer::createRayTracingResources()
 {
     VkExtent2D extent = m_SwapChainContext->getSwapChainExtent();
-    VkFormat shadowFormat = VK_FORMAT_B8G8R8A8_UNORM;
+
+    VkFormat shadowFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
     VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     imgInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -693,35 +691,27 @@ void VulkanRenderer::createRayTracingResources()
 
     UploadHelpers::transitionImageLayout(
         cmd, m_rtShadowImage.get(),
-        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         rng,
         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
     UploadHelpers::endSingleTimeCommands(
         *m_DeviceContext, m_CommandManager->getCommandPool(), cmd);
 
     std::array<VkDescriptorSetLayoutBinding, 6> b{};
-    // 0: storage image (output)
+
     b[0] = {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR};
-    // 1: TLAS
+
     b[1] = {1, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR};
-    // 2: sun sampler
+
     b[2] = {2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR};
-    // 3: moon sampler
+
     b[3] = {3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR};
-    // 4: DDGI UBO
+
     b[4] = {4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR};
-    // 5: DDGI probe buffer
+
     b[5] = {5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR};
-
-    VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    li.bindingCount = static_cast<uint32_t>(b.size());
-    li.pBindings = b.data();
-
-    VkDescriptorSetLayout tmpLayout;
-    vkCreateDescriptorSetLayout(m_DeviceContext->getDevice(), &li, nullptr, &tmpLayout);
-    m_rtDescriptorSetLayout = VulkanHandle<VkDescriptorSetLayout, DescriptorSetLayoutDeleter>(tmpLayout, {m_DeviceContext->getDevice()});
 
     std::array<VkDescriptorPoolSize, 5> ps{};
     ps[0] = {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, MAX_FRAMES_IN_FLIGHT};
@@ -739,10 +729,9 @@ void VulkanRenderer::createRayTracingResources()
     vkCreateDescriptorPool(m_DeviceContext->getDevice(), &pi, nullptr, &pool);
     m_rtDescriptorPool = VulkanHandle<VkDescriptorPool, DescriptorPoolDeleter>(pool, {m_DeviceContext->getDevice()});
 
-    // Create DDGI buffers (params UBO + probes SSBO)
     struct DDGIParams
     {
-        int gsx = 32, gsy = 18, gsz = 32; // grid size
+        int gsx = 32, gsy = 18, gsz = 32;
         float spacing = 2.5f;
         float hysteresis = 0.95f;
         int raysPerProbe = 12;
@@ -752,18 +741,20 @@ void VulkanRenderer::createRayTracingResources()
         float rotation = 0.0f;
     } ddgiInit;
 
-    // UBO
     {
         VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
         bi.size = sizeof(DDGIParams);
         bi.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        VmaAllocationCreateInfo ai{}; ai.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT; ai.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+        VmaAllocationCreateInfo ai{};
+        ai.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        ai.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
         m_ddgiUbo = VmaBuffer(m_DeviceContext->getAllocator(), bi, ai);
-        VmaAllocationInfo info{}; vmaGetAllocationInfo(m_DeviceContext->getAllocator(), m_ddgiUbo.getAllocation(), &info);
+        VmaAllocationInfo info{};
+        vmaGetAllocationInfo(m_DeviceContext->getAllocator(), m_ddgiUbo.getAllocation(), &info);
         m_ddgiUboMapped = info.pMappedData;
         memcpy(m_ddgiUboMapped, &ddgiInit, sizeof(DDGIParams));
     }
-    // Probes buffer (stride = 9*3 + 4 floats per probe)
+
     {
         const int probeCount = ddgiInit.gsx * ddgiInit.gsy * ddgiInit.gsz;
         const VkDeviceSize stride = sizeof(float) * (9 * 3 + 4);
@@ -771,7 +762,8 @@ void VulkanRenderer::createRayTracingResources()
         VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
         bi.size = total;
         bi.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        VmaAllocationCreateInfo ai{}; ai.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+        VmaAllocationCreateInfo ai{};
+        ai.usage = VMA_MEMORY_USAGE_GPU_ONLY;
         m_ddgiProbes = VmaBuffer(m_DeviceContext->getAllocator(), bi, ai);
     }
 }
@@ -787,7 +779,6 @@ void VulkanRenderer::updateRtDescriptorSet(uint32_t frame)
     asInfo.accelerationStructureCount = 1;
     asInfo.pAccelerationStructures = &m_tlas.handle;
 
-    // Binding 0: storage image
     VkDescriptorImageInfo outImg{};
     outImg.imageView = m_rtShadowImageView.get();
     outImg.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -798,7 +789,6 @@ void VulkanRenderer::updateRtDescriptorSet(uint32_t frame)
     wOut.descriptorCount = 1;
     wOut.pImageInfo = &outImg;
 
-    // Binding 1: TLAS
     VkWriteDescriptorSet wAs{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
     wAs.pNext = &asInfo;
     wAs.dstSet = dst;
@@ -806,23 +796,36 @@ void VulkanRenderer::updateRtDescriptorSet(uint32_t frame)
     wAs.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
     wAs.descriptorCount = 1;
 
-    // Binding 2/3: sun/moon samplers
     VkDescriptorImageInfo sunInfo{m_TextureManager->getTextureSampler(), m_SunTextureView.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkDescriptorImageInfo moonInfo{m_TextureManager->getTextureSampler(), m_MoonTextureView.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkWriteDescriptorSet wSun{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-    wSun.dstSet = dst; wSun.dstBinding = 2; wSun.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wSun.descriptorCount = 1; wSun.pImageInfo = &sunInfo;
+    wSun.dstSet = dst;
+    wSun.dstBinding = 2;
+    wSun.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    wSun.descriptorCount = 1;
+    wSun.pImageInfo = &sunInfo;
     VkWriteDescriptorSet wMoon{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-    wMoon.dstSet = dst; wMoon.dstBinding = 3; wMoon.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wMoon.descriptorCount = 1; wMoon.pImageInfo = &moonInfo;
+    wMoon.dstSet = dst;
+    wMoon.dstBinding = 3;
+    wMoon.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    wMoon.descriptorCount = 1;
+    wMoon.pImageInfo = &moonInfo;
 
-    // Binding 4: DDGI UBO
     VkDescriptorBufferInfo ddgiUboInfo{m_ddgiUbo.get(), 0, VK_WHOLE_SIZE};
     VkWriteDescriptorSet wUbo{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-    wUbo.dstSet = dst; wUbo.dstBinding = 4; wUbo.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; wUbo.descriptorCount = 1; wUbo.pBufferInfo = &ddgiUboInfo;
+    wUbo.dstSet = dst;
+    wUbo.dstBinding = 4;
+    wUbo.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    wUbo.descriptorCount = 1;
+    wUbo.pBufferInfo = &ddgiUboInfo;
 
-    // Binding 5: DDGI probe buffer
     VkDescriptorBufferInfo ddgiBufInfo{m_ddgiProbes.get(), 0, VK_WHOLE_SIZE};
     VkWriteDescriptorSet wBuf{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-    wBuf.dstSet = dst; wBuf.dstBinding = 5; wBuf.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; wBuf.descriptorCount = 1; wBuf.pBufferInfo = &ddgiBufInfo;
+    wBuf.dstSet = dst;
+    wBuf.dstBinding = 5;
+    wBuf.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    wBuf.descriptorCount = 1;
+    wBuf.pBufferInfo = &ddgiBufInfo;
 
     std::array<VkWriteDescriptorSet, 6> w = {wOut, wAs, wSun, wMoon, wUbo, wBuf};
     vkUpdateDescriptorSets(m_DeviceContext->getDevice(),
@@ -840,9 +843,17 @@ void VulkanRenderer::buildBlas(const std::vector<std::pair<Chunk *, int>> &chunk
     dirty.reserve(chunksToBuild.size());
     for (const auto &p : chunksToBuild)
     {
-        if (p.first->m_blas_dirty.load(std::memory_order_acquire) && p.first->getState() == Chunk::State::GPU_READY)
+        Chunk *chunk = p.first;
+        int lod = p.second;
+        if (chunk->getState() != Chunk::State::GPU_READY)
+            continue;
+
+        ChunkMesh *mesh = chunk->getMesh(lod);
+        bool needsBlas = chunk->m_blas_dirty.load(std::memory_order_acquire) ||
+                         (mesh && mesh->blas.handle == VK_NULL_HANDLE);
+        if (needsBlas)
         {
-            dirty.emplace_back(p);
+            dirty.emplace_back(chunk, lod);
         }
     }
 
@@ -1737,7 +1748,7 @@ void VulkanRenderer::createShaderBindingTableForPipeline(
     const uint32_t handleSize = rtProps.shaderGroupHandleSize;
     const uint32_t handleSizeAligned = (handleSize + rtProps.shaderGroupBaseAlignment - 1) & ~(rtProps.shaderGroupBaseAlignment - 1);
 
-    const uint32_t groupCount = 5; // rgen, 2 miss, 2 hit
+    const uint32_t groupCount = 5;
     const uint32_t sbtSize = groupCount * handleSizeAligned;
 
     std::vector<uint8_t> handles(sbtSize);
