@@ -327,7 +327,7 @@ void CommandManager::recordRayTraceCommand(
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtLayout, 0, 1, &rtDescriptorSet, 0, 0);
 
     vkCmdPushConstants(cb, rtLayout,
-                       VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
+                       VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR,
                        0, sizeof(RayTracePushConstants), pushConstants);
 
     VkExtent2D extent = m_SwapChainContext.getSwapChainExtent();

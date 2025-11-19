@@ -21,51 +21,66 @@ layout(push_constant) uniform Push {
   vec4 renderParams; // x=reflectionMode, y=nightBrightness, z=shadowMinVisibility
 } pc;
 
-vec3 cubeFaceNormal(uint prim) {
-  uint face = prim / 2u;
-  if (face == 0u) return vec3(0.0, 0.0, -1.0);
-  if (face == 1u) return vec3(0.0, 0.0,  1.0);
-  if (face == 2u) return vec3(-1.0, 0.0, 0.0);
-  if (face == 3u) return vec3( 1.0, 0.0, 0.0);
-  if (face == 4u) return vec3(0.0, 1.0, 0.0);
-  return vec3(0.0, -1.0, 0.0);
-}
-
 void buildBasis(in vec3 d, out vec3 t, out vec3 b) {
   vec3 up = abs(d.y) > 0.9 ? vec3(1,0,0) : vec3(0,1,0);
   t = normalize(cross(up, d));
   b = normalize(cross(d, t));
 }
 
+// Infer a face-normal from the hit position on the voxel grid instead of gl_PrimitiveID.
+// gl_PrimitiveID only encodes the global triangle index for a chunk mesh, so most faces
+// would end up with an invalid normal (black shading). Here we pick the closest grid plane.
+vec3 voxelNormal(vec3 Pw, vec3 rayDir) {
+  vec3 f = fract(Pw);
+  float best = f.x; vec3 N = vec3(-1.0, 0.0, 0.0);
+
+  float d = 1.0 - f.x; if (d < best) { best = d; N = vec3(1.0, 0.0, 0.0); }
+  d = f.y;             if (d < best) { best = d; N = vec3(0.0,-1.0, 0.0); }
+  d = 1.0 - f.y;       if (d < best) { best = d; N = vec3(0.0, 1.0, 0.0); }
+  d = f.z;             if (d < best) { best = d; N = vec3(0.0, 0.0,-1.0); }
+  d = 1.0 - f.z;       if (d < best) { best = d; N = vec3(0.0, 0.0, 1.0); }
+
+  // If we're exactly on an edge/corner fall back to the dominant ray axis to resolve ties.
+  if (best < 1e-4) {
+    vec3 ad = abs(rayDir);
+    if (ad.x > ad.y && ad.x > ad.z)      N = vec3(sign(rayDir.x), 0.0, 0.0);
+    else if (ad.y > ad.z)                N = vec3(0.0, sign(rayDir.y), 0.0);
+    else                                 N = vec3(0.0, 0.0, sign(rayDir.z));
+  }
+  
+  // Fix self-shadowing: Ensure normal points against the ray
+  if (dot(N, rayDir) > 0.0) N = -N;
+  
+  return normalize(N);
+}
+
 vec3 schlickFresnel(vec3 F0, float cosTheta) { return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0); }
 
 void main() {
-  vec3 N;
+  vec3 Pw = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT;
+  vec3 N = voxelNormal(Pw, gl_WorldRayDirectionEXT);
   vec3 albedo;
   uint inst = gl_InstanceCustomIndexEXT;
   if (inst == 2u) {
-    N = vec3(0.0, 1.0, 0.0);
-    vec3 Pw = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT;
     int cx = int(floor(Pw.x));
     int cz = int(floor(Pw.z));
     bool check = ((cx + cz) & 1) == 0;
     albedo = check ? vec3(0.8) : vec3(0.6);
   } else {
-    N = cubeFaceNormal(gl_PrimitiveID);
     if (inst == 3u) albedo = vec3(0.85);
     else if (inst == 4u) albedo = vec3(0.95, 0.98, 1.0);
-    else albedo = vec3(0.8, 0.2, 0.2);
+    else albedo = vec3(0.9); // Default to white/grey for terrain (index 1 or 0)
   }
   N = normalize(N);
   vec3 V = normalize(-gl_WorldRayDirectionEXT);
 
-  vec3 Lsun = normalize(-pc.lightDir);
-  vec3 Lmoon = normalize(pc.lightDir);
-  bool day = ((-pc.lightDir).y) > 0.0;
+  vec3 Lsun = normalize(pc.lightDir);
+  vec3 Lmoon = normalize(-pc.lightDir);
+  bool day = pc.lightDir.y > 0.0;
   vec3 L = day ? Lsun : Lmoon;
   float lightIntensity = day ? 1.0 : 0.35;
   vec3 P = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT + N * 0.001;
-  float dayFactor = smoothstep(0.0, 0.2, (-pc.lightDir).y);
+  float dayFactor = smoothstep(-0.2, 0.2, pc.lightDir.y);
 
   vec3 color = vec3(0.0);
   float bounce = payload.w;
@@ -102,6 +117,7 @@ void main() {
       visibility = 1.0 - occ / float(S);
     }
   }
+
   visibility = mix(pc.renderParams.z, 1.0, visibility);
   vec3 ambient = mix(0.01, 0.05, dayFactor) * albedo;
   vec3 direct = lightIntensity * visibility * NoL * albedo;
@@ -169,7 +185,7 @@ void main() {
     color += gi * albedo;
   }
 
-  payload.rgb = color;
-  payload.w = bounce;
+  // Debug: Force Red Blocks
+  payload.rgb = vec3(1.0, 0.0, 0.0);
+  payload.w = gl_HitTEXT;
 }
-

@@ -59,6 +59,7 @@ void main() {
     sky = mix(sky, moonCol, 0.7 * (1.0 - dayFactor));
   }
 
-  payload.rgb = sky;
+  // Debug: Force Green Sky
+  payload.rgb = vec3(0.0, 1.0, 0.0);
 }
 

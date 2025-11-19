@@ -64,7 +64,7 @@ foreach(SHADER_SOURCE_FILE ${SHADER_SOURCES})
 
     # Korrigierte Bedingung: Erfasst alle raytracing-spezifischen Endungen
     if(SHADER_SOURCE_FILE MATCHES "\\.(rgen|rmiss|rchit|rahit)$")
-        list(APPEND COMPILE_COMMAND --target-env=vulkan1.2)
+        list(APPEND COMPILE_COMMAND --target-env=vulkan1.3)
     endif()
     
     add_custom_command(

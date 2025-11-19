@@ -25,7 +25,7 @@ DeviceContext::DeviceContext(const InstanceContext &instanceContext)
     {
         allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
     }
-    allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_2;
+    allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_3;
     allocatorInfo.physicalDevice = m_PhysicalDevice;
     allocatorInfo.device = m_Device.get();
     allocatorInfo.instance = m_InstanceContext.getInstance();

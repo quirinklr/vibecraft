@@ -1022,6 +1022,7 @@ void VulkanRenderer::buildTlasAsync(const std::vector<std::pair<Chunk *, int>> &
             glm::mat4 tr = glm::transpose(c->getModelMatrix());
             memcpy(&inst.transform, &tr, sizeof(inst.transform));
             inst.mask = 0xFF;
+            inst.instanceCustomIndex = 0; // Revert to 0 to match SBT
             inst.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
             inst.accelerationStructureReference = m->blas.deviceAddress;
             instances.push_back(inst);
